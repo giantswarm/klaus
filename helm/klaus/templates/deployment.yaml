@@ -14,6 +14,8 @@ spec:
     metadata:
       labels:
         {{- include "klaus.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "klaus.serviceAccountName" . }}
       securityContext:
@@ -26,6 +28,60 @@ spec:
             - name: http
               containerPort: {{ .Values.port }}
               protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            {{- if .Values.claude.model }}
+            - name: CLAUDE_MODEL
+              value: {{ .Values.claude.model | quote }}
+            {{- end }}
+            {{- if .Values.claude.maxTurns }}
+            - name: CLAUDE_MAX_TURNS
+              value: {{ .Values.claude.maxTurns | quote }}
+            {{- end }}
+            {{- if .Values.claude.permissionMode }}
+            - name: CLAUDE_PERMISSION_MODE
+              value: {{ .Values.claude.permissionMode | quote }}
+            {{- end }}
+            {{- if .Values.claude.systemPrompt }}
+            - name: CLAUDE_SYSTEM_PROMPT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "klaus.fullname" . }}
+                  key: system-prompt
+            {{- end }}
+            {{- if .Values.claude.appendSystemPrompt }}
+            - name: CLAUDE_APPEND_SYSTEM_PROMPT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "klaus.fullname" . }}
+                  key: append-system-prompt
+            {{- end }}
+            {{- if .Values.claude.mcpConfig }}
+            - name: CLAUDE_MCP_CONFIG
+              value: /etc/klaus/mcp-config.json
+            {{- end }}
+            {{- if .Values.workspace.enabled }}
+            - name: CLAUDE_WORKSPACE
+              value: /workspace
+            {{- end }}
+            {{- if .Values.anthropicApiKey.secretName }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.anthropicApiKey.secretName }}
+                  key: {{ .Values.anthropicApiKey.secretKey }}
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.claude.mcpConfig }}
+            - name: mcp-config
+              mountPath: /etc/klaus
+              readOnly: true
+            {{- end }}
+            {{- if .Values.workspace.enabled }}
+            - name: workspace
+              mountPath: /workspace
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -42,6 +98,25 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        {{- if .Values.claude.mcpConfig }}
+        - name: mcp-config
+          configMap:
+            name: {{ include "klaus.fullname" . }}
+            items:
+              - key: mcp-config.json
+                path: mcp-config.json
+        {{- end }}
+        {{- if .Values.workspace.enabled }}
+        - name: workspace
+          {{- if .Values.workspace.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspace.existingClaim }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "klaus.fullname" . }}-workspace
+          {{- end }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -7,45 +7,60 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/project"
+	"github.com/giantswarm/klaus/pkg/server"
 )
 
 func main() {
-	fmt.Printf("%s (build: %s, commit: %s)\n", project.Name, project.BuildTimestamp(), project.GitSHA())
+	fmt.Printf("%s %s (build: %s, commit: %s)\n",
+		project.Name, project.Version(), project.BuildTimestamp(), project.GitSHA())
 
-	mux := http.NewServeMux()
+	// Build Claude options from environment variables.
+	opts := claude.DefaultOptions()
 
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
+	if v := os.Getenv("CLAUDE_MODEL"); v != "" {
+		opts.Model = v
+	}
+	if v := os.Getenv("CLAUDE_SYSTEM_PROMPT"); v != "" {
+		opts.SystemPrompt = v
+	}
+	if v := os.Getenv("CLAUDE_APPEND_SYSTEM_PROMPT"); v != "" {
+		opts.AppendSystemPrompt = v
+	}
+	if v := os.Getenv("CLAUDE_MAX_TURNS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			opts.MaxTurns = n
+		}
+	}
+	if v := os.Getenv("CLAUDE_PERMISSION_MODE"); v != "" {
+		opts.PermissionMode = v
+	}
+	if v := os.Getenv("CLAUDE_MCP_CONFIG"); v != "" {
+		opts.MCPConfigPath = v
+	}
+	if v := os.Getenv("CLAUDE_WORKSPACE"); v != "" {
+		opts.WorkDir = v
+	}
 
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
+	// Create the Claude process manager.
+	process := claude.NewProcess(opts)
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "%s\n", project.Name)
-	})
-
+	// Determine listen port.
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	server := &http.Server{
-		Addr:              ":" + port,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	// Create and start the HTTP server.
+	srv := server.New(process, port)
 
 	go func() {
-		log.Printf("Starting %s on :%s", project.Name, port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
@@ -55,12 +70,16 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	// Stop any running Claude process.
+	if err := process.Stop(); err != nil {
+		log.Printf("Error stopping Claude process: %v", err)
+	}
 
+	// Graceful HTTP shutdown.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
