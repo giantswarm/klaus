@@ -3,6 +3,7 @@ package project
 var (
 	buildTimestamp string
 	gitSHA         string
+	version        = "dev"
 )
 
 const (
@@ -21,4 +22,9 @@ func BuildTimestamp() string {
 // GitSHA returns the git SHA set at compile time.
 func GitSHA() string {
 	return gitSHA
+}
+
+// Version returns the application version set at compile time.
+func Version() string {
+	return version
 }

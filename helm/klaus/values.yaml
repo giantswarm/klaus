@@ -10,13 +10,48 @@ registry:
 
 port: 8080
 
+# Claude Code agent configuration.
+claude:
+  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514").
+  # Empty string uses the Claude CLI default.
+  model: ""
+  # maxTurns limits the number of agentic turns per prompt.
+  # 0 means no limit.
+  maxTurns: 0
+  # permissionMode controls how Claude handles tool permissions.
+  # "accept-all" is required for headless/autonomous operation.
+  permissionMode: "accept-all"
+  # systemPrompt is the system prompt text for the Claude agent.
+  # Set via ConfigMap when non-empty.
+  systemPrompt: ""
+  # appendSystemPrompt is appended to the default system prompt.
+  appendSystemPrompt: ""
+  # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
+  # Mounted as a file in the container.
+  mcpConfig: ""
+
+# anthropicApiKey configures the API key secret reference.
+anthropicApiKey:
+  # secretName is the name of the Kubernetes Secret containing the API key.
+  secretName: ""
+  # secretKey is the key within the Secret that holds the API key value.
+  secretKey: "api-key"
+
+# workspace configures persistent storage for the Claude agent workspace.
+workspace:
+  enabled: false
+  storageClass: ""
+  size: 1Gi
+  # existingClaim allows using a pre-existing PVC.
+  existingClaim: ""
+
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: "2"
+    memory: 2Gi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 250m
+    memory: 512Mi
 
 podSecurityContext:
   runAsNonRoot: true
@@ -28,7 +63,8 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
+  # Claude CLI needs to write to npm cache, git state, and workspace.
+  readOnlyRootFilesystem: false
   capabilities:
     drop:
       - ALL
