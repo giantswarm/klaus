@@ -1,0 +1,5 @@
+# This file is for ignoring known vulnerabilities in dependencies
+# that are false positives or not applicable.
+#
+# Format: one CVE per line
+# Example: CVE-2021-12345

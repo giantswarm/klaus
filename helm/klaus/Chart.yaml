@@ -1,0 +1,13 @@
+apiVersion: v2
+annotations:
+  application.giantswarm.io/team: planeteers
+name: klaus
+description: A Go wrapper around claude-code to orchestrate AI agents within Kubernetes
+home: https://github.com/giantswarm/klaus
+sources:
+  - https://github.com/giantswarm/klaus
+version: 0.1.0
+appVersion: 0.1.0
+maintainers:
+  - name: giantswarm/team-planeteers
+    email: team-planeteers@giantswarm.io

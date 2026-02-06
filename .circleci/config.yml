@@ -1,0 +1,42 @@
+version: 2.1
+
+orbs:
+  architect: giantswarm/architect@6.10.0
+
+workflows:
+  build:
+    jobs:
+      - architect/go-build:
+          name: go-build-klaus
+          binary: klaus
+          filters:
+            tags:
+              only: /^v.*/
+
+      - architect/push-to-registries:
+          context: architect
+          name: push-to-registries
+          requires:
+            - go-build-klaus
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore:
+                - main
+
+  package-and-push-chart-on-tag:
+    jobs:
+      - architect/push-to-app-catalog:
+          context: architect
+          executor: app-build-suite
+          name: package and push klaus chart
+          app_catalog: giantswarm-catalog
+          app_catalog_test: giantswarm-test-catalog
+          chart: klaus
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore:
+                - main

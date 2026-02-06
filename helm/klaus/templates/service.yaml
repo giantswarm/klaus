@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "klaus.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "klaus.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "klaus.selectorLabels" . | nindent 4 }}
