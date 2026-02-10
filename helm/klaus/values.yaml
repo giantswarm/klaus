@@ -12,15 +12,16 @@ port: 8080
 
 # Claude Code agent configuration.
 claude:
-  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514").
+  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
   # Empty string uses the Claude CLI default.
   model: ""
   # maxTurns limits the number of agentic turns per prompt.
   # 0 means no limit.
   maxTurns: 0
   # permissionMode controls how Claude handles tool permissions.
-  # "accept-all" is required for headless/autonomous operation.
-  permissionMode: "accept-all"
+  # Valid values: "bypassPermissions", "acceptEdits", "dontAsk", "plan", "delegate", "default".
+  # "bypassPermissions" is required for headless/autonomous operation.
+  permissionMode: "bypassPermissions"
   # systemPrompt is the system prompt text for the Claude agent.
   # Set via ConfigMap when non-empty.
   systemPrompt: ""
@@ -29,6 +30,47 @@ claude:
   # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
   # Mounted as a file in the container.
   mcpConfig: ""
+  # strictMcpConfig when true only uses MCP servers from mcpConfig,
+  # ignoring all user/project/local MCP configurations. Recommended for production.
+  strictMcpConfig: true
+
+  # -- Operational controls --
+  # maxBudgetUSD caps the maximum dollar spend per invocation; 0 means no limit.
+  maxBudgetUSD: 0
+  # effort controls the effort level: "low", "medium", "high"; empty means default.
+  effort: ""
+  # fallbackModel specifies a model to use when the primary is overloaded.
+  fallbackModel: ""
+
+  # -- Structured output --
+  # jsonSchema constrains output to conform to a JSON Schema (JSON string).
+  jsonSchema: ""
+
+  # -- Session management --
+  # noSessionPersistence disables saving sessions to disk (recommended for ephemeral containers).
+  noSessionPersistence: true
+
+  # -- Tool control --
+  # tools controls the base set of built-in tools. Empty means all defaults.
+  # Example: ["Bash", "Edit", "Read"]
+  tools: []
+
+  # -- Settings --
+  # settingsFile is a path to a settings JSON file loaded at startup.
+  settingsFile: ""
+  # settingSources controls which setting sources are loaded (comma-separated: "user,project,local").
+  settingSources: ""
+
+  # -- Plugins --
+  # pluginDirs is a list of directories to load plugins from.
+  pluginDirs: []
+
+  # -- Named agents --
+  # agents defines named agent personas. JSON object with agent names as keys.
+  # Example: {"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}
+  agents: {}
+  # activeAgent selects the default named agent to use.
+  activeAgent: ""
 
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:

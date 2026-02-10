@@ -11,10 +11,10 @@ import (
 )
 
 type statusResponse struct {
-	Name    string              `json:"name"`
-	Version string              `json:"version"`
-	Build   string              `json:"build"`
-	Commit  string              `json:"commit"`
+	Name    string               `json:"name"`
+	Version string               `json:"version"`
+	Build   string               `json:"build"`
+	Commit  string               `json:"commit"`
 	Agent   claudepkg.StatusInfo `json:"agent"`
 }
 

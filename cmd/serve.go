@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -24,28 +26,28 @@ func newServeCmd() *cobra.Command {
 		port string
 
 		// OAuth options
-		enableOAuth                     bool
-		oauthBaseURL                    string
-		oauthProvider                   string
-		googleClientID                  string
-		googleClientSecret              string
-		dexIssuerURL                    string
-		dexClientID                     string
-		dexClientSecret                 string
-		dexConnectorID                  string
-		dexCAFile                       string
-		disableStreaming                bool
-		registrationToken               string
-		allowPublicRegistration         bool
-		allowInsecureAuthWithoutState   bool
-		maxClientsPerIP                 int
-		oauthEncryptionKey              string
-		enableCIMD                      bool
-		cimdAllowPrivateIPs             bool
+		enableOAuth                      bool
+		oauthBaseURL                     string
+		oauthProvider                    string
+		googleClientID                   string
+		googleClientSecret               string
+		dexIssuerURL                     string
+		dexClientID                      string
+		dexClientSecret                  string
+		dexConnectorID                   string
+		dexCAFile                        string
+		disableStreaming                 bool
+		registrationToken                string
+		allowPublicRegistration          bool
+		allowInsecureAuthWithoutState    bool
+		maxClientsPerIP                  int
+		oauthEncryptionKey               string
+		enableCIMD                       bool
+		cimdAllowPrivateIPs              bool
 		trustedPublicRegistrationSchemes []string
 		disableStrictSchemeMatching      bool
-		tlsCertFile                     string
-		tlsKeyFile                      string
+		tlsCertFile                      string
+		tlsKeyFile                       string
 	)
 
 	cmd := &cobra.Command{
@@ -67,14 +69,26 @@ Bearer token authentication. Additional endpoints are exposed:
   - /oauth/register, /oauth/authorize, /oauth/token, /oauth/callback
 
 Configuration is primarily via environment variables:
-  CLAUDE_MODEL             -- Claude model to use
-  CLAUDE_SYSTEM_PROMPT     -- System prompt
+  CLAUDE_MODEL               -- Claude model to use
+  CLAUDE_SYSTEM_PROMPT       -- System prompt
   CLAUDE_APPEND_SYSTEM_PROMPT -- Append to system prompt
-  CLAUDE_MAX_TURNS         -- Max agentic turns
-  CLAUDE_PERMISSION_MODE   -- Permission mode
-  CLAUDE_MCP_CONFIG        -- MCP config file path
-  CLAUDE_WORKSPACE         -- Working directory
-  PORT                     -- HTTP server port (default: 8080)`,
+  CLAUDE_MAX_TURNS           -- Max agentic turns (0 = unlimited)
+  CLAUDE_PERMISSION_MODE     -- Permission mode (bypassPermissions, acceptEdits, dontAsk, plan, delegate, default)
+  CLAUDE_MCP_CONFIG          -- MCP config file path
+  CLAUDE_STRICT_MCP_CONFIG   -- Only use servers from MCP config (true/false)
+  CLAUDE_WORKSPACE           -- Working directory
+  CLAUDE_MAX_BUDGET_USD      -- Maximum dollar spend per invocation
+  CLAUDE_EFFORT              -- Effort level (low, medium, high)
+  CLAUDE_FALLBACK_MODEL      -- Fallback model when primary is overloaded
+  CLAUDE_JSON_SCHEMA         -- JSON Schema for structured output
+  CLAUDE_SETTINGS_FILE       -- Path to settings JSON file
+  CLAUDE_SETTING_SOURCES     -- Setting sources to load (user,project,local)
+  CLAUDE_TOOLS               -- Comma-separated list of built-in tools
+  CLAUDE_PLUGIN_DIRS         -- Comma-separated plugin directories
+  CLAUDE_AGENTS              -- JSON object defining named agents
+  CLAUDE_ACTIVE_AGENT        -- Default named agent to use
+  CLAUDE_NO_SESSION_PERSISTENCE -- Disable session persistence (true/false)
+  PORT                       -- HTTP server port (default: 8080)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load TLS paths from environment if not provided via flags.
 			loadEnvIfEmpty(&tlsCertFile, "TLS_CERT_FILE")
@@ -125,14 +139,14 @@ Configuration is primarily via environment variables:
 					EnableCIMD:                       enableCIMD,
 					CIMDAllowPrivateIPs:              cimdAllowPrivateIPs,
 					TrustedPublicRegistrationSchemes: trustedPublicRegistrationSchemes,
-					DisableStrictSchemeMatching:       disableStrictSchemeMatching,
+					DisableStrictSchemeMatching:      disableStrictSchemeMatching,
 				},
 				TLS: server.TLSConfig{
 					CertFile: tlsCertFile,
 					KeyFile:  tlsKeyFile,
 				},
 				DisableStreaming: disableStreaming,
-				DebugMode:       false,
+				DebugMode:        false,
 			}
 
 			return runServe(port, enableOAuth, oauthConfig)
@@ -193,8 +207,70 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	if v := os.Getenv("CLAUDE_MCP_CONFIG"); v != "" {
 		opts.MCPConfigPath = v
 	}
+	if v := os.Getenv("CLAUDE_STRICT_MCP_CONFIG"); v != "" {
+		opts.StrictMCPConfig = parseBool(v)
+	}
 	if v := os.Getenv("CLAUDE_WORKSPACE"); v != "" {
 		opts.WorkDir = v
+	}
+
+	// Operational controls.
+	if v := os.Getenv("CLAUDE_MAX_BUDGET_USD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			opts.MaxBudgetUSD = f
+		}
+	}
+	if v := os.Getenv("CLAUDE_EFFORT"); v != "" {
+		opts.Effort = v
+	}
+	if v := os.Getenv("CLAUDE_FALLBACK_MODEL"); v != "" {
+		opts.FallbackModel = v
+	}
+
+	// Structured output.
+	if v := os.Getenv("CLAUDE_JSON_SCHEMA"); v != "" {
+		opts.JSONSchema = v
+	}
+
+	// Settings.
+	if v := os.Getenv("CLAUDE_SETTINGS_FILE"); v != "" {
+		opts.SettingsFile = v
+	}
+	if v := os.Getenv("CLAUDE_SETTING_SOURCES"); v != "" {
+		opts.SettingSources = v
+	}
+
+	// Tool control.
+	if v := os.Getenv("CLAUDE_TOOLS"); v != "" {
+		opts.Tools = strings.Split(v, ",")
+	}
+
+	// Plugin directories.
+	if v := os.Getenv("CLAUDE_PLUGIN_DIRS"); v != "" {
+		opts.PluginDirs = strings.Split(v, ",")
+	}
+
+	// Named agents.
+	if v := os.Getenv("CLAUDE_AGENTS"); v != "" {
+		var agents map[string]claude.AgentConfig
+		if err := json.Unmarshal([]byte(v), &agents); err != nil {
+			log.Printf("WARNING: failed to parse CLAUDE_AGENTS: %v", err)
+		} else {
+			opts.Agents = agents
+		}
+	}
+	if v := os.Getenv("CLAUDE_ACTIVE_AGENT"); v != "" {
+		opts.ActiveAgent = v
+	}
+
+	// Session persistence.
+	if v := os.Getenv("CLAUDE_NO_SESSION_PERSISTENCE"); v != "" {
+		opts.NoSessionPersistence = parseBool(v)
+	}
+
+	// Validate permission mode.
+	if err := claude.ValidatePermissionMode(opts.PermissionMode); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
 	}
 
 	// Create the Claude process manager.
@@ -299,5 +375,15 @@ func runServerLifecycle(
 func loadEnvIfEmpty(target *string, envKey string) {
 	if *target == "" {
 		*target = os.Getenv(envKey)
+	}
+}
+
+// parseBool returns true for "true", "1", "yes" (case-insensitive).
+func parseBool(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "1", "yes":
+		return true
+	default:
+		return false
 	}
 }

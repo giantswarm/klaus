@@ -22,8 +22,8 @@ const (
 // StreamMessage is the top-level envelope for all stream-json messages
 // emitted by the Claude CLI on stdout.
 type StreamMessage struct {
-	Type    MessageType    `json:"type"`
-	Subtype MessageSubtype `json:"subtype,omitempty"`
+	Type    MessageType     `json:"type"`
+	Subtype MessageSubtype  `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 
 	// Fields present on "system" messages.
@@ -72,8 +72,12 @@ const (
 )
 
 type StatusInfo struct {
-	Status       ProcessStatus `json:"status"`
-	SessionID    string        `json:"session_id,omitempty"`
-	ErrorMessage string        `json:"error,omitempty"`
-	TotalCost    float64       `json:"total_cost_usd,omitempty"`
+	Status        ProcessStatus `json:"status"`
+	SessionID     string        `json:"session_id,omitempty"`
+	ErrorMessage  string        `json:"error,omitempty"`
+	TotalCost     float64       `json:"total_cost_usd,omitempty"`
+	MessageCount  int           `json:"message_count,omitempty"`
+	ToolCallCount int           `json:"tool_call_count,omitempty"`
+	LastMessage   string        `json:"last_message,omitempty"`
+	LastToolName  string        `json:"last_tool_name,omitempty"`
 }

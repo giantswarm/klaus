@@ -61,6 +61,10 @@ spec:
             - name: CLAUDE_MCP_CONFIG
               value: /etc/klaus/mcp-config.json
             {{- end }}
+            {{- if .Values.claude.strictMcpConfig }}
+            - name: CLAUDE_STRICT_MCP_CONFIG
+              value: "true"
+            {{- end }}
             {{- if .Values.workspace.enabled }}
             - name: CLAUDE_WORKSPACE
               value: /workspace
@@ -71,6 +75,63 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.anthropicApiKey.secretName }}
                   key: {{ .Values.anthropicApiKey.secretKey }}
+            {{- end }}
+            {{- /* Operational controls */}}
+            {{- if .Values.claude.maxBudgetUSD }}
+            - name: CLAUDE_MAX_BUDGET_USD
+              value: {{ .Values.claude.maxBudgetUSD | quote }}
+            {{- end }}
+            {{- if .Values.claude.effort }}
+            - name: CLAUDE_EFFORT
+              value: {{ .Values.claude.effort | quote }}
+            {{- end }}
+            {{- if .Values.claude.fallbackModel }}
+            - name: CLAUDE_FALLBACK_MODEL
+              value: {{ .Values.claude.fallbackModel | quote }}
+            {{- end }}
+            {{- /* Structured output */}}
+            {{- if .Values.claude.jsonSchema }}
+            - name: CLAUDE_JSON_SCHEMA
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "klaus.fullname" . }}
+                  key: json-schema
+            {{- end }}
+            {{- /* Session management */}}
+            {{- if .Values.claude.noSessionPersistence }}
+            - name: CLAUDE_NO_SESSION_PERSISTENCE
+              value: "true"
+            {{- end }}
+            {{- /* Tool control */}}
+            {{- if .Values.claude.tools }}
+            - name: CLAUDE_TOOLS
+              value: {{ join "," .Values.claude.tools | quote }}
+            {{- end }}
+            {{- /* Settings */}}
+            {{- if .Values.claude.settingsFile }}
+            - name: CLAUDE_SETTINGS_FILE
+              value: {{ .Values.claude.settingsFile | quote }}
+            {{- end }}
+            {{- if .Values.claude.settingSources }}
+            - name: CLAUDE_SETTING_SOURCES
+              value: {{ .Values.claude.settingSources | quote }}
+            {{- end }}
+            {{- /* Plugins */}}
+            {{- if .Values.claude.pluginDirs }}
+            - name: CLAUDE_PLUGIN_DIRS
+              value: {{ join "," .Values.claude.pluginDirs | quote }}
+            {{- end }}
+            {{- /* Named agents */}}
+            {{- if .Values.claude.agents }}
+            - name: CLAUDE_AGENTS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "klaus.fullname" . }}
+                  key: agents
+            {{- end }}
+            {{- if .Values.claude.activeAgent }}
+            - name: CLAUDE_ACTIVE_AGENT
+              value: {{ .Values.claude.activeAgent | quote }}
             {{- end }}
           volumeMounts:
             {{- if .Values.claude.mcpConfig }}

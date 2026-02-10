@@ -12,16 +12,39 @@ import (
 	"time"
 )
 
+// RunOptions allows overriding base Options on a per-invocation basis.
+// Zero values are ignored (the base Options value is used instead).
+type RunOptions struct {
+	// SessionID overrides Options.SessionID for this run.
+	SessionID string
+	// Resume overrides Options.Resume for this run.
+	Resume string
+	// ContinueSession overrides Options.ContinueSession for this run.
+	ContinueSession bool
+	// ActiveAgent overrides Options.ActiveAgent for this run.
+	ActiveAgent string
+	// JSONSchema overrides Options.JSONSchema for this run.
+	JSONSchema string
+	// MaxBudgetUSD overrides Options.MaxBudgetUSD for this run.
+	MaxBudgetUSD float64
+	// Effort overrides Options.Effort for this run.
+	Effort string
+}
+
 // Process manages a Claude CLI subprocess lifecycle and streams its output.
 type Process struct {
 	opts Options
 
-	mu        sync.RWMutex
-	cmd       *exec.Cmd
-	status    ProcessStatus
-	sessionID string
-	lastError string
-	totalCost float64
+	mu            sync.RWMutex
+	cmd           *exec.Cmd
+	status        ProcessStatus
+	sessionID     string
+	lastError     string
+	totalCost     float64
+	messageCount  int
+	toolCallCount int
+	lastMessage   string
+	lastToolName  string
 
 	done chan struct{}
 }
@@ -38,9 +61,44 @@ func NewProcess(opts Options) *Process {
 	}
 }
 
+// mergedOpts returns a copy of the base options with per-run overrides applied.
+func (p *Process) mergedOpts(ro *RunOptions) Options {
+	opts := p.opts
+	if ro == nil {
+		return opts
+	}
+	if ro.SessionID != "" {
+		opts.SessionID = ro.SessionID
+	}
+	if ro.Resume != "" {
+		opts.Resume = ro.Resume
+	}
+	if ro.ContinueSession {
+		opts.ContinueSession = true
+	}
+	if ro.ActiveAgent != "" {
+		opts.ActiveAgent = ro.ActiveAgent
+	}
+	if ro.JSONSchema != "" {
+		opts.JSONSchema = ro.JSONSchema
+	}
+	if ro.MaxBudgetUSD > 0 {
+		opts.MaxBudgetUSD = ro.MaxBudgetUSD
+	}
+	if ro.Effort != "" {
+		opts.Effort = ro.Effort
+	}
+	return opts
+}
+
 // Run spawns a claude subprocess for the given prompt and returns a channel
 // of stream-json messages. The channel is closed when the process exits.
 func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage, error) {
+	return p.RunWithOptions(ctx, prompt, nil)
+}
+
+// RunWithOptions spawns a claude subprocess with per-run option overrides.
+func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (<-chan StreamMessage, error) {
 	p.mu.Lock()
 	if p.status == ProcessStatusBusy {
 		p.mu.Unlock()
@@ -48,6 +106,10 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+	p.messageCount = 0
+	p.toolCallCount = 0
+	p.lastMessage = ""
+	p.lastToolName = ""
 
 	// Create a new done channel for this run while holding the lock,
 	// ensuring no race between concurrent callers.
@@ -55,15 +117,16 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	p.done = done
 	p.mu.Unlock()
 
-	args := p.opts.args()
+	opts := p.mergedOpts(runOpts)
+	args := opts.args()
 	args = append(args, "--", prompt)
 
 	// Use exec.Command (not CommandContext) so that cancellation goes through
 	// Stop() which sends SIGTERM for graceful shutdown, rather than the
 	// immediate SIGKILL that CommandContext would send.
 	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
-	if p.opts.WorkDir != "" {
-		cmd.Dir = p.opts.WorkDir
+	if opts.WorkDir != "" {
+		cmd.Dir = opts.WorkDir
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -142,8 +205,18 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 			}
 
 			p.mu.Lock()
+			p.messageCount++
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
+			}
+			if msg.Type == MessageTypeAssistant {
+				if msg.Subtype == SubtypeText && msg.Text != "" {
+					p.lastMessage = truncate(msg.Text, 200)
+				}
+				if msg.Subtype == SubtypeToolUse {
+					p.toolCallCount++
+					p.lastToolName = msg.ToolName
+				}
 			}
 			if msg.Type == MessageTypeResult {
 				p.totalCost = msg.TotalCost
@@ -164,7 +237,12 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 // RunSync runs a prompt and blocks until completion, returning the result text
 // and all messages. It respects context cancellation.
 func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamMessage, error) {
-	ch, err := p.Run(ctx, prompt)
+	return p.RunSyncWithOptions(ctx, prompt, nil)
+}
+
+// RunSyncWithOptions runs a prompt with per-run overrides and blocks until completion.
+func (p *Process) RunSyncWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (string, []StreamMessage, error) {
+	ch, err := p.RunWithOptions(ctx, prompt, runOpts)
 	if err != nil {
 		return "", nil, err
 	}
@@ -235,10 +313,14 @@ func (p *Process) Status() StatusInfo {
 	defer p.mu.RUnlock()
 
 	return StatusInfo{
-		Status:       p.status,
-		SessionID:    p.sessionID,
-		ErrorMessage: p.lastError,
-		TotalCost:    p.totalCost,
+		Status:        p.status,
+		SessionID:     p.sessionID,
+		ErrorMessage:  p.lastError,
+		TotalCost:     p.totalCost,
+		MessageCount:  p.messageCount,
+		ToolCallCount: p.toolCallCount,
+		LastMessage:   p.lastMessage,
+		LastToolName:  p.lastToolName,
 	}
 }
 
@@ -258,4 +340,12 @@ func (p *Process) setError(msg string) {
 	defer p.mu.Unlock()
 	p.status = ProcessStatusError
 	p.lastError = msg
+}
+
+// truncate returns s truncated to maxLen characters with "..." appended if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }

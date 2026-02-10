@@ -28,6 +28,21 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			mcp.Required(),
 			mcp.Description("The prompt or task description to send to the Claude agent"),
 		),
+		mcp.WithString("session_id",
+			mcp.Description("Optional session UUID to use or resume a specific conversation"),
+		),
+		mcp.WithString("agent",
+			mcp.Description("Optional named agent persona to use for this prompt (must be pre-configured)"),
+		),
+		mcp.WithString("json_schema",
+			mcp.Description("Optional JSON Schema to constrain the output format"),
+		),
+		mcp.WithNumber("max_budget_usd",
+			mcp.Description("Optional maximum dollar spend for this invocation (0 = no limit)"),
+		),
+		mcp.WithString("effort",
+			mcp.Description("Optional effort level: low, medium, or high"),
+		),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -40,7 +55,25 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			return mcp.NewToolResultError("message must not be empty"), nil
 		}
 
-		result, messages, err := process.RunSync(ctx, message)
+		// Build per-run overrides from optional parameters.
+		runOpts := &claudepkg.RunOptions{}
+		if v, err := optionalString(request, "session_id"); err == nil && v != "" {
+			runOpts.SessionID = v
+		}
+		if v, err := optionalString(request, "agent"); err == nil && v != "" {
+			runOpts.ActiveAgent = v
+		}
+		if v, err := optionalString(request, "json_schema"); err == nil && v != "" {
+			runOpts.JSONSchema = v
+		}
+		if v, err := optionalFloat(request, "max_budget_usd"); err == nil && v > 0 {
+			runOpts.MaxBudgetUSD = v
+		}
+		if v, err := optionalString(request, "effort"); err == nil && v != "" {
+			runOpts.Effort = v
+		}
+
+		result, messages, err := process.RunSyncWithOptions(ctx, message, runOpts)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
 		}
@@ -50,15 +83,22 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			Result       string  `json:"result"`
 			MessageCount int     `json:"message_count"`
 			TotalCost    float64 `json:"total_cost_usd,omitempty"`
+			SessionID    string  `json:"session_id,omitempty"`
 		}{
 			Result:       result,
 			MessageCount: len(messages),
 		}
 
-		// Extract cost from the last result message.
+		// Extract cost and session_id from messages.
 		for i := len(messages) - 1; i >= 0; i-- {
 			if messages[i].Type == claudepkg.MessageTypeResult {
 				response.TotalCost = messages[i].TotalCost
+				break
+			}
+		}
+		for _, msg := range messages {
+			if msg.Type == claudepkg.MessageTypeSystem && msg.SessionID != "" {
+				response.SessionID = msg.SessionID
 				break
 			}
 		}
@@ -76,7 +116,8 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 
 func statusTool(process *claudepkg.Process) server.ServerTool {
 	tool := mcp.NewTool("status",
-		mcp.WithDescription("Get the current status of the Claude Code agent (starting, idle, busy, stopped, error)"),
+		mcp.WithDescription("Get the current status of the Claude Code agent including progress info "+
+			"(starting, idle, busy, stopped, error), message/tool counts, and last activity"),
 	)
 
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -103,4 +144,32 @@ func stopTool(process *claudepkg.Process) server.ServerTool {
 	}
 
 	return server.ServerTool{Tool: tool, Handler: handler}
+}
+
+// optionalString extracts an optional string parameter from a tool request.
+func optionalString(request mcp.CallToolRequest, key string) (string, error) {
+	args := request.GetArguments()
+	v, ok := args[key]
+	if !ok || v == nil {
+		return "", nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", fmt.Errorf("parameter %q must be a string", key)
+	}
+	return s, nil
+}
+
+// optionalFloat extracts an optional float parameter from a tool request.
+func optionalFloat(request mcp.CallToolRequest, key string) (float64, error) {
+	args := request.GetArguments()
+	v, ok := args[key]
+	if !ok || v == nil {
+		return 0, nil
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return 0, fmt.Errorf("parameter %q must be a number", key)
+	}
+	return f, nil
 }
