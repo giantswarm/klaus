@@ -25,10 +25,10 @@ When run without subcommands, it starts the server (equivalent to 'klaus serve')
 	},
 }
 
-// SetVersion propagates the build-time version to the root command and pkg/project.
-func SetVersion(v string) {
-	rootCmd.Version = v
-	project.SetVersion(v)
+// SetBuildInfo propagates build-time metadata to the root command and pkg/project.
+func SetBuildInfo(version, commit, date string) {
+	rootCmd.Version = version
+	project.SetBuildInfo(version, commit, date)
 }
 
 // Execute runs the root command and exits on error.

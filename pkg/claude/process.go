@@ -58,7 +58,10 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	args := p.opts.args()
 	args = append(args, "--", prompt)
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	// Use exec.Command (not CommandContext) so that cancellation goes through
+	// Stop() which sends SIGTERM for graceful shutdown, rather than the
+	// immediate SIGKILL that CommandContext would send.
+	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
 	if p.opts.WorkDir != "" {
 		cmd.Dir = p.opts.WorkDir
 	}
@@ -87,14 +90,14 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 
 	out := make(chan StreamMessage, 100)
 
-	// Use a WaitGroup to ensure both pipe readers finish before cmd.Wait(),
+	// Wait for the stderr reader to finish before calling cmd.Wait(),
 	// avoiding potential data loss from premature pipe closure.
-	var pipeWg sync.WaitGroup
-	pipeWg.Add(2)
+	var stderrWg sync.WaitGroup
+	stderrWg.Add(1)
 
 	// Read stderr in background for logging.
 	go func() {
-		defer pipeWg.Done()
+		defer stderrWg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			log.Printf("[claude stderr] %s", scanner.Text())
@@ -107,8 +110,8 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	go func() {
 		defer close(out)
 		defer func() {
-			// Ensure both pipe readers are fully drained before Wait.
-			pipeWg.Wait()
+			// Wait for stderr reader to drain before calling Wait.
+			stderrWg.Wait()
 			waitErr := cmd.Wait()
 
 			p.mu.Lock()
@@ -153,8 +156,6 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 		if scanErr := scanner.Err(); scanErr != nil {
 			log.Printf("[claude] stdout scanner error: %v", scanErr)
 		}
-
-		pipeWg.Done()
 	}()
 
 	return out, nil

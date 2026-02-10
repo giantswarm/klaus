@@ -4,9 +4,14 @@ import (
 	"github.com/giantswarm/klaus/cmd"
 )
 
-var version = "dev" // set by goreleaser
+// Build-time variables set via ldflags (goreleaser & Dockerfile).
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
 
 func main() {
-	cmd.SetVersion(version)
+	cmd.SetBuildInfo(version, commit, date)
 	cmd.Execute()
 }

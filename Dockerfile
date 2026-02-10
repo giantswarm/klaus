@@ -7,15 +7,15 @@ RUN go mod download
 
 COPY . .
 ARG VERSION=dev
-ARG BUILDTIMESTAMP=unknown
-ARG GITSHA=unknown
+ARG COMMIT=unknown
+ARG DATE=unknown
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags "-w -extldflags '-static' \
     -X 'main.version=${VERSION}' \
-    -X 'github.com/giantswarm/klaus/pkg/project.buildTimestamp=${BUILDTIMESTAMP}' \
-    -X 'github.com/giantswarm/klaus/pkg/project.gitSHA=${GITSHA}'" \
+    -X 'main.commit=${COMMIT}' \
+    -X 'main.date=${DATE}'" \
     -o klaus .
 
 # Stage 2: Runtime with Node.js and Claude CLI.

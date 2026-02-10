@@ -45,9 +45,26 @@ func TestHandleRoot(t *testing.T) {
 
 	handleRoot(w, req)
 
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
 	body := w.Body.String()
 	if !strings.Contains(body, "klaus") {
 		t.Errorf("expected body to contain %q, got %q", "klaus", body)
+	}
+}
+
+func TestHandleRoot_UnknownPath(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
+	w := httptest.NewRecorder()
+
+	handleRoot(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404 for unknown path, got %d", resp.StatusCode)
 	}
 }
 
@@ -99,5 +116,21 @@ func TestRegisterOperationalRoutes(t *testing.T) {
 		if w.Result().StatusCode != http.StatusOK {
 			t.Errorf("path %s: expected status 200, got %d", path, w.Result().StatusCode)
 		}
+	}
+}
+
+func TestRegisterOperationalRoutes_UnknownPath(t *testing.T) {
+	process := claude.NewProcess(claude.DefaultOptions())
+	mux := http.NewServeMux()
+
+	registerOperationalRoutes(mux, process)
+
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Result().StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404 for unknown path, got %d", w.Result().StatusCode)
 	}
 }

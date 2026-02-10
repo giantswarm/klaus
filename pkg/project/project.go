@@ -24,11 +24,17 @@ func GitSHA() string {
 	return gitSHA
 }
 
-// SetVersion overrides the version. This is used by the cmd package to propagate
-// the version from main when set via goreleaser ldflags on main.version.
-func SetVersion(v string) {
+// SetBuildInfo overrides the build-time metadata. This is called by the cmd
+// package to propagate ldflags set on main (via goreleaser or Dockerfile).
+func SetBuildInfo(v, commit, date string) {
 	if v != "" {
 		version = v
+	}
+	if commit != "" {
+		gitSHA = commit
+	}
+	if date != "" {
+		buildTimestamp = date
 	}
 }
 

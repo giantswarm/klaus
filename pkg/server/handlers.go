@@ -28,7 +28,13 @@ func handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
-func handleRoot(w http.ResponseWriter, _ *http.Request) {
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	// Go's ServeMux uses "/" as a catch-all. Return 404 for unmatched paths
+	// to avoid masking routing issues and confusing monitoring.
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
 	fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 

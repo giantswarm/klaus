@@ -103,28 +103,36 @@ Configuration is primarily via environment variables:
 			}
 
 			oauthConfig := server.OAuthConfig{
-				BaseURL:                         oauthBaseURL,
-				Provider:                        oauthProvider,
-				GoogleClientID:                  googleClientID,
-				GoogleClientSecret:              googleClientSecret,
-				DexIssuerURL:                    dexIssuerURL,
-				DexClientID:                     dexClientID,
-				DexClientSecret:                 dexClientSecret,
-				DexConnectorID:                  dexConnectorID,
-				DexCAFile:                       dexCAFile,
-				DisableStreaming:                disableStreaming,
-				DebugMode:                       false,
-				EncryptionKey:                   encryptionKey,
-				RegistrationAccessToken:         registrationToken,
-				AllowPublicClientRegistration:   allowPublicRegistration,
-				AllowInsecureAuthWithoutState:   allowInsecureAuthWithoutState,
-				MaxClientsPerIP:                 maxClientsPerIP,
-				EnableCIMD:                      enableCIMD,
-				CIMDAllowPrivateIPs:             cimdAllowPrivateIPs,
-				TrustedPublicRegistrationSchemes: trustedPublicRegistrationSchemes,
-				DisableStrictSchemeMatching:       disableStrictSchemeMatching,
-				TLSCertFile:                     tlsCertFile,
-				TLSKeyFile:                      tlsKeyFile,
+				BaseURL:  oauthBaseURL,
+				Provider: oauthProvider,
+				Google: server.GoogleOAuthConfig{
+					ClientID:     googleClientID,
+					ClientSecret: googleClientSecret,
+				},
+				Dex: server.DexOAuthConfig{
+					IssuerURL:    dexIssuerURL,
+					ClientID:     dexClientID,
+					ClientSecret: dexClientSecret,
+					ConnectorID:  dexConnectorID,
+					CAFile:       dexCAFile,
+				},
+				Security: server.SecurityConfig{
+					EncryptionKey:                    encryptionKey,
+					RegistrationAccessToken:          registrationToken,
+					AllowPublicClientRegistration:    allowPublicRegistration,
+					AllowInsecureAuthWithoutState:    allowInsecureAuthWithoutState,
+					MaxClientsPerIP:                  maxClientsPerIP,
+					EnableCIMD:                       enableCIMD,
+					CIMDAllowPrivateIPs:              cimdAllowPrivateIPs,
+					TrustedPublicRegistrationSchemes: trustedPublicRegistrationSchemes,
+					DisableStrictSchemeMatching:       disableStrictSchemeMatching,
+				},
+				TLS: server.TLSConfig{
+					CertFile: tlsCertFile,
+					KeyFile:  tlsKeyFile,
+				},
+				DisableStreaming: disableStreaming,
+				DebugMode:       false,
 			}
 
 			return runServe(port, enableOAuth, oauthConfig)
@@ -212,57 +220,18 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 }
 
 func runWithOAuth(process *claude.Process, port string, config server.OAuthConfig, quit chan os.Signal) error {
-	addr := ":" + port
-	if config.BaseURL == "" {
-		return fmt.Errorf("--oauth-base-url is required when --enable-oauth is set")
-	}
-
-	// Validate TLS configuration.
-	if (config.TLSCertFile != "" && config.TLSKeyFile == "") ||
-		(config.TLSCertFile == "" && config.TLSKeyFile != "") {
-		return fmt.Errorf("both --tls-cert-file and --tls-key-file must be provided together for HTTPS")
-	}
-
-	// Provider-specific validation.
-	switch config.Provider {
-	case server.OAuthProviderDex:
-		if config.DexIssuerURL == "" {
-			return fmt.Errorf("dex issuer URL is required when using Dex provider (--dex-issuer-url or DEX_ISSUER_URL)")
-		}
-		if config.DexClientID == "" {
-			return fmt.Errorf("dex client ID is required when using Dex provider (--dex-client-id or DEX_CLIENT_ID)")
-		}
-		if config.DexClientSecret == "" {
-			return fmt.Errorf("dex client secret is required when using Dex provider (--dex-client-secret or DEX_CLIENT_SECRET)")
-		}
-	case server.OAuthProviderGoogle:
-		if config.GoogleClientID == "" {
-			return fmt.Errorf("google client ID is required when using Google provider (--google-client-id or GOOGLE_CLIENT_ID)")
-		}
-		if config.GoogleClientSecret == "" {
-			return fmt.Errorf("google client secret is required when using Google provider (--google-client-secret or GOOGLE_CLIENT_SECRET)")
-		}
-	default:
-		return fmt.Errorf("unsupported OAuth provider: %s (supported: %s, %s)", config.Provider, server.OAuthProviderDex, server.OAuthProviderGoogle)
-	}
-
-	// Registration token or alternative must be configured.
-	hasTrustedSchemes := len(config.TrustedPublicRegistrationSchemes) > 0
-	if !config.AllowPublicClientRegistration && config.RegistrationAccessToken == "" && !hasTrustedSchemes && !config.EnableCIMD {
-		return fmt.Errorf("--registration-token is required when public registration is disabled, " +
-			"no trusted schemes are configured, and CIMD is disabled. " +
-			"Either set --registration-token, enable --allow-public-registration, " +
-			"configure --trusted-public-registration-schemes, or enable --enable-cimd")
+	if err := config.Validate(); err != nil {
+		return err
 	}
 
 	// Warn about insecure configuration.
-	if config.AllowPublicClientRegistration {
+	if config.Security.AllowPublicClientRegistration {
 		log.Println("WARNING: Public client registration is enabled - this allows unlimited client registration")
 	}
-	if config.AllowInsecureAuthWithoutState {
+	if config.Security.AllowInsecureAuthWithoutState {
 		log.Println("WARNING: State parameter is optional - this weakens CSRF protection")
 	}
-	if len(config.EncryptionKey) == 0 {
+	if len(config.Security.EncryptionKey) == 0 {
 		log.Println("WARNING: OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
@@ -271,46 +240,32 @@ func runWithOAuth(process *claude.Process, port string, config server.OAuthConfi
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}
 
-	serverDone := make(chan error, 1)
-	go func() {
-		defer close(serverDone)
-		if err := oauthSrv.Start(addr, config); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverDone <- err
-		}
-	}()
-
-	select {
-	case <-quit:
-		log.Println("Shutdown signal received...")
-	case err := <-serverDone:
-		if err != nil {
-			return fmt.Errorf("OAuth HTTP server error: %w", err)
-		}
-	}
-
-	// Stop any running Claude process.
-	if err := process.Stop(); err != nil {
-		log.Printf("Error stopping Claude process: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), server.DefaultShutdownTimeout)
-	defer cancel()
-
-	if err := oauthSrv.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server forced to shutdown: %w", err)
-	}
-
-	log.Println("Server exited")
-	return nil
+	addr := ":" + port
+	return runServerLifecycle(
+		func() error { return oauthSrv.Start(addr, config) },
+		oauthSrv.Shutdown,
+		process,
+		quit,
+	)
 }
 
 func runWithoutOAuth(process *claude.Process, port string, quit chan os.Signal) error {
 	srv := server.New(process, port)
+	return runServerLifecycle(srv.Start, srv.Shutdown, process, quit)
+}
 
+// runServerLifecycle runs a server in a goroutine, waits for a shutdown signal
+// or server error, stops the Claude process, and gracefully shuts down.
+func runServerLifecycle(
+	startFn func() error,
+	shutdownFn func(context.Context) error,
+	process *claude.Process,
+	quit <-chan os.Signal,
+) error {
 	serverDone := make(chan error, 1)
 	go func() {
 		defer close(serverDone)
-		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := startFn(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverDone <- err
 		}
 	}()
@@ -332,7 +287,7 @@ func runWithoutOAuth(process *claude.Process, port string, quit chan os.Signal) 
 	ctx, cancel := context.WithTimeout(context.Background(), server.DefaultShutdownTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := shutdownFn(ctx); err != nil {
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 

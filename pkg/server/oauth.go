@@ -73,28 +73,42 @@ type OAuthConfig struct {
 	// Provider specifies the OAuth provider: "dex" or "google".
 	Provider string
 
-	// GoogleClientID is the Google OAuth Client ID.
-	GoogleClientID string
-	// GoogleClientSecret is the Google OAuth Client Secret.
-	GoogleClientSecret string
+	// Google holds Google-specific OAuth credentials.
+	Google GoogleOAuthConfig
 
-	// DexIssuerURL is the Dex OIDC issuer URL.
-	DexIssuerURL string
-	// DexClientID is the Dex OAuth Client ID.
-	DexClientID string
-	// DexClientSecret is the Dex OAuth Client Secret.
-	DexClientSecret string
-	// DexConnectorID is the optional Dex connector ID to bypass connector selection.
-	DexConnectorID string
-	// DexCAFile is the path to a CA certificate file for Dex TLS verification.
-	DexCAFile string
+	// Dex holds Dex-specific OIDC credentials.
+	Dex DexOAuthConfig
+
+	// Security holds token encryption and registration settings.
+	Security SecurityConfig
+
+	// TLS holds optional TLS certificate paths for HTTPS.
+	TLS TLSConfig
 
 	// DisableStreaming disables streaming for streamable-http transport.
 	DisableStreaming bool
 
 	// DebugMode enables debug logging.
 	DebugMode bool
+}
 
+// GoogleOAuthConfig holds Google OAuth provider settings.
+type GoogleOAuthConfig struct {
+	ClientID     string
+	ClientSecret string
+}
+
+// DexOAuthConfig holds Dex OIDC provider settings.
+type DexOAuthConfig struct {
+	IssuerURL    string
+	ClientID     string
+	ClientSecret string
+	ConnectorID  string // optional: bypass connector selection
+	CAFile       string // optional: CA certificate for TLS verification
+}
+
+// SecurityConfig holds OAuth security settings.
+type SecurityConfig struct {
 	// EncryptionKey is the AES-256 key for encrypting tokens at rest (32 bytes).
 	EncryptionKey []byte
 
@@ -121,11 +135,61 @@ type OAuthConfig struct {
 
 	// DisableStrictSchemeMatching allows mixed redirect URI schemes.
 	DisableStrictSchemeMatching bool
+}
 
-	// TLSCertFile is the path to the TLS certificate file (PEM format).
-	TLSCertFile string
-	// TLSKeyFile is the path to the TLS private key file (PEM format).
-	TLSKeyFile string
+// TLSConfig holds paths for the TLS certificate and key.
+type TLSConfig struct {
+	CertFile string // PEM format
+	KeyFile  string // PEM format
+}
+
+// Validate checks that the OAuthConfig is internally consistent.
+// It validates provider-specific required fields, TLS pairing, and
+// client registration policy.
+func (c OAuthConfig) Validate() error {
+	if c.BaseURL == "" {
+		return fmt.Errorf("base URL is required when OAuth is enabled")
+	}
+
+	// TLS cert and key must be provided together.
+	if (c.TLS.CertFile != "" && c.TLS.KeyFile == "") ||
+		(c.TLS.CertFile == "" && c.TLS.KeyFile != "") {
+		return fmt.Errorf("both TLS cert and key must be provided together for HTTPS")
+	}
+
+	// Provider-specific validation.
+	switch c.Provider {
+	case OAuthProviderDex:
+		if c.Dex.IssuerURL == "" {
+			return fmt.Errorf("dex issuer URL is required when using Dex provider (--dex-issuer-url or DEX_ISSUER_URL)")
+		}
+		if c.Dex.ClientID == "" {
+			return fmt.Errorf("dex client ID is required when using Dex provider (--dex-client-id or DEX_CLIENT_ID)")
+		}
+		if c.Dex.ClientSecret == "" {
+			return fmt.Errorf("dex client secret is required when using Dex provider (--dex-client-secret or DEX_CLIENT_SECRET)")
+		}
+	case OAuthProviderGoogle:
+		if c.Google.ClientID == "" {
+			return fmt.Errorf("google client ID is required when using Google provider (--google-client-id or GOOGLE_CLIENT_ID)")
+		}
+		if c.Google.ClientSecret == "" {
+			return fmt.Errorf("google client secret is required when using Google provider (--google-client-secret or GOOGLE_CLIENT_SECRET)")
+		}
+	default:
+		return fmt.Errorf("unsupported OAuth provider: %s (supported: %s, %s)", c.Provider, OAuthProviderDex, OAuthProviderGoogle)
+	}
+
+	// Registration token or alternative must be configured.
+	hasTrustedSchemes := len(c.Security.TrustedPublicRegistrationSchemes) > 0
+	if !c.Security.AllowPublicClientRegistration && c.Security.RegistrationAccessToken == "" && !hasTrustedSchemes && !c.Security.EnableCIMD {
+		return fmt.Errorf("registration token is required when public registration is disabled, " +
+			"no trusted schemes are configured, and CIMD is disabled; " +
+			"set --registration-token, enable --allow-public-registration, " +
+			"configure --trusted-public-registration-schemes, or enable --enable-cimd")
+	}
+
+	return nil
 }
 
 // OAuthServer wraps the MCP endpoint with OAuth 2.1 authentication.
@@ -190,8 +254,8 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 	log.Printf("    - Revoke: /oauth/revoke")
 	log.Printf("    - Introspect: /oauth/introspect")
 
-	if config.TLSCertFile != "" && config.TLSKeyFile != "" {
-		return s.httpServer.ListenAndServeTLS(config.TLSCertFile, config.TLSKeyFile)
+	if config.TLS.CertFile != "" && config.TLS.KeyFile != "" {
+		return s.httpServer.ListenAndServeTLS(config.TLS.CertFile, config.TLS.KeyFile)
 	}
 
 	return s.httpServer.ListenAndServe()
@@ -251,33 +315,33 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 	switch config.Provider {
 	case OAuthProviderDex:
 		dexConfig := &dex.Config{
-			IssuerURL:    config.DexIssuerURL,
-			ClientID:     config.DexClientID,
-			ClientSecret: config.DexClientSecret,
+			IssuerURL:    config.Dex.IssuerURL,
+			ClientID:     config.Dex.ClientID,
+			ClientSecret: config.Dex.ClientSecret,
 			RedirectURL:  redirectURL,
 			Scopes:       dexOAuthScopes,
 		}
-		if config.DexConnectorID != "" {
-			dexConfig.ConnectorID = config.DexConnectorID
+		if config.Dex.ConnectorID != "" {
+			dexConfig.ConnectorID = config.Dex.ConnectorID
 		}
-		if config.DexCAFile != "" {
-			httpClient, err := createHTTPClientWithCA(config.DexCAFile)
+		if config.Dex.CAFile != "" {
+			httpClient, err := createHTTPClientWithCA(config.Dex.CAFile)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create HTTP client with CA: %w", err)
 			}
 			dexConfig.HTTPClient = httpClient
-			logger.Info("Using custom CA for Dex TLS verification", "caFile", config.DexCAFile)
+			logger.Info("Using custom CA for Dex TLS verification", "caFile", config.Dex.CAFile)
 		}
 		provider, err = dex.NewProvider(dexConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Dex provider: %w", err)
 		}
-		logger.Info("Using Dex OIDC provider", "issuer", config.DexIssuerURL)
+		logger.Info("Using Dex OIDC provider", "issuer", config.Dex.IssuerURL)
 
 	case OAuthProviderGoogle:
 		provider, err = google.NewProvider(&google.Config{
-			ClientID:     config.GoogleClientID,
-			ClientSecret: config.GoogleClientSecret,
+			ClientID:     config.Google.ClientID,
+			ClientSecret: config.Google.ClientSecret,
 			RedirectURL:  redirectURL,
 			Scopes:       googleOAuthScopes,
 		})
@@ -296,7 +360,7 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 	var clientStore storage.ClientStore = memStore
 	var flowStore storage.FlowStore = memStore
 
-	maxClientsPerIP := config.MaxClientsPerIP
+	maxClientsPerIP := config.Security.MaxClientsPerIP
 	if maxClientsPerIP == 0 {
 		maxClientsPerIP = DefaultMaxClientsPerIP
 	}
@@ -307,18 +371,18 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		AllowRefreshTokenRotation:     true,
 		RequirePKCE:                   true,
 		AllowPKCEPlain:                false,
-		AllowPublicClientRegistration: config.AllowPublicClientRegistration,
-		RegistrationAccessToken:       config.RegistrationAccessToken,
-		AllowNoStateParameter:         config.AllowInsecureAuthWithoutState,
+		AllowPublicClientRegistration: config.Security.AllowPublicClientRegistration,
+		RegistrationAccessToken:       config.Security.RegistrationAccessToken,
+		AllowNoStateParameter:         config.Security.AllowInsecureAuthWithoutState,
 		MaxClientsPerIP:               maxClientsPerIP,
 
 		// CIMD per MCP 2025-11-25.
-		EnableClientIDMetadataDocuments: config.EnableCIMD,
-		AllowPrivateIPClientMetadata:    config.CIMDAllowPrivateIPs,
+		EnableClientIDMetadataDocuments: config.Security.EnableCIMD,
+		AllowPrivateIPClientMetadata:    config.Security.CIMDAllowPrivateIPs,
 
 		// Trusted scheme registration.
-		TrustedPublicRegistrationSchemes: config.TrustedPublicRegistrationSchemes,
-		DisableStrictSchemeMatching:      config.DisableStrictSchemeMatching,
+		TrustedPublicRegistrationSchemes: config.Security.TrustedPublicRegistrationSchemes,
+		DisableStrictSchemeMatching:      config.Security.DisableStrictSchemeMatching,
 
 		// Instrumentation.
 		Instrumentation: oauthserver.InstrumentationConfig{
@@ -341,8 +405,8 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 	}
 
 	// Set up encryption if key provided.
-	if len(config.EncryptionKey) > 0 {
-		encryptor, err := security.NewEncryptor(config.EncryptionKey)
+	if len(config.Security.EncryptionKey) > 0 {
+		encryptor, err := security.NewEncryptor(config.Security.EncryptionKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create encryptor: %w", err)
 		}
