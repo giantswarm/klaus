@@ -6,21 +6,24 @@ import "encoding/json"
 type MessageType string
 
 const (
-	// Outbound message types (from Claude stdout).
 	MessageTypeSystem    MessageType = "system"
 	MessageTypeAssistant MessageType = "assistant"
 	MessageTypeResult    MessageType = "result"
+)
 
-	// Subtypes within assistant messages.
-	SubtypeText    = "text"
-	SubtypeToolUse = "tool_use"
+// MessageSubtype identifies the subtype of an assistant message.
+type MessageSubtype string
+
+const (
+	SubtypeText    MessageSubtype = "text"
+	SubtypeToolUse MessageSubtype = "tool_use"
 )
 
 // StreamMessage is the top-level envelope for all stream-json messages
 // emitted by the Claude CLI on stdout.
 type StreamMessage struct {
-	Type    MessageType     `json:"type"`
-	Subtype string          `json:"subtype,omitempty"`
+	Type    MessageType    `json:"type"`
+	Subtype MessageSubtype `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 
 	// Fields present on "system" messages.
@@ -47,7 +50,7 @@ type StreamMessage struct {
 	Raw json.RawMessage `json:"-"`
 }
 
-// ParseStreamMessage parses a single line of stream-json output.
+// ParseStreamMessage unmarshals a single line of stream-json output.
 func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	var msg StreamMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -58,7 +61,6 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	return msg, nil
 }
 
-// ProcessStatus represents the current state of the Claude subprocess.
 type ProcessStatus string
 
 const (
@@ -69,10 +71,9 @@ const (
 	ProcessStatusError    ProcessStatus = "error"
 )
 
-// StatusInfo provides detailed status information about the Claude process.
 type StatusInfo struct {
-	Status    ProcessStatus `json:"status"`
-	SessionID string        `json:"session_id,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	TotalCost float64       `json:"total_cost_usd,omitempty"`
+	Status       ProcessStatus `json:"status"`
+	SessionID    string        `json:"session_id,omitempty"`
+	ErrorMessage string        `json:"error,omitempty"`
+	TotalCost    float64       `json:"total_cost_usd,omitempty"`
 }

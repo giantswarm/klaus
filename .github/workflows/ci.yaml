@@ -1,0 +1,64 @@
+---
+# yamllint disable rule:truthy
+name: CI Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Python for yamllint
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.19.4'
+
+      - name: Install helm-unittest plugin
+        run: |
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git
+
+      - name: Run Checks (Lint & Test)
+        run: make check
+
+      - name: Run Helm linter
+        run: make helm-lint
+
+      - name: Run govulncheck (Security Scan)
+        run: make govulncheck
+
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          install-only: true
+
+      - name: Run Release Dry-Run
+        if: github.event_name == 'pull_request'
+        run: make release-dry-run-fast
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

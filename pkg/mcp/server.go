@@ -7,9 +7,20 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// NewServer creates a configured MCP server with all Klaus tools registered.
-// The returned StreamableHTTPServer serves the MCP protocol over HTTP at /mcp.
+// NewServer returns a StreamableHTTPServer that serves MCP at /mcp.
 func NewServer(process *claudepkg.Process) *server.StreamableHTTPServer {
+	mcpServer := NewMCPServer(process)
+
+	httpServer := server.NewStreamableHTTPServer(mcpServer,
+		server.WithEndpointPath("/mcp"),
+	)
+
+	return httpServer
+}
+
+// NewMCPServer returns the raw MCPServer with tools registered, for use
+// when wrapping with custom middleware (e.g. OAuth).
+func NewMCPServer(process *claudepkg.Process) *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		project.Name,
 		project.Version(),
@@ -20,9 +31,5 @@ func NewServer(process *claudepkg.Process) *server.StreamableHTTPServer {
 
 	RegisterTools(mcpServer, process)
 
-	httpServer := server.NewStreamableHTTPServer(mcpServer,
-		server.WithEndpointPath("/mcp"),
-	)
-
-	return httpServer
+	return mcpServer
 }

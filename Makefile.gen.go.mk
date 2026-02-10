@@ -16,6 +16,7 @@ ifeq ($(OS), linux)
 EXTLDFLAGS := -static
 endif
 LDFLAGS        ?= -w -linkmode 'auto' -extldflags '$(EXTLDFLAGS)' \
+  -X 'main.version=${VERSION}' \
   -X '$(shell go list -m)/pkg/project.buildTimestamp=${BUILDTIMESTAMP}' \
   -X '$(shell go list -m)/pkg/project.gitSHA=${GITSHA1}'
 

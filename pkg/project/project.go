@@ -24,6 +24,20 @@ func GitSHA() string {
 	return gitSHA
 }
 
+// SetBuildInfo overrides the build-time metadata. This is called by the cmd
+// package to propagate ldflags set on main (via goreleaser or Dockerfile).
+func SetBuildInfo(v, commit, date string) {
+	if v != "" {
+		version = v
+	}
+	if commit != "" {
+		gitSHA = commit
+	}
+	if date != "" {
+		buildTimestamp = date
+	}
+}
+
 // Version returns the application version set at compile time.
 func Version() string {
 	return version

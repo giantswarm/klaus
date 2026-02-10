@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os/exec"
 	"sync"
@@ -13,36 +12,34 @@ import (
 	"time"
 )
 
-// Process manages a Claude CLI subprocess.
+// Process manages a Claude CLI subprocess lifecycle and streams its output.
 type Process struct {
 	opts Options
 
 	mu        sync.RWMutex
 	cmd       *exec.Cmd
-	stdin     io.WriteCloser
 	status    ProcessStatus
 	sessionID string
 	lastError string
 	totalCost float64
 
-	messages chan StreamMessage
-	done     chan struct{}
+	done chan struct{}
 }
 
-// NewProcess creates a new Claude process manager with the given options.
+// NewProcess returns a Process ready to run. The Done channel is pre-closed
+// to indicate no subprocess is active.
 func NewProcess(opts Options) *Process {
+	done := make(chan struct{})
+	close(done) // Pre-closed: "not running" == "already done".
 	return &Process{
-		opts:     opts,
-		status:   ProcessStatusStopped,
-		messages: make(chan StreamMessage, 100),
-		done:     make(chan struct{}),
+		opts:   opts,
+		status: ProcessStatusIdle,
+		done:   done,
 	}
 }
 
-// Run sends a prompt to Claude in one-shot mode and streams results back.
-// It spawns a new claude subprocess for each invocation.
-// The returned channel receives all stream-json messages and is closed when
-// the process completes.
+// Run spawns a claude subprocess for the given prompt and returns a channel
+// of stream-json messages. The channel is closed when the process exits.
 func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage, error) {
 	p.mu.Lock()
 	if p.status == ProcessStatusBusy {
@@ -51,12 +48,20 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+
+	// Create a new done channel for this run while holding the lock,
+	// ensuring no race between concurrent callers.
+	done := make(chan struct{})
+	p.done = done
 	p.mu.Unlock()
 
 	args := p.opts.args()
-	args = append(args, prompt)
+	args = append(args, "--", prompt)
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	// Use exec.Command (not CommandContext) so that cancellation goes through
+	// Stop() which sends SIGTERM for graceful shutdown, rather than the
+	// immediate SIGKILL that CommandContext would send.
+	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
 	if p.opts.WorkDir != "" {
 		cmd.Dir = p.opts.WorkDir
 	}
@@ -81,13 +86,18 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	p.mu.Lock()
 	p.cmd = cmd
 	p.status = ProcessStatusBusy
-	p.done = make(chan struct{})
 	p.mu.Unlock()
 
 	out := make(chan StreamMessage, 100)
 
+	// Wait for the stderr reader to finish before calling cmd.Wait(),
+	// avoiding potential data loss from premature pipe closure.
+	var stderrWg sync.WaitGroup
+	stderrWg.Add(1)
+
 	// Read stderr in background for logging.
 	go func() {
+		defer stderrWg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			log.Printf("[claude stderr] %s", scanner.Text())
@@ -95,10 +105,13 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}()
 
 	// Read stdout stream-json messages.
+	// Use the local done variable captured at creation time so that
+	// closing it cannot race with a subsequent Run call.
 	go func() {
 		defer close(out)
 		defer func() {
-			// Wait for process to finish.
+			// Wait for stderr reader to drain before calling Wait.
+			stderrWg.Wait()
 			waitErr := cmd.Wait()
 
 			p.mu.Lock()
@@ -109,12 +122,11 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 			} else if p.status == ProcessStatusBusy {
 				p.status = ProcessStatusIdle
 			}
-			close(p.done)
+			close(done)
 			p.mu.Unlock()
 		}()
 
 		scanner := bufio.NewScanner(stdout)
-		// Claude can produce long lines; increase buffer.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 		for scanner.Scan() {
@@ -129,7 +141,6 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 				continue
 			}
 
-			// Track session state.
 			p.mu.Lock()
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
@@ -150,8 +161,8 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	return out, nil
 }
 
-// RunSync sends a prompt and collects the full response synchronously.
-// It returns the final result text and any messages received during execution.
+// RunSync runs a prompt and blocks until completion, returning the result text
+// and all messages. It respects context cancellation.
 func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamMessage, error) {
 	ch, err := p.Run(ctx, prompt)
 	if err != nil {
@@ -161,10 +172,20 @@ func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamM
 	var messages []StreamMessage
 	var resultText string
 
-	for msg := range ch {
-		messages = append(messages, msg)
-		if msg.Type == MessageTypeResult {
-			resultText = msg.Result
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			_ = p.Stop()
+			return "", messages, ctx.Err()
+		case msg, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			messages = append(messages, msg)
+			if msg.Type == MessageTypeResult {
+				resultText = msg.Result
+			}
 		}
 	}
 
@@ -180,7 +201,7 @@ func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamM
 	return resultText, messages, nil
 }
 
-// Stop terminates the running Claude subprocess gracefully.
+// Stop sends SIGTERM and waits up to 10s before SIGKILL.
 func (p *Process) Stop() error {
 	p.mu.Lock()
 	cmd := p.cmd
@@ -194,7 +215,7 @@ func (p *Process) Stop() error {
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		// Process may have already exited.
+		log.Printf("[claude] SIGTERM failed (process may have already exited): %v", err)
 		return nil
 	}
 
@@ -209,27 +230,25 @@ func (p *Process) Stop() error {
 	}
 }
 
-// Status returns the current process status information.
 func (p *Process) Status() StatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	return StatusInfo{
-		Status:    p.status,
-		SessionID: p.sessionID,
-		Error:     p.lastError,
-		TotalCost: p.totalCost,
+		Status:       p.status,
+		SessionID:    p.sessionID,
+		ErrorMessage: p.lastError,
+		TotalCost:    p.totalCost,
 	}
 }
 
-// Done returns a channel that is closed when the current run completes.
+// Done returns a channel closed when the current run completes.
 func (p *Process) Done() <-chan struct{} {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.done
 }
 
-// MarshalStatus returns the status as JSON bytes.
 func (p *Process) MarshalStatus() ([]byte, error) {
 	return json.Marshal(p.Status())
 }
