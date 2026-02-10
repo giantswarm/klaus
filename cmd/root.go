@@ -8,10 +8,8 @@ import (
 	"github.com/giantswarm/klaus/pkg/project"
 )
 
-// serveCmd is stored so the root command can delegate to it.
 var serveCmd *cobra.Command
 
-// rootCmd represents the base command for the klaus application.
 var rootCmd = &cobra.Command{
 	Use:   "klaus",
 	Short: "AI agent orchestrator for Kubernetes",
@@ -27,14 +25,13 @@ When run without subcommands, it starts the server (equivalent to 'klaus serve')
 	},
 }
 
-// SetVersion sets the version for the root command and propagates it to pkg/project.
-// This function is called from the main package to inject the application version at build time.
+// SetVersion propagates the build-time version to the root command and pkg/project.
 func SetVersion(v string) {
 	rootCmd.Version = v
 	project.SetVersion(v)
 }
 
-// Execute is the main entry point for the CLI application.
+// Execute runs the root command and exits on error.
 func Execute() {
 	rootCmd.SetVersionTemplate(`{{printf "klaus version %s\n" .Version}}`)
 

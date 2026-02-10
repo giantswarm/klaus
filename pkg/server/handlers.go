@@ -10,7 +10,6 @@ import (
 	"github.com/giantswarm/klaus/pkg/project"
 )
 
-// statusResponse is the JSON structure returned by the /status endpoint.
 type statusResponse struct {
 	Name    string              `json:"name"`
 	Version string              `json:"version"`
@@ -19,24 +18,20 @@ type statusResponse struct {
 	Agent   claudepkg.StatusInfo `json:"agent"`
 }
 
-// handleHealthz responds with "ok" for liveness probes.
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "ok")
 }
 
-// handleReadyz responds with "ok" for readiness probes.
 func handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "ok")
 }
 
-// handleRoot responds with the application name and version.
 func handleRoot(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 
-// handleStatus returns a JSON status response including process information.
 func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := statusResponse{
@@ -54,7 +49,6 @@ func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 	}
 }
 
-// registerOperationalRoutes registers /healthz, /readyz, /status, and / on the given mux.
 func registerOperationalRoutes(mux *http.ServeMux, process *claudepkg.Process) {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz)

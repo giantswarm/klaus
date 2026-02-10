@@ -5,42 +5,20 @@ import (
 	"strings"
 )
 
-// Options holds configuration for spawning a Claude CLI subprocess.
+// Options configures how a Claude CLI subprocess is spawned.
 type Options struct {
-	// Model is the Claude model to use (e.g. "claude-sonnet-4-20250514").
-	Model string
-
-	// SystemPrompt is an optional system prompt to pass to Claude.
-	SystemPrompt string
-
-	// AppendSystemPrompt is additional text appended to the default system prompt.
-	AppendSystemPrompt string
-
-	// AllowedTools restricts which tools Claude can use.
-	// Empty means all tools are allowed.
-	AllowedTools []string
-
-	// DisallowedTools prevents Claude from using specific tools.
-	DisallowedTools []string
-
-	// MaxTurns limits the number of agentic turns Claude will take.
-	// 0 means no limit.
-	MaxTurns int
-
-	// MCPConfigPath is the path to an MCP configuration file that Claude
-	// will use to connect to MCP servers.
-	MCPConfigPath string
-
-	// WorkDir is the working directory for the Claude subprocess.
-	// Defaults to the current directory if empty.
-	WorkDir string
-
-	// PermissionMode controls how Claude handles tool permissions.
-	// Defaults to "accept-all" for headless operation.
-	PermissionMode string
+	Model              string   // e.g. "claude-sonnet-4-20250514"
+	SystemPrompt       string   // overrides the default system prompt
+	AppendSystemPrompt string   // appended to the default system prompt
+	AllowedTools       []string // restrict tools; empty = all allowed
+	DisallowedTools    []string // explicitly blocked tools
+	MaxTurns           int      // 0 = unlimited agentic turns
+	MCPConfigPath      string   // path to MCP config file
+	WorkDir            string   // working directory (default: cwd)
+	PermissionMode     string   // default "accept-all" for headless
 }
 
-// DefaultOptions returns Options with sensible defaults for headless operation.
+// DefaultOptions returns sensible defaults for headless operation.
 func DefaultOptions() Options {
 	return Options{
 		PermissionMode: "accept-all",

@@ -12,17 +12,12 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-// Server is the main HTTP server for Klaus. It serves:
-//   - /mcp -- Streamable HTTP MCP endpoint
-//   - /healthz -- Liveness probe
-//   - /readyz -- Readiness probe
-//   - /status -- JSON status endpoint
+// Server wraps the MCP and operational HTTP endpoints.
 type Server struct {
 	httpServer *http.Server
 	mcpServer  *mcpserver.StreamableHTTPServer
 }
 
-// New creates a new Klaus HTTP server.
 func New(process *claudepkg.Process, port string) *Server {
 	mcpSrv := mcppkg.NewServer(process)
 
@@ -42,18 +37,20 @@ func New(process *claudepkg.Process, port string) *Server {
 		Addr:              ":" + port,
 		Handler:           mux,
 		ReadHeaderTimeout: DefaultReadHeaderTimeout,
+		WriteTimeout:      DefaultWriteTimeout,
+		IdleTimeout:       DefaultIdleTimeout,
 	}
 
 	return s
 }
 
-// Start begins serving HTTP requests. It blocks until the server is shut down.
+// Start blocks, serving HTTP requests until Shutdown is called.
 func (s *Server) Start() error {
 	log.Printf("Starting %s on %s", project.Name, s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the HTTP server and the MCP server.
+// Shutdown gracefully drains MCP sessions, then stops the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
 	log.Println("Shutting down server...")
 

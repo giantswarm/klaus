@@ -6,7 +6,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newVersionCmd creates the Cobra command for displaying the application version.
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",

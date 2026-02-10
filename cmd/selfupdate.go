@@ -8,10 +8,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// githubRepoSlug specifies the GitHub repository (owner/repo) to check for updates.
 const githubRepoSlug = "giantswarm/klaus"
 
-// newSelfUpdateCmd creates the Cobra command for the self-update functionality.
 func newSelfUpdateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "self-update",
@@ -22,8 +20,6 @@ updates the current binary if a newer version is found.`,
 	}
 }
 
-// runSelfUpdate performs the self-update logic.
-// It checks the current version against the latest GitHub release and updates if necessary.
 func runSelfUpdate(cmd *cobra.Command, args []string) error {
 	currentVersion := rootCmd.Version
 	if currentVersion == "" || currentVersion == "dev" {

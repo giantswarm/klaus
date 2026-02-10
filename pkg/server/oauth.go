@@ -128,7 +128,7 @@ type OAuthConfig struct {
 	TLSKeyFile string
 }
 
-// OAuthServer wraps the MCP server with OAuth 2.1 authentication.
+// OAuthServer wraps the MCP endpoint with OAuth 2.1 authentication.
 type OAuthServer struct {
 	process      *claudepkg.Process
 	oauthServer  *oauth.Server
@@ -136,7 +136,6 @@ type OAuthServer struct {
 	httpServer   *http.Server
 }
 
-// NewOAuthServer creates a new OAuth-enabled HTTP server for Klaus.
 func NewOAuthServer(process *claudepkg.Process, config OAuthConfig) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
@@ -152,9 +151,8 @@ func NewOAuthServer(process *claudepkg.Process, config OAuthConfig) (*OAuthServe
 	}, nil
 }
 
-// Start starts the OAuth-enabled HTTP server.
+// Start validates the config, registers routes, and begins serving.
 func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
-	// Validate HTTPS requirement.
 	if err := ValidateHTTPSRequirement(config.BaseURL); err != nil {
 		return err
 	}
@@ -165,9 +163,7 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 	s.setupOAuthRoutes(mux)
 
 	// MCP endpoint (protected by OAuth).
-	if err := s.setupMCPRoutes(mux, config); err != nil {
-		return err
-	}
+	s.setupMCPRoutes(mux, config)
 
 	// Health and status endpoints (unprotected).
 	registerOperationalRoutes(mux, s.process)
@@ -201,7 +197,6 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 	return s.httpServer.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the OAuth server.
 func (s *OAuthServer) Shutdown(ctx context.Context) error {
 	if s.oauthServer != nil {
 		if err := s.oauthServer.Shutdown(ctx); err != nil {
@@ -225,29 +220,20 @@ func (s *OAuthServer) setupOAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/oauth/introspect", s.oauthHandler.ServeTokenIntrospection)
 }
 
-func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) error {
-	// Create MCP server and register tools.
+func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
 	mcpSrv := mcppkg.NewMCPServer(s.process)
 
-	var httpServer http.Handler
-	if config.DisableStreaming {
-		httpServer = mcpserver.NewStreamableHTTPServer(mcpSrv,
-			mcpserver.WithEndpointPath("/mcp"),
-			mcpserver.WithDisableStreaming(true),
-		)
-	} else {
-		httpServer = mcpserver.NewStreamableHTTPServer(mcpSrv,
-			mcpserver.WithEndpointPath("/mcp"),
-		)
+	opts := []mcpserver.StreamableHTTPOption{
+		mcpserver.WithEndpointPath("/mcp"),
 	}
+	if config.DisableStreaming {
+		opts = append(opts, mcpserver.WithDisableStreaming(true))
+	}
+	httpServer := mcpserver.NewStreamableHTTPServer(mcpSrv, opts...)
 
-	// Wrap MCP endpoint with OAuth token validation middleware.
 	mux.Handle("/mcp", s.oauthHandler.ValidateToken(httpServer))
-
-	return nil
 }
 
-// createOAuthServer creates an OAuth server using the mcp-oauth library.
 func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 	var logger *slog.Logger
 	if config.DebugMode {
@@ -386,7 +372,6 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 	return srv, nil
 }
 
-// createHTTPClientWithCA creates an HTTP client that trusts the CA in the specified file.
 func createHTTPClientWithCA(caFile string) (*http.Client, error) {
 	caCert, err := os.ReadFile(caFile) //#nosec G304 -- operator-provided config
 	if err != nil {
@@ -417,8 +402,8 @@ func createHTTPClientWithCA(caFile string) (*http.Client, error) {
 	}, nil
 }
 
-// ValidateHTTPSRequirement ensures OAuth 2.1 HTTPS compliance.
-// Allows HTTP only for loopback addresses (localhost, 127.0.0.1, ::1).
+// ValidateHTTPSRequirement enforces OAuth 2.1 HTTPS requirements.
+// HTTP is permitted only for loopback addresses (localhost, 127.0.0.1, ::1).
 func ValidateHTTPSRequirement(baseURL string) error {
 	if baseURL == "" {
 		return fmt.Errorf("base URL cannot be empty")

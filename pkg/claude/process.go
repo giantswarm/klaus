@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Process manages a Claude CLI subprocess.
+// Process manages a Claude CLI subprocess lifecycle and streams its output.
 type Process struct {
 	opts Options
 
@@ -26,7 +26,8 @@ type Process struct {
 	done chan struct{}
 }
 
-// NewProcess creates a new Claude process manager with the given options.
+// NewProcess returns a Process ready to run. The Done channel is pre-closed
+// to indicate no subprocess is active.
 func NewProcess(opts Options) *Process {
 	done := make(chan struct{})
 	close(done) // Pre-closed: "not running" == "already done".
@@ -37,10 +38,8 @@ func NewProcess(opts Options) *Process {
 	}
 }
 
-// Run sends a prompt to Claude in one-shot mode and streams results back.
-// It spawns a new claude subprocess for each invocation.
-// The returned channel receives all stream-json messages and is closed when
-// the process completes.
+// Run spawns a claude subprocess for the given prompt and returns a channel
+// of stream-json messages. The channel is closed when the process exits.
 func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage, error) {
 	p.mu.Lock()
 	if p.status == ProcessStatusBusy {
@@ -57,7 +56,7 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	p.mu.Unlock()
 
 	args := p.opts.args()
-	args = append(args, prompt)
+	args = append(args, "--", prompt)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	if p.opts.WorkDir != "" {
@@ -88,8 +87,14 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 
 	out := make(chan StreamMessage, 100)
 
+	// Use a WaitGroup to ensure both pipe readers finish before cmd.Wait(),
+	// avoiding potential data loss from premature pipe closure.
+	var pipeWg sync.WaitGroup
+	pipeWg.Add(2)
+
 	// Read stderr in background for logging.
 	go func() {
+		defer pipeWg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			log.Printf("[claude stderr] %s", scanner.Text())
@@ -102,7 +107,8 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	go func() {
 		defer close(out)
 		defer func() {
-			// Wait for process to finish.
+			// Ensure both pipe readers are fully drained before Wait.
+			pipeWg.Wait()
 			waitErr := cmd.Wait()
 
 			p.mu.Lock()
@@ -118,7 +124,6 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 		}()
 
 		scanner := bufio.NewScanner(stdout)
-		// Claude can produce long lines; increase buffer.
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 		for scanner.Scan() {
@@ -133,7 +138,6 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 				continue
 			}
 
-			// Track session state.
 			p.mu.Lock()
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
@@ -149,14 +153,15 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 		if scanErr := scanner.Err(); scanErr != nil {
 			log.Printf("[claude] stdout scanner error: %v", scanErr)
 		}
+
+		pipeWg.Done()
 	}()
 
 	return out, nil
 }
 
-// RunSync sends a prompt and collects the full response synchronously.
-// It returns the final result text and any messages received during execution.
-// It respects context cancellation and will return early if the context is done.
+// RunSync runs a prompt and blocks until completion, returning the result text
+// and all messages. It respects context cancellation.
 func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamMessage, error) {
 	ch, err := p.Run(ctx, prompt)
 	if err != nil {
@@ -166,15 +171,15 @@ func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamM
 	var messages []StreamMessage
 	var resultText string
 
+loop:
 	for {
 		select {
 		case <-ctx.Done():
-			// Stop the subprocess on context cancellation.
 			_ = p.Stop()
 			return "", messages, ctx.Err()
 		case msg, ok := <-ch:
 			if !ok {
-				goto done
+				break loop
 			}
 			messages = append(messages, msg)
 			if msg.Type == MessageTypeResult {
@@ -183,7 +188,6 @@ func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamM
 		}
 	}
 
-done:
 	if resultText == "" {
 		// Collect text from assistant messages as fallback.
 		for _, msg := range messages {
@@ -196,7 +200,7 @@ done:
 	return resultText, messages, nil
 }
 
-// Stop terminates the running Claude subprocess gracefully.
+// Stop sends SIGTERM and waits up to 10s before SIGKILL.
 func (p *Process) Stop() error {
 	p.mu.Lock()
 	cmd := p.cmd
@@ -225,7 +229,6 @@ func (p *Process) Stop() error {
 	}
 }
 
-// Status returns the current process status information.
 func (p *Process) Status() StatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -238,14 +241,13 @@ func (p *Process) Status() StatusInfo {
 	}
 }
 
-// Done returns a channel that is closed when the current run completes.
+// Done returns a channel closed when the current run completes.
 func (p *Process) Done() <-chan struct{} {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.done
 }
 
-// MarshalStatus returns the status as JSON bytes.
 func (p *Process) MarshalStatus() ([]byte, error) {
 	return json.Marshal(p.Status())
 }

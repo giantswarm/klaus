@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -200,26 +201,20 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		port = "8080"
 	}
 
-	addr := ":" + port
-
 	// Wait for interrupt signal for graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	if enableOAuth {
-		return runWithOAuth(process, addr, oauthConfig, quit)
+		return runWithOAuth(process, port, oauthConfig, quit)
 	}
-	return runWithoutOAuth(process, addr, quit)
+	return runWithoutOAuth(process, port, quit)
 }
 
-// runWithOAuth starts the server with OAuth 2.1 authentication.
-func runWithOAuth(process *claude.Process, addr string, config server.OAuthConfig, quit chan os.Signal) error {
-	// Validate OAuth configuration.
+func runWithOAuth(process *claude.Process, port string, config server.OAuthConfig, quit chan os.Signal) error {
+	addr := ":" + port
 	if config.BaseURL == "" {
 		return fmt.Errorf("--oauth-base-url is required when --enable-oauth is set")
-	}
-	if err := server.ValidateHTTPSRequirement(config.BaseURL); err != nil {
-		return err
 	}
 
 	// Validate TLS configuration.
@@ -279,7 +274,7 @@ func runWithOAuth(process *claude.Process, addr string, config server.OAuthConfi
 	serverDone := make(chan error, 1)
 	go func() {
 		defer close(serverDone)
-		if err := oauthSrv.Start(addr, config); err != nil && err != http.ErrServerClosed {
+		if err := oauthSrv.Start(addr, config); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverDone <- err
 		}
 	}()
@@ -309,20 +304,13 @@ func runWithOAuth(process *claude.Process, addr string, config server.OAuthConfi
 	return nil
 }
 
-// runWithoutOAuth starts the server without OAuth.
-func runWithoutOAuth(process *claude.Process, addr string, quit chan os.Signal) error {
-	// Derive port from addr for the server.New call.
-	port := addr
-	if len(port) > 0 && port[0] == ':' {
-		port = port[1:]
-	}
-
+func runWithoutOAuth(process *claude.Process, port string, quit chan os.Signal) error {
 	srv := server.New(process, port)
 
 	serverDone := make(chan error, 1)
 	go func() {
 		defer close(serverDone)
-		if err := srv.Start(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverDone <- err
 		}
 	}()

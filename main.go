@@ -4,13 +4,9 @@ import (
 	"github.com/giantswarm/klaus/cmd"
 )
 
-// version will be set by goreleaser during build.
-var version = "dev"
+var version = "dev" // set by goreleaser
 
 func main() {
-	// Set the version from build-time variable.
 	cmd.SetVersion(version)
-
-	// Execute the root command.
 	cmd.Execute()
 }

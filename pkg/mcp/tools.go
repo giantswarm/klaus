@@ -12,7 +12,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// RegisterTools registers all Klaus MCP tools on the given server.
 func RegisterTools(s *server.MCPServer, process *claudepkg.Process) {
 	s.AddTools(
 		promptTool(process),
@@ -21,7 +20,6 @@ func RegisterTools(s *server.MCPServer, process *claudepkg.Process) {
 	)
 }
 
-// promptTool creates the "prompt" tool that sends a task to the Claude instance.
 func promptTool(process *claudepkg.Process) server.ServerTool {
 	tool := mcp.NewTool("prompt",
 		mcp.WithDescription("Send a prompt to the Claude Code agent and receive the response. "+
@@ -76,7 +74,6 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 	return server.ServerTool{Tool: tool, Handler: handler}
 }
 
-// statusTool creates the "status" tool that returns the agent's current status.
 func statusTool(process *claudepkg.Process) server.ServerTool {
 	tool := mcp.NewTool("status",
 		mcp.WithDescription("Get the current status of the Claude Code agent (starting, idle, busy, stopped, error)"),
@@ -93,7 +90,6 @@ func statusTool(process *claudepkg.Process) server.ServerTool {
 	return server.ServerTool{Tool: tool, Handler: handler}
 }
 
-// stopTool creates the "stop" tool that aborts the current Claude operation.
 func stopTool(process *claudepkg.Process) server.ServerTool {
 	tool := mcp.NewTool("stop",
 		mcp.WithDescription("Stop the currently running Claude Code agent task"),
