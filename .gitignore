@@ -1,5 +1,6 @@
 # Binaries
-klaus
+/klaus
+/klaus-*
 *.exe
 *.exe~
 *.dll
@@ -11,6 +12,8 @@ klaus
 
 # Output of go coverage
 *.out
+coverage.txt
+coverage.html
 
 # Go workspace
 go.work
@@ -18,6 +21,7 @@ go.work.sum
 
 # Build artifacts
 /build/
+dist/
 
 # IDE
 .idea/
@@ -28,3 +32,8 @@ go.work.sum
 # OS
 .DS_Store
 Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os/exec"
 	"sync"
@@ -19,23 +18,22 @@ type Process struct {
 
 	mu        sync.RWMutex
 	cmd       *exec.Cmd
-	stdin     io.WriteCloser
 	status    ProcessStatus
 	sessionID string
 	lastError string
 	totalCost float64
 
-	messages chan StreamMessage
-	done     chan struct{}
+	done chan struct{}
 }
 
 // NewProcess creates a new Claude process manager with the given options.
 func NewProcess(opts Options) *Process {
+	done := make(chan struct{})
+	close(done) // Pre-closed: "not running" == "already done".
 	return &Process{
-		opts:     opts,
-		status:   ProcessStatusStopped,
-		messages: make(chan StreamMessage, 100),
-		done:     make(chan struct{}),
+		opts:   opts,
+		status: ProcessStatusIdle,
+		done:   done,
 	}
 }
 
@@ -51,6 +49,11 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+
+	// Create a new done channel for this run while holding the lock,
+	// ensuring no race between concurrent callers.
+	done := make(chan struct{})
+	p.done = done
 	p.mu.Unlock()
 
 	args := p.opts.args()
@@ -81,7 +84,6 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	p.mu.Lock()
 	p.cmd = cmd
 	p.status = ProcessStatusBusy
-	p.done = make(chan struct{})
 	p.mu.Unlock()
 
 	out := make(chan StreamMessage, 100)
@@ -95,6 +97,8 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}()
 
 	// Read stdout stream-json messages.
+	// Use the local done variable captured at creation time so that
+	// closing it cannot race with a subsequent Run call.
 	go func() {
 		defer close(out)
 		defer func() {
@@ -109,7 +113,7 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 			} else if p.status == ProcessStatusBusy {
 				p.status = ProcessStatusIdle
 			}
-			close(p.done)
+			close(done)
 			p.mu.Unlock()
 		}()
 
@@ -152,6 +156,7 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 
 // RunSync sends a prompt and collects the full response synchronously.
 // It returns the final result text and any messages received during execution.
+// It respects context cancellation and will return early if the context is done.
 func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamMessage, error) {
 	ch, err := p.Run(ctx, prompt)
 	if err != nil {
@@ -161,13 +166,24 @@ func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamM
 	var messages []StreamMessage
 	var resultText string
 
-	for msg := range ch {
-		messages = append(messages, msg)
-		if msg.Type == MessageTypeResult {
-			resultText = msg.Result
+	for {
+		select {
+		case <-ctx.Done():
+			// Stop the subprocess on context cancellation.
+			_ = p.Stop()
+			return "", messages, ctx.Err()
+		case msg, ok := <-ch:
+			if !ok {
+				goto done
+			}
+			messages = append(messages, msg)
+			if msg.Type == MessageTypeResult {
+				resultText = msg.Result
+			}
 		}
 	}
 
+done:
 	if resultText == "" {
 		// Collect text from assistant messages as fallback.
 		for _, msg := range messages {
@@ -194,7 +210,7 @@ func (p *Process) Stop() error {
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		// Process may have already exited.
+		log.Printf("[claude] SIGTERM failed (process may have already exited): %v", err)
 		return nil
 	}
 
@@ -215,10 +231,10 @@ func (p *Process) Status() StatusInfo {
 	defer p.mu.RUnlock()
 
 	return StatusInfo{
-		Status:    p.status,
-		SessionID: p.sessionID,
-		Error:     p.lastError,
-		TotalCost: p.totalCost,
+		Status:       p.status,
+		SessionID:    p.sessionID,
+		ErrorMessage: p.lastError,
+		TotalCost:    p.totalCost,
 	}
 }
 

@@ -10,17 +10,22 @@ const (
 	MessageTypeSystem    MessageType = "system"
 	MessageTypeAssistant MessageType = "assistant"
 	MessageTypeResult    MessageType = "result"
+)
 
+// MessageSubtype identifies the subtype of an assistant message.
+type MessageSubtype string
+
+const (
 	// Subtypes within assistant messages.
-	SubtypeText    = "text"
-	SubtypeToolUse = "tool_use"
+	SubtypeText    MessageSubtype = "text"
+	SubtypeToolUse MessageSubtype = "tool_use"
 )
 
 // StreamMessage is the top-level envelope for all stream-json messages
 // emitted by the Claude CLI on stdout.
 type StreamMessage struct {
-	Type    MessageType     `json:"type"`
-	Subtype string          `json:"subtype,omitempty"`
+	Type    MessageType    `json:"type"`
+	Subtype MessageSubtype `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 
 	// Fields present on "system" messages.
@@ -71,8 +76,8 @@ const (
 
 // StatusInfo provides detailed status information about the Claude process.
 type StatusInfo struct {
-	Status    ProcessStatus `json:"status"`
-	SessionID string        `json:"session_id,omitempty"`
-	Error     string        `json:"error,omitempty"`
-	TotalCost float64       `json:"total_cost_usd,omitempty"`
+	Status       ProcessStatus `json:"status"`
+	SessionID    string        `json:"session_id,omitempty"`
+	ErrorMessage string        `json:"error,omitempty"`
+	TotalCost    float64       `json:"total_cost_usd,omitempty"`
 }

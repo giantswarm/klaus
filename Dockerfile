@@ -9,9 +9,11 @@ COPY . .
 ARG VERSION=dev
 ARG BUILDTIMESTAMP=unknown
 ARG GITSHA=unknown
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags "-w -extldflags '-static' \
-    -X 'github.com/giantswarm/klaus/pkg/project.version=${VERSION}' \
+    -X 'main.version=${VERSION}' \
     -X 'github.com/giantswarm/klaus/pkg/project.buildTimestamp=${BUILDTIMESTAMP}' \
     -X 'github.com/giantswarm/klaus/pkg/project.gitSHA=${GITSHA}'" \
     -o klaus .

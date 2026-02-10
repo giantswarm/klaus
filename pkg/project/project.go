@@ -24,6 +24,14 @@ func GitSHA() string {
 	return gitSHA
 }
 
+// SetVersion overrides the version. This is used by the cmd package to propagate
+// the version from main when set via goreleaser ldflags on main.version.
+func SetVersion(v string) {
+	if v != "" {
+		version = v
+	}
+}
+
 // Version returns the application version set at compile time.
 func Version() string {
 	return version

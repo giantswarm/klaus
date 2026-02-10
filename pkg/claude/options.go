@@ -1,7 +1,7 @@
 package claude
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -69,7 +69,7 @@ func (o Options) args() []string {
 	}
 
 	if o.MaxTurns > 0 {
-		args = append(args, "--max-turns", intToStr(o.MaxTurns))
+		args = append(args, "--max-turns", strconv.Itoa(o.MaxTurns))
 	}
 
 	if o.PermissionMode != "" {
@@ -81,20 +81,12 @@ func (o Options) args() []string {
 	}
 
 	if len(o.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", joinStrings(o.AllowedTools))
+		args = append(args, "--allowedTools", strings.Join(o.AllowedTools, ","))
 	}
 
 	if len(o.DisallowedTools) > 0 {
-		args = append(args, "--disallowedTools", joinStrings(o.DisallowedTools))
+		args = append(args, "--disallowedTools", strings.Join(o.DisallowedTools, ","))
 	}
 
 	return args
-}
-
-func intToStr(i int) string {
-	return fmt.Sprintf("%d", i)
-}
-
-func joinStrings(s []string) string {
-	return strings.Join(s, ",")
 }
