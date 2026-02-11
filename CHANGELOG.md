@@ -7,8 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Persistent mode subprocess lifetime is now decoupled from request contexts**: `PersistentProcess` reader/watchdog now use an internal lifecycle context so cancelling a single MCP request does not terminate persistent stream handling.
+- **`/readyz` now reflects Claude process health**: readiness returns `503` when the process is `starting`, `stopped`, or `error`, and `200` otherwise.
+- **Negative `CLAUDE_MAX_BUDGET_USD` and `CLAUDE_MAX_TURNS` now fail fast** with clear startup errors instead of being silently ignored.
+- **PersistentProcess now warns about ignored per-invocation overrides** instead of silently discarding them. `RunWithOptions` logs which fields cannot be applied in persistent mode.
+- **OAuth `/status` endpoint now reports correct mode** (was hardcoded to `single-shot` even when running in persistent mode).
+- **Fixed potential goroutine leak** in `Process.Run` when context is cancelled: the stdout-reading goroutine now uses a cancellable select on channel sends, preventing permanent blocking when the consumer stops reading.
+- **`OAuthServer.Shutdown` now attempts both shutdowns**: previously returned early if OAuth server shutdown failed, leaving the HTTP server running.
+- **Invalid `CLAUDE_MAX_BUDGET_USD` and `CLAUDE_MAX_TURNS` now cause startup errors** instead of being silently ignored. Previously, `CLAUDE_MAX_BUDGET_USD=abc` would start the server with unlimited spend.
+- **MCP progress counter no longer has gaps**: `progressCount` is only incremented for messages that actually produce a progress notification, giving clients a sequential 1, 2, 3... series.
+- **Eliminated major DRY violation**: `PersistentProcess.persistentArgs()` duplicated all 100+ lines of `Options.args()`. Refactored into shared `baseArgs()` with mode-specific `args()` and `PersistentArgs()` methods on `Options`.
+- **Removed dead `DebugMode` config** from `OAuthConfig` (was hardcoded to `false` with no flag or env var to set it).
+- **Extracted shared `CollectResultText` and `Truncate` functions** eliminating triplicated result-text fallback logic across `tools.go`, `process.go`, and `persistent.go`.
+- PersistentProcess now passes `--replay-user-messages` for reliable request/response synchronization in stream-json mode.
+- PersistentProcess now includes a background watchdog that automatically restarts the subprocess on unexpected exit, with a 2-second backoff to prevent tight restart loops.
+- MCP `prompt` tool now validates per-invocation `effort` overrides against known valid levels, returning a clear error for invalid values instead of passing them through to the CLI.
+- Helm `values.schema.json` updated with all new configuration options (strictMcpConfig, maxBudgetUSD, effort, fallbackModel, etc.) for proper CI validation.
+- Permission mode default changed from invalid `accept-all` to `bypassPermissions` with `--dangerously-skip-permissions` flag.
+- Permission mode is now validated at startup against known valid values.
+- Effort level validated at startup against known values (`low`, `medium`, `high`).
+- `Truncate` now operates on runes instead of bytes, preventing invalid UTF-8 on multi-byte strings.
+- MCP tool handler now returns errors for invalid parameter types instead of silently ignoring them.
+- `allowedTools` / `disallowedTools` Helm values are now wired to env vars and deployment template.
+- Partial message streaming now configurable via `CLAUDE_INCLUDE_PARTIAL_MESSAGES` env var.
+- Helm: `includePartialMessages` now exposed in `values.yaml` and wired to `CLAUDE_INCLUDE_PARTIAL_MESSAGES` in deployment template.
+- Helm: `noSessionPersistence` and `strictMcpConfig` env vars are now always emitted (not only when truthy), so setting them to `false` via Helm overrides actually takes effect.
+- `ForkSession` added to `RunOptions` so MCP clients can fork sessions per-invocation via `fork_session` parameter on the `prompt` tool.
+
 ### Added
 
 - Initial project structure with Go app and Helm chart.
+- **Bidirectional stream-json mode** (`CLAUDE_PERSISTENT_MODE=true`): Maintains a single long-running Claude subprocess using `--input-format stream-json` for multi-turn conversations with conversation continuity, lower latency, and cost efficiency.
+- `Prompter` interface abstracting over single-shot (`Process`) and persistent (`PersistentProcess`) modes, allowing seamless switching via configuration.
+- **MCP progress notifications**: The `prompt` tool now streams real-time `notifications/progress` messages to MCP clients during task execution, reporting tool usage, assistant output, and task completion.
+- MCP `prompt` tool: added `resume` and `continue` parameters for full session management from MCP clients.
+- Budget control via `--max-budget-usd` / `CLAUDE_MAX_BUDGET_USD` to cap per-invocation spending.
+- Effort level via `--effort` / `CLAUDE_EFFORT` to control quality vs. speed tradeoff.
+- Fallback model via `--fallback-model` / `CLAUDE_FALLBACK_MODEL` for resilience when primary model is overloaded.
+- Strict MCP config via `--strict-mcp-config` / `CLAUDE_STRICT_MCP_CONFIG` to prevent loading untrusted MCP servers.
+- Session management support: `--session-id`, `--resume`, `--continue`, `--fork-session`, `--no-session-persistence`.
+- Custom named agents via `--agents` / `--agent` / `CLAUDE_AGENTS` / `CLAUDE_ACTIVE_AGENT`.
+- JSON Schema structured output via `--json-schema` / `CLAUDE_JSON_SCHEMA`.
+- Partial message streaming via `--include-partial-messages` / `CLAUDE_INCLUDE_PARTIAL_MESSAGES`.
+- Settings file support via `--settings` / `CLAUDE_SETTINGS_FILE` and `--setting-sources` / `CLAUDE_SETTING_SOURCES`.
+- Built-in tool set control via `--tools` / `CLAUDE_TOOLS`.
+- Tool access control via `CLAUDE_ALLOWED_TOOLS` and `CLAUDE_DISALLOWED_TOOLS`.
+- Plugin directory support via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`.
+- Per-invocation RunOptions allowing MCP clients to override session_id, resume, continue, agent, json_schema, max_budget_usd, effort, and fork_session per prompt.
+- Enhanced status endpoint with message count, tool call count, last message, last tool name, and operating mode for progress monitoring.
+- Helm chart values for all new Claude Code configuration options including `persistentMode`.
+- Comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
 
 [Unreleased]: https://github.com/giantswarm/klaus/tree/main

@@ -22,8 +22,8 @@ const (
 // StreamMessage is the top-level envelope for all stream-json messages
 // emitted by the Claude CLI on stdout.
 type StreamMessage struct {
-	Type    MessageType    `json:"type"`
-	Subtype MessageSubtype `json:"subtype,omitempty"`
+	Type    MessageType     `json:"type"`
+	Subtype MessageSubtype  `json:"subtype,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
 
 	// Fields present on "system" messages.
@@ -72,8 +72,42 @@ const (
 )
 
 type StatusInfo struct {
-	Status       ProcessStatus `json:"status"`
-	SessionID    string        `json:"session_id,omitempty"`
-	ErrorMessage string        `json:"error,omitempty"`
-	TotalCost    float64       `json:"total_cost_usd,omitempty"`
+	Status        ProcessStatus `json:"status"`
+	SessionID     string        `json:"session_id,omitempty"`
+	ErrorMessage  string        `json:"error,omitempty"`
+	TotalCost     float64       `json:"total_cost_usd,omitempty"`
+	MessageCount  int           `json:"message_count,omitempty"`
+	ToolCallCount int           `json:"tool_call_count,omitempty"`
+	LastMessage   string        `json:"last_message,omitempty"`
+	LastToolName  string        `json:"last_tool_name,omitempty"`
+}
+
+// Truncate returns s truncated to maxLen runes with "..." appended if truncated.
+// It operates on runes to ensure clean truncation of multi-byte UTF-8 strings.
+func Truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+// CollectResultText extracts the result text from a completed set of stream messages.
+// It returns the text from the last result message, falling back to concatenated
+// assistant text messages if no result message contains text.
+func CollectResultText(messages []StreamMessage) string {
+	// Try to get result from the last result message.
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Type == MessageTypeResult && messages[i].Result != "" {
+			return messages[i].Result
+		}
+	}
+	// Fallback: concatenate assistant text messages.
+	var text string
+	for _, msg := range messages {
+		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
+			text += msg.Text
+		}
+	}
+	return text
 }

@@ -12,16 +12,17 @@ port: 8080
 
 # Claude Code agent configuration.
 claude:
-  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514").
+  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
   # Empty string uses the Claude CLI default.
   model: ""
   # maxTurns limits the number of agentic turns per prompt.
   # 0 means no limit.
   maxTurns: 0
   # permissionMode controls how Claude handles tool permissions.
-  # "accept-all" is required for headless/autonomous operation.
-  permissionMode: "accept-all"
-  # systemPrompt is the system prompt text for the Claude agent.
+  # Valid values: "bypassPermissions", "acceptEdits", "dontAsk", "plan", "delegate", "default".
+  # "bypassPermissions" is required for headless/autonomous operation.
+  permissionMode: "bypassPermissions"
+  # systemPrompt overrides the default system prompt entirely.
   # Set via ConfigMap when non-empty.
   systemPrompt: ""
   # appendSystemPrompt is appended to the default system prompt.
@@ -29,6 +30,72 @@ claude:
   # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
   # Mounted as a file in the container.
   mcpConfig: ""
+  # strictMcpConfig when true only uses MCP servers from mcpConfig,
+  # ignoring user, project, and local MCP configurations.
+  # Recommended for production security.
+  strictMcpConfig: true
+
+  # -- Operational controls --
+  # maxBudgetUSD caps the maximum dollar spend per invocation; 0 means no limit.
+  maxBudgetUSD: 0
+  # effort controls the effort level: "low", "medium", "high"; empty means default.
+  effort: ""
+  # fallbackModel specifies a model to use when the primary is overloaded.
+  fallbackModel: ""
+
+  # -- Structured output --
+  # jsonSchema constrains the output to conform to a JSON Schema (JSON string).
+  jsonSchema: ""
+
+  # -- Settings --
+  # settingsFile is a path to a settings JSON file inside the container.
+  settingsFile: ""
+  # settingSources controls which setting sources are loaded (comma-separated: "user,project,local").
+  # Empty string means only explicit configuration is used.
+  settingSources: ""
+
+  # -- Tool control --
+  # tools controls the base set of built-in tools available.
+  # Empty list means all default tools. Use ["Bash","Edit","Read"] to restrict.
+  tools: []
+  # allowedTools restricts tool access with patterns (e.g. ["Bash(git:*)", "Edit"]).
+  allowedTools: []
+  # disallowedTools explicitly blocks specific tools (e.g. ["Bash(rm:*)"]).
+  disallowedTools: []
+
+  # -- Plugin support --
+  # pluginDirs are directories to load plugins from.
+  pluginDirs: []
+
+  # -- Named agents --
+  # agents defines named agent personas with descriptions and prompts.
+  # Example:
+  #   agents:
+  #     reviewer:
+  #       description: "Reviews code changes"
+  #       prompt: "You are a senior code reviewer..."
+  #     deployer:
+  #       description: "Handles deployments"
+  #       prompt: "You are a deployment specialist..."
+  agents: {}
+  # activeAgent selects which named agent to use by default.
+  activeAgent: ""
+
+  # -- Streaming --
+  # includePartialMessages emits partial message chunks during streaming.
+  # Enables progress tracking with message count, tool call count, and last activity.
+  includePartialMessages: false
+
+  # -- Process mode --
+  # persistentMode enables bidirectional stream-json mode where a single
+  # long-running Claude subprocess handles multiple prompts with conversation
+  # continuity. When false (default), a new subprocess is spawned per prompt.
+  persistentMode: false
+
+  # -- Session management --
+  # noSessionPersistence disables saving sessions to disk.
+  # Recommended for ephemeral container workloads.
+  noSessionPersistence: true
 
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:

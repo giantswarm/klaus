@@ -8,7 +8,7 @@ import (
 )
 
 // NewServer returns a StreamableHTTPServer that serves MCP at /mcp.
-func NewServer(process *claudepkg.Process) *server.StreamableHTTPServer {
+func NewServer(process claudepkg.Prompter) *server.StreamableHTTPServer {
 	mcpServer := NewMCPServer(process)
 
 	httpServer := server.NewStreamableHTTPServer(mcpServer,
@@ -20,7 +20,7 @@ func NewServer(process *claudepkg.Process) *server.StreamableHTTPServer {
 
 // NewMCPServer returns the raw MCPServer with tools registered, for use
 // when wrapping with custom middleware (e.g. OAuth).
-func NewMCPServer(process *claudepkg.Process) *server.MCPServer {
+func NewMCPServer(process claudepkg.Prompter) *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		project.Name,
 		project.Version(),

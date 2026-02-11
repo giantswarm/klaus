@@ -11,11 +11,12 @@ import (
 )
 
 type statusResponse struct {
-	Name    string              `json:"name"`
-	Version string              `json:"version"`
-	Build   string              `json:"build"`
-	Commit  string              `json:"commit"`
+	Name    string               `json:"name"`
+	Version string               `json:"version"`
+	Build   string               `json:"build"`
+	Commit  string               `json:"commit"`
 	Agent   claudepkg.StatusInfo `json:"agent"`
+	Mode    string               `json:"mode"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -23,9 +24,21 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
-func handleReadyz(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
+// handleReadyz reports whether the Claude process is ready to accept traffic.
+// It returns 503 when the process is starting, stopped, or in an error state.
+func handleReadyz(process claudepkg.Prompter) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		status := process.Status().Status
+		switch status {
+		case claudepkg.ProcessStatusStarting, claudepkg.ProcessStatusError, claudepkg.ProcessStatusStopped:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, "not ready")
+			return
+		default:
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "ok")
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +51,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 
-func handleStatus(process *claudepkg.Process) http.HandlerFunc {
+func handleStatus(process claudepkg.Prompter, mode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := statusResponse{
 			Name:    project.Name,
@@ -46,6 +59,7 @@ func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 			Build:   project.BuildTimestamp(),
 			Commit:  project.GitSHA(),
 			Agent:   process.Status(),
+			Mode:    mode,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -55,9 +69,9 @@ func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 	}
 }
 
-func registerOperationalRoutes(mux *http.ServeMux, process *claudepkg.Process) {
+func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string) {
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
-	mux.HandleFunc("/status", handleStatus(process))
+	mux.HandleFunc("/readyz", handleReadyz(process))
+	mux.HandleFunc("/status", handleStatus(process, mode))
 	mux.HandleFunc("/", handleRoot)
 }
