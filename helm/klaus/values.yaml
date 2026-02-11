@@ -81,6 +81,11 @@ claude:
   # activeAgent selects which named agent to use by default.
   activeAgent: ""
 
+  # -- Streaming --
+  # includePartialMessages emits partial message chunks during streaming.
+  # Enables progress tracking with message count, tool call count, and last activity.
+  includePartialMessages: false
+
   # -- Session management --
   # noSessionPersistence disables saving sessions to disk.
   # Recommended for ephemeral container workloads.

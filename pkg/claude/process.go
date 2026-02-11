@@ -21,6 +21,8 @@ type RunOptions struct {
 	Resume string
 	// ContinueSession overrides Options.ContinueSession for this run.
 	ContinueSession bool
+	// ForkSession overrides Options.ForkSession for this run.
+	ForkSession bool
 	// ActiveAgent overrides Options.ActiveAgent for this run.
 	ActiveAgent string
 	// JSONSchema overrides Options.JSONSchema for this run.
@@ -75,6 +77,9 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.ContinueSession {
 		opts.ContinueSession = true
+	}
+	if ro.ForkSession {
+		opts.ForkSession = true
 	}
 	if ro.ActiveAgent != "" {
 		opts.ActiveAgent = ro.ActiveAgent

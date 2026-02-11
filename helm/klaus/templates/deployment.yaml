@@ -61,10 +61,8 @@ spec:
             - name: CLAUDE_MCP_CONFIG
               value: /etc/klaus/mcp-config.json
             {{- end }}
-            {{- if .Values.claude.strictMcpConfig }}
             - name: CLAUDE_STRICT_MCP_CONFIG
-              value: "true"
-            {{- end }}
+              value: {{ .Values.claude.strictMcpConfig | quote }}
             {{- if .Values.workspace.enabled }}
             - name: CLAUDE_WORKSPACE
               value: /workspace
@@ -136,11 +134,12 @@ spec:
             - name: CLAUDE_ACTIVE_AGENT
               value: {{ .Values.claude.activeAgent | quote }}
             {{- end }}
+            # Streaming
+            - name: CLAUDE_INCLUDE_PARTIAL_MESSAGES
+              value: {{ .Values.claude.includePartialMessages | quote }}
             # Session persistence
-            {{- if .Values.claude.noSessionPersistence }}
             - name: CLAUDE_NO_SESSION_PERSISTENCE
-              value: "true"
-            {{- end }}
+              value: {{ .Values.claude.noSessionPersistence | quote }}
           volumeMounts:
             {{- if .Values.claude.mcpConfig }}
             - name: mcp-config

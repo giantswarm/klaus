@@ -43,6 +43,9 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 		mcp.WithString("effort",
 			mcp.Description("Optional effort level: low, medium, or high"),
 		),
+		mcp.WithBoolean("fork_session",
+			mcp.Description("Optional: fork the session when resuming, creating a new session ID"),
+		),
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -86,6 +89,12 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			return mcp.NewToolResultError(err.Error()), nil
 		} else if v != "" {
 			runOpts.Effort = v
+		}
+
+		if v, err := optionalBool(request, "fork_session"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v {
+			runOpts.ForkSession = true
 		}
 
 		result, messages, err := process.RunSyncWithOptions(ctx, message, &runOpts)
@@ -173,6 +182,20 @@ func optionalString(request mcp.CallToolRequest, key string) (string, error) {
 		return "", fmt.Errorf("parameter %q must be a string", key)
 	}
 	return s, nil
+}
+
+// optionalBool extracts an optional boolean parameter from the request.
+func optionalBool(request mcp.CallToolRequest, key string) (bool, error) {
+	args := request.GetArguments()
+	v, ok := args[key]
+	if !ok || v == nil {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("parameter %q must be a boolean", key)
+	}
+	return b, nil
 }
 
 // optionalFloat extracts an optional float parameter from the request.

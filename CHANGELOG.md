@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `allowedTools` / `disallowedTools` Helm values are now wired to env vars and deployment template.
 - Partial message streaming now configurable via `CLAUDE_INCLUDE_PARTIAL_MESSAGES` env var.
 - Fixed indentation inconsistency in `OAuthConfig` struct literal.
+- Helm: `includePartialMessages` now exposed in `values.yaml` and wired to `CLAUDE_INCLUDE_PARTIAL_MESSAGES` in deployment template.
+- Helm: `noSessionPersistence` and `strictMcpConfig` env vars are now always emitted (not only when truthy), so setting them to `false` via Helm overrides actually takes effect.
+- `ForkSession` added to `RunOptions` so MCP clients can fork sessions per-invocation via `fork_session` parameter on the `prompt` tool.
 
 ### Added
 
