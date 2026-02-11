@@ -84,11 +84,14 @@ Configuration is primarily via environment variables:
   CLAUDE_SETTINGS_FILE       -- Path to settings JSON file
   CLAUDE_SETTING_SOURCES     -- Setting sources to load (user,project,local)
   CLAUDE_TOOLS               -- Comma-separated list of built-in tools
+  CLAUDE_ALLOWED_TOOLS       -- Comma-separated allowed tool patterns
+  CLAUDE_DISALLOWED_TOOLS    -- Comma-separated disallowed tool patterns
   CLAUDE_PLUGIN_DIRS         -- Comma-separated plugin directories
   CLAUDE_AGENTS              -- JSON object defining named agents
   CLAUDE_ACTIVE_AGENT        -- Default named agent to use
-  CLAUDE_NO_SESSION_PERSISTENCE -- Disable session persistence (true/false)
-  PORT                       -- HTTP server port (default: 8080)`,
+  CLAUDE_INCLUDE_PARTIAL_MESSAGES -- Emit partial message chunks (true/false)
+  CLAUDE_NO_SESSION_PERSISTENCE  -- Disable session persistence (true/false)
+  PORT                           -- HTTP server port (default: 8080)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load TLS paths from environment if not provided via flags.
 			loadEnvIfEmpty(&tlsCertFile, "TLS_CERT_FILE")
@@ -244,6 +247,12 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	if v := os.Getenv("CLAUDE_TOOLS"); v != "" {
 		opts.Tools = strings.Split(v, ",")
 	}
+	if v := os.Getenv("CLAUDE_ALLOWED_TOOLS"); v != "" {
+		opts.AllowedTools = strings.Split(v, ",")
+	}
+	if v := os.Getenv("CLAUDE_DISALLOWED_TOOLS"); v != "" {
+		opts.DisallowedTools = strings.Split(v, ",")
+	}
 
 	// Plugin directories.
 	if v := os.Getenv("CLAUDE_PLUGIN_DIRS"); v != "" {
@@ -263,13 +272,21 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		opts.ActiveAgent = v
 	}
 
+	// Streaming.
+	if v := os.Getenv("CLAUDE_INCLUDE_PARTIAL_MESSAGES"); v != "" {
+		opts.IncludePartialMessages = parseBool(v)
+	}
+
 	// Session persistence.
 	if v := os.Getenv("CLAUDE_NO_SESSION_PERSISTENCE"); v != "" {
 		opts.NoSessionPersistence = parseBool(v)
 	}
 
-	// Validate permission mode.
+	// Validate configuration.
 	if err := claude.ValidatePermissionMode(opts.PermissionMode); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	if err := claude.ValidateEffort(opts.Effort); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
 

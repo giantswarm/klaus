@@ -56,40 +56,39 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 		}
 
 		// Build per-run overrides from optional parameters.
-		runOpts := &claudepkg.RunOptions{}
-		hasOverrides := false
+		var runOpts claudepkg.RunOptions
 
-		if v, err := optionalString(request, "session_id"); err == nil && v != "" {
+		if v, err := optionalString(request, "session_id"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v != "" {
 			runOpts.SessionID = v
-			hasOverrides = true
 		}
 
-		if v, err := optionalString(request, "agent"); err == nil && v != "" {
+		if v, err := optionalString(request, "agent"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v != "" {
 			runOpts.ActiveAgent = v
-			hasOverrides = true
 		}
 
-		if v, err := optionalString(request, "json_schema"); err == nil && v != "" {
+		if v, err := optionalString(request, "json_schema"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v != "" {
 			runOpts.JSONSchema = v
-			hasOverrides = true
 		}
 
-		if v, err := optionalFloat(request, "max_budget_usd"); err == nil && v > 0 {
+		if v, err := optionalFloat(request, "max_budget_usd"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v > 0 {
 			runOpts.MaxBudgetUSD = v
-			hasOverrides = true
 		}
 
-		if v, err := optionalString(request, "effort"); err == nil && v != "" {
+		if v, err := optionalString(request, "effort"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v != "" {
 			runOpts.Effort = v
-			hasOverrides = true
 		}
 
-		var opts *claudepkg.RunOptions
-		if hasOverrides {
-			opts = runOpts
-		}
-
-		result, messages, err := process.RunSyncWithOptions(ctx, message, opts)
+		result, messages, err := process.RunSyncWithOptions(ctx, message, &runOpts)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
 		}

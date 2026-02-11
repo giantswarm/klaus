@@ -117,21 +117,26 @@ func TestProcess_MergedOpts(t *testing.T) {
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {
+		name   string
 		input  string
 		maxLen int
 		want   string
 	}{
-		{"hello", 10, "hello"},
-		{"hello world", 5, "hello..."},
-		{"", 5, ""},
-		{"abc", 3, "abc"},
-		{"abcd", 3, "abc..."},
+		{"short string", "hello", 10, "hello"},
+		{"exact length", "abc", 3, "abc"},
+		{"truncated", "hello world", 5, "hello..."},
+		{"empty", "", 5, ""},
+		{"one over", "abcd", 3, "abc..."},
+		{"multi-byte utf8 no truncate", "Hello \u4e16\u754c!", 9, "Hello \u4e16\u754c!"},
+		{"truncate multi-byte", "Hello \u4e16\u754c\u4eba\u6c11", 8, "Hello \u4e16\u754c..."},
 	}
 
 	for _, tt := range tests {
-		got := truncate(tt.input, tt.maxLen)
-		if got != tt.want {
-			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncate(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+			}
+		})
 	}
 }

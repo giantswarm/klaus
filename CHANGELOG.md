@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Permission mode default changed from invalid `accept-all` to `bypassPermissions` with `--dangerously-skip-permissions` flag.
 - Permission mode is now validated at startup against known valid values.
+- Effort level validated at startup against known values (`low`, `medium`, `high`).
+- `truncate` now operates on runes instead of bytes, preventing invalid UTF-8 on multi-byte strings.
+- MCP tool handler now returns errors for invalid parameter types instead of silently ignoring them.
+- `allowedTools` / `disallowedTools` Helm values are now wired to env vars and deployment template.
+- Partial message streaming now configurable via `CLAUDE_INCLUDE_PARTIAL_MESSAGES` env var.
+- Fixed indentation inconsistency in `OAuthConfig` struct literal.
 
 ### Added
 
@@ -22,9 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Session management support: `--session-id`, `--resume`, `--continue`, `--fork-session`, `--no-session-persistence`.
 - Custom named agents via `--agents` / `--agent` / `CLAUDE_AGENTS` / `CLAUDE_ACTIVE_AGENT`.
 - JSON Schema structured output via `--json-schema` / `CLAUDE_JSON_SCHEMA`.
-- Partial message streaming via `--include-partial-messages`.
+- Partial message streaming via `--include-partial-messages` / `CLAUDE_INCLUDE_PARTIAL_MESSAGES`.
 - Settings file support via `--settings` / `CLAUDE_SETTINGS_FILE` and `--setting-sources` / `CLAUDE_SETTING_SOURCES`.
 - Built-in tool set control via `--tools` / `CLAUDE_TOOLS`.
+- Tool access control via `CLAUDE_ALLOWED_TOOLS` and `CLAUDE_DISALLOWED_TOOLS`.
 - Plugin directory support via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`.
 - Per-invocation RunOptions allowing MCP clients to override session_id, agent, json_schema, max_budget_usd, and effort per prompt.
 - Enhanced status endpoint with message count, tool call count, last message, and last tool name for progress monitoring.

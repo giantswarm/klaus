@@ -111,6 +111,14 @@ spec:
             - name: CLAUDE_TOOLS
               value: {{ join "," .Values.claude.tools | quote }}
             {{- end }}
+            {{- if .Values.claude.allowedTools }}
+            - name: CLAUDE_ALLOWED_TOOLS
+              value: {{ join "," .Values.claude.allowedTools | quote }}
+            {{- end }}
+            {{- if .Values.claude.disallowedTools }}
+            - name: CLAUDE_DISALLOWED_TOOLS
+              value: {{ join "," .Values.claude.disallowedTools | quote }}
+            {{- end }}
             # Plugin directories
             {{- if .Values.claude.pluginDirs }}
             - name: CLAUDE_PLUGIN_DIRS

@@ -130,11 +130,13 @@ func TestArgs_BypassPermissionsAddsDangerousFlag(t *testing.T) {
 
 func TestArgs_NonBypassPermissionsDoesNotAddDangerousFlag(t *testing.T) {
 	for _, mode := range []string{"default", "acceptEdits", "dontAsk", "plan", "delegate"} {
-		opts := Options{PermissionMode: mode}
-		args := opts.args()
+		t.Run(mode, func(t *testing.T) {
+			opts := Options{PermissionMode: mode}
+			args := opts.args()
 
-		assertContainsSequence(t, args, "--permission-mode", mode)
-		assertNotContains(t, args, "--dangerously-skip-permissions")
+			assertContainsSequence(t, args, "--permission-mode", mode)
+			assertNotContains(t, args, "--dangerously-skip-permissions")
+		})
 	}
 }
 
@@ -178,6 +180,28 @@ func TestValidatePermissionMode(t *testing.T) {
 	for _, mode := range invalidModes {
 		if err := ValidatePermissionMode(mode); err == nil {
 			t.Errorf("expected mode %q to be invalid, but got no error", mode)
+		}
+	}
+}
+
+func TestValidateEffort(t *testing.T) {
+	// Empty string should be valid (uses default).
+	if err := ValidateEffort(""); err != nil {
+		t.Errorf("expected empty effort to be valid, got error: %v", err)
+	}
+
+	// Valid levels should not error.
+	for _, level := range ValidEffortLevels {
+		if err := ValidateEffort(level); err != nil {
+			t.Errorf("expected effort %q to be valid, got error: %v", level, err)
+		}
+	}
+
+	// Invalid levels should error.
+	invalidLevels := []string{"hig", "LOW", "Medium", "extreme", "auto"}
+	for _, level := range invalidLevels {
+		if err := ValidateEffort(level); err == nil {
+			t.Errorf("expected effort %q to be invalid, but got no error", level)
 		}
 	}
 }

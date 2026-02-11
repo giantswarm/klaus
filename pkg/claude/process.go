@@ -342,10 +342,11 @@ func (p *Process) setError(msg string) {
 	p.lastError = msg
 }
 
-// truncate returns s truncated to maxLen characters with "..." appended if truncated.
+// truncate returns s truncated to maxLen runes with "..." appended if truncated.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return string(runes[:maxLen]) + "..."
 }

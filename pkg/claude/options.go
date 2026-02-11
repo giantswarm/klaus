@@ -108,6 +108,27 @@ func ValidatePermissionMode(mode string) error {
 	return fmt.Errorf("invalid permission mode %q; valid modes: %s", mode, strings.Join(ValidPermissionModes, ", "))
 }
 
+// ValidEffortLevels lists all valid effort level values for Claude Code.
+var ValidEffortLevels = []string{
+	"low",
+	"medium",
+	"high",
+}
+
+// ValidateEffort checks whether the given effort level is valid.
+// An empty string is allowed (uses the CLI default).
+func ValidateEffort(effort string) error {
+	if effort == "" {
+		return nil
+	}
+	for _, valid := range ValidEffortLevels {
+		if effort == valid {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid effort level %q; valid levels: %s", effort, strings.Join(ValidEffortLevels, ", "))
+}
+
 // args builds the CLI argument list for the claude command.
 func (o Options) args() []string {
 	args := []string{
