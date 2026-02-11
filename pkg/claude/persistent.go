@@ -125,7 +125,9 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	processDone := make(chan struct{})
 	p.processDone = processDone
 
-	readerCtx, cancel := context.WithCancel(ctx)
+	// Persistent mode subprocess lifetime is managed explicitly via Stop(),
+	// not by any single request context.
+	readerCtx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
 	// Read stderr in background.
@@ -141,7 +143,7 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 
 	// Start the background watchdog that auto-restarts on unexpected exit.
 	if p.autoRestart {
-		p.startWatchdog(ctx, processDone)
+		p.startWatchdog(context.Background(), processDone)
 	}
 
 	log.Println("[claude] persistent subprocess started")
@@ -336,7 +338,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	if p.cmd == nil {
 		p.mu.Unlock()
 		// Auto-start if not yet started.
-		if err := p.Start(ctx); err != nil {
+		if err := p.Start(context.Background()); err != nil {
 			return nil, err
 		}
 		p.mu.Lock()

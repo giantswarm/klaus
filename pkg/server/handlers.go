@@ -24,12 +24,21 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
-// handleReadyz returns readiness status. Currently identical to healthz.
-// TODO: check Claude process health (e.g., not in error state) to properly
-// signal readiness to Kubernetes for load balancing.
-func handleReadyz(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
+// handleReadyz reports whether the Claude process is ready to accept traffic.
+// It returns 503 when the process is starting, stopped, or in an error state.
+func handleReadyz(process claudepkg.Prompter) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		status := process.Status().Status
+		switch status {
+		case claudepkg.ProcessStatusStarting, claudepkg.ProcessStatusError, claudepkg.ProcessStatusStopped:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, "not ready")
+			return
+		default:
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "ok")
+		}
+	}
 }
 
 func handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +71,7 @@ func handleStatus(process claudepkg.Prompter, mode string) http.HandlerFunc {
 
 func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string) {
 	mux.HandleFunc("/healthz", handleHealthz)
-	mux.HandleFunc("/readyz", handleReadyz)
+	mux.HandleFunc("/readyz", handleReadyz(process))
 	mux.HandleFunc("/status", handleStatus(process, mode))
 	mux.HandleFunc("/", handleRoot)
 }

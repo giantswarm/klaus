@@ -204,6 +204,9 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		if err != nil {
 			return fmt.Errorf("invalid CLAUDE_MAX_TURNS %q: %w", v, err)
 		}
+		if n < 0 {
+			return fmt.Errorf("invalid CLAUDE_MAX_TURNS %q: must be >= 0", v)
+		}
 		if n > 0 {
 			opts.MaxTurns = n
 		}
@@ -226,6 +229,9 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
 			return fmt.Errorf("invalid CLAUDE_MAX_BUDGET_USD %q: %w", v, err)
+		}
+		if f < 0 {
+			return fmt.Errorf("invalid CLAUDE_MAX_BUDGET_USD %q: must be >= 0", v)
 		}
 		if f > 0 {
 			opts.MaxBudgetUSD = f
