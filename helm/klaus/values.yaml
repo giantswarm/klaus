@@ -22,7 +22,7 @@ claude:
   # Valid values: "bypassPermissions", "acceptEdits", "dontAsk", "plan", "delegate", "default".
   # "bypassPermissions" is required for headless/autonomous operation.
   permissionMode: "bypassPermissions"
-  # systemPrompt is the system prompt text for the Claude agent.
+  # systemPrompt overrides the default system prompt entirely.
   # Set via ConfigMap when non-empty.
   systemPrompt: ""
   # appendSystemPrompt is appended to the default system prompt.
@@ -31,7 +31,8 @@ claude:
   # Mounted as a file in the container.
   mcpConfig: ""
   # strictMcpConfig when true only uses MCP servers from mcpConfig,
-  # ignoring all user/project/local MCP configurations. Recommended for production.
+  # ignoring user, project, and local MCP configurations.
+  # Recommended for production security.
   strictMcpConfig: true
 
   # -- Operational controls --
@@ -43,34 +44,47 @@ claude:
   fallbackModel: ""
 
   # -- Structured output --
-  # jsonSchema constrains output to conform to a JSON Schema (JSON string).
+  # jsonSchema constrains the output to conform to a JSON Schema (JSON string).
   jsonSchema: ""
 
-  # -- Session management --
-  # noSessionPersistence disables saving sessions to disk (recommended for ephemeral containers).
-  noSessionPersistence: true
-
-  # -- Tool control --
-  # tools controls the base set of built-in tools. Empty means all defaults.
-  # Example: ["Bash", "Edit", "Read"]
-  tools: []
-
   # -- Settings --
-  # settingsFile is a path to a settings JSON file loaded at startup.
+  # settingsFile is a path to a settings JSON file inside the container.
   settingsFile: ""
   # settingSources controls which setting sources are loaded (comma-separated: "user,project,local").
+  # Empty string means only explicit configuration is used.
   settingSources: ""
 
-  # -- Plugins --
-  # pluginDirs is a list of directories to load plugins from.
+  # -- Tool control --
+  # tools controls the base set of built-in tools available.
+  # Empty list means all default tools. Use ["Bash","Edit","Read"] to restrict.
+  tools: []
+  # allowedTools restricts tool access with patterns (e.g. ["Bash(git:*)", "Edit"]).
+  allowedTools: []
+  # disallowedTools explicitly blocks specific tools (e.g. ["Bash(rm:*)"]).
+  disallowedTools: []
+
+  # -- Plugin support --
+  # pluginDirs are directories to load plugins from.
   pluginDirs: []
 
   # -- Named agents --
-  # agents defines named agent personas. JSON object with agent names as keys.
-  # Example: {"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}
+  # agents defines named agent personas with descriptions and prompts.
+  # Example:
+  #   agents:
+  #     reviewer:
+  #       description: "Reviews code changes"
+  #       prompt: "You are a senior code reviewer..."
+  #     deployer:
+  #       description: "Handles deployments"
+  #       prompt: "You are a deployment specialist..."
   agents: {}
-  # activeAgent selects the default named agent to use.
+  # activeAgent selects which named agent to use by default.
   activeAgent: ""
+
+  # -- Session management --
+  # noSessionPersistence disables saving sessions to disk.
+  # Recommended for ephemeral container workloads.
+  noSessionPersistence: true
 
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:

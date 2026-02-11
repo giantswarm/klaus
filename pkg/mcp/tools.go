@@ -32,13 +32,13 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			mcp.Description("Optional session UUID to use or resume a specific conversation"),
 		),
 		mcp.WithString("agent",
-			mcp.Description("Optional named agent persona to use for this prompt (must be pre-configured)"),
+			mcp.Description("Optional named agent persona to use for this prompt (must be defined in server config)"),
 		),
 		mcp.WithString("json_schema",
 			mcp.Description("Optional JSON Schema to constrain the output format"),
 		),
 		mcp.WithNumber("max_budget_usd",
-			mcp.Description("Optional maximum dollar spend for this invocation (0 = no limit)"),
+			mcp.Description("Optional per-invocation spending cap in USD (0 = no limit)"),
 		),
 		mcp.WithString("effort",
 			mcp.Description("Optional effort level: low, medium, or high"),
@@ -57,23 +57,39 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 
 		// Build per-run overrides from optional parameters.
 		runOpts := &claudepkg.RunOptions{}
+		hasOverrides := false
+
 		if v, err := optionalString(request, "session_id"); err == nil && v != "" {
 			runOpts.SessionID = v
-		}
-		if v, err := optionalString(request, "agent"); err == nil && v != "" {
-			runOpts.ActiveAgent = v
-		}
-		if v, err := optionalString(request, "json_schema"); err == nil && v != "" {
-			runOpts.JSONSchema = v
-		}
-		if v, err := optionalFloat(request, "max_budget_usd"); err == nil && v > 0 {
-			runOpts.MaxBudgetUSD = v
-		}
-		if v, err := optionalString(request, "effort"); err == nil && v != "" {
-			runOpts.Effort = v
+			hasOverrides = true
 		}
 
-		result, messages, err := process.RunSyncWithOptions(ctx, message, runOpts)
+		if v, err := optionalString(request, "agent"); err == nil && v != "" {
+			runOpts.ActiveAgent = v
+			hasOverrides = true
+		}
+
+		if v, err := optionalString(request, "json_schema"); err == nil && v != "" {
+			runOpts.JSONSchema = v
+			hasOverrides = true
+		}
+
+		if v, err := optionalFloat(request, "max_budget_usd"); err == nil && v > 0 {
+			runOpts.MaxBudgetUSD = v
+			hasOverrides = true
+		}
+
+		if v, err := optionalString(request, "effort"); err == nil && v != "" {
+			runOpts.Effort = v
+			hasOverrides = true
+		}
+
+		var opts *claudepkg.RunOptions
+		if hasOverrides {
+			opts = runOpts
+		}
+
+		result, messages, err := process.RunSyncWithOptions(ctx, message, opts)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
 		}
@@ -89,7 +105,7 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			MessageCount: len(messages),
 		}
 
-		// Extract cost and session_id from messages.
+		// Extract cost and session ID from messages.
 		for i := len(messages) - 1; i >= 0; i-- {
 			if messages[i].Type == claudepkg.MessageTypeResult {
 				response.TotalCost = messages[i].TotalCost
@@ -116,8 +132,8 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 
 func statusTool(process *claudepkg.Process) server.ServerTool {
 	tool := mcp.NewTool("status",
-		mcp.WithDescription("Get the current status of the Claude Code agent including progress info "+
-			"(starting, idle, busy, stopped, error), message/tool counts, and last activity"),
+		mcp.WithDescription("Get the current status of the Claude Code agent including progress information "+
+			"(status, session_id, cost, message_count, tool_call_count, last_message, last_tool_name)"),
 	)
 
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -146,7 +162,7 @@ func stopTool(process *claudepkg.Process) server.ServerTool {
 	return server.ServerTool{Tool: tool, Handler: handler}
 }
 
-// optionalString extracts an optional string parameter from a tool request.
+// optionalString extracts an optional string parameter from the request.
 func optionalString(request mcp.CallToolRequest, key string) (string, error) {
 	args := request.GetArguments()
 	v, ok := args[key]
@@ -160,7 +176,7 @@ func optionalString(request mcp.CallToolRequest, key string) (string, error) {
 	return s, nil
 }
 
-// optionalFloat extracts an optional float parameter from a tool request.
+// optionalFloat extracts an optional float parameter from the request.
 func optionalFloat(request mcp.CallToolRequest, key string) (float64, error) {
 	args := request.GetArguments()
 	v, ok := args[key]

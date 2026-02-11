@@ -76,7 +76,7 @@ spec:
                   name: {{ .Values.anthropicApiKey.secretName }}
                   key: {{ .Values.anthropicApiKey.secretKey }}
             {{- end }}
-            {{- /* Operational controls */}}
+            # Operational controls
             {{- if .Values.claude.maxBudgetUSD }}
             - name: CLAUDE_MAX_BUDGET_USD
               value: {{ .Values.claude.maxBudgetUSD | quote }}
@@ -89,7 +89,7 @@ spec:
             - name: CLAUDE_FALLBACK_MODEL
               value: {{ .Values.claude.fallbackModel | quote }}
             {{- end }}
-            {{- /* Structured output */}}
+            # Structured output
             {{- if .Values.claude.jsonSchema }}
             - name: CLAUDE_JSON_SCHEMA
               valueFrom:
@@ -97,17 +97,7 @@ spec:
                   name: {{ include "klaus.fullname" . }}
                   key: json-schema
             {{- end }}
-            {{- /* Session management */}}
-            {{- if .Values.claude.noSessionPersistence }}
-            - name: CLAUDE_NO_SESSION_PERSISTENCE
-              value: "true"
-            {{- end }}
-            {{- /* Tool control */}}
-            {{- if .Values.claude.tools }}
-            - name: CLAUDE_TOOLS
-              value: {{ join "," .Values.claude.tools | quote }}
-            {{- end }}
-            {{- /* Settings */}}
+            # Settings
             {{- if .Values.claude.settingsFile }}
             - name: CLAUDE_SETTINGS_FILE
               value: {{ .Values.claude.settingsFile | quote }}
@@ -116,12 +106,17 @@ spec:
             - name: CLAUDE_SETTING_SOURCES
               value: {{ .Values.claude.settingSources | quote }}
             {{- end }}
-            {{- /* Plugins */}}
+            # Tool control
+            {{- if .Values.claude.tools }}
+            - name: CLAUDE_TOOLS
+              value: {{ join "," .Values.claude.tools | quote }}
+            {{- end }}
+            # Plugin directories
             {{- if .Values.claude.pluginDirs }}
             - name: CLAUDE_PLUGIN_DIRS
               value: {{ join "," .Values.claude.pluginDirs | quote }}
             {{- end }}
-            {{- /* Named agents */}}
+            # Named agents
             {{- if .Values.claude.agents }}
             - name: CLAUDE_AGENTS
               valueFrom:
@@ -132,6 +127,11 @@ spec:
             {{- if .Values.claude.activeAgent }}
             - name: CLAUDE_ACTIVE_AGENT
               value: {{ .Values.claude.activeAgent | quote }}
+            {{- end }}
+            # Session persistence
+            {{- if .Values.claude.noSessionPersistence }}
+            - name: CLAUDE_NO_SESSION_PERSISTENCE
+              value: "true"
             {{- end }}
           volumeMounts:
             {{- if .Values.claude.mcpConfig }}
