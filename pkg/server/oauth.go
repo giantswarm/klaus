@@ -194,13 +194,13 @@ func (c OAuthConfig) Validate() error {
 
 // OAuthServer wraps the MCP endpoint with OAuth 2.1 authentication.
 type OAuthServer struct {
-	process      *claudepkg.Process
+	process      claudepkg.Prompter
 	oauthServer  *oauth.Server
 	oauthHandler *oauth.Handler
 	httpServer   *http.Server
 }
 
-func NewOAuthServer(process *claudepkg.Process, config OAuthConfig) (*OAuthServer, error) {
+func NewOAuthServer(process claudepkg.Prompter, config OAuthConfig) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
@@ -230,7 +230,7 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 	s.setupMCPRoutes(mux, config)
 
 	// Health and status endpoints (unprotected).
-	registerOperationalRoutes(mux, s.process)
+	registerOperationalRoutes(mux, s.process, ModeSingleShot)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,

@@ -86,6 +86,12 @@ claude:
   # Enables progress tracking with message count, tool call count, and last activity.
   includePartialMessages: false
 
+  # -- Process mode --
+  # persistentMode enables bidirectional stream-json mode where a single
+  # long-running Claude subprocess handles multiple prompts with conversation
+  # continuity. When false (default), a new subprocess is spawned per prompt.
+  persistentMode: false
+
   # -- Session management --
   # noSessionPersistence disables saving sessions to disk.
   # Recommended for ephemeral container workloads.

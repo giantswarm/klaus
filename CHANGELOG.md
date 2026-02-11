@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Initial project structure with Go app and Helm chart.
+- **Bidirectional stream-json mode** (`CLAUDE_PERSISTENT_MODE=true`): Maintains a single long-running Claude subprocess using `--input-format stream-json` for multi-turn conversations with conversation continuity, lower latency, and cost efficiency.
+- `Prompter` interface abstracting over single-shot (`Process`) and persistent (`PersistentProcess`) modes, allowing seamless switching via configuration.
+- **MCP progress notifications**: The `prompt` tool now streams real-time `notifications/progress` messages to MCP clients during task execution, reporting tool usage, assistant output, and task completion.
+- MCP `prompt` tool: added `resume` and `continue` parameters for full session management from MCP clients.
 - Budget control via `--max-budget-usd` / `CLAUDE_MAX_BUDGET_USD` to cap per-invocation spending.
 - Effort level via `--effort` / `CLAUDE_EFFORT` to control quality vs. speed tradeoff.
 - Fallback model via `--fallback-model` / `CLAUDE_FALLBACK_MODEL` for resilience when primary model is overloaded.
@@ -36,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Built-in tool set control via `--tools` / `CLAUDE_TOOLS`.
 - Tool access control via `CLAUDE_ALLOWED_TOOLS` and `CLAUDE_DISALLOWED_TOOLS`.
 - Plugin directory support via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`.
-- Per-invocation RunOptions allowing MCP clients to override session_id, agent, json_schema, max_budget_usd, and effort per prompt.
-- Enhanced status endpoint with message count, tool call count, last message, and last tool name for progress monitoring.
-- Helm chart values for all new Claude Code configuration options.
+- Per-invocation RunOptions allowing MCP clients to override session_id, resume, continue, agent, json_schema, max_budget_usd, effort, and fork_session per prompt.
+- Enhanced status endpoint with message count, tool call count, last message, last tool name, and operating mode for progress monitoring.
+- Helm chart values for all new Claude Code configuration options including `persistentMode`.
 
 [Unreleased]: https://github.com/giantswarm/klaus/tree/main

@@ -137,6 +137,9 @@ spec:
             # Streaming
             - name: CLAUDE_INCLUDE_PARTIAL_MESSAGES
               value: {{ .Values.claude.includePartialMessages | quote }}
+            # Process mode
+            - name: CLAUDE_PERSISTENT_MODE
+              value: {{ .Values.claude.persistentMode | quote }}
             # Session persistence
             - name: CLAUDE_NO_SESSION_PERSISTENCE
               value: {{ .Values.claude.noSessionPersistence | quote }}

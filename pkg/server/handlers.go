@@ -16,6 +16,7 @@ type statusResponse struct {
 	Build   string               `json:"build"`
 	Commit  string               `json:"commit"`
 	Agent   claudepkg.StatusInfo `json:"agent"`
+	Mode    string               `json:"mode"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -38,7 +39,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 
-func handleStatus(process *claudepkg.Process) http.HandlerFunc {
+func handleStatus(process claudepkg.Prompter, mode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := statusResponse{
 			Name:    project.Name,
@@ -46,6 +47,7 @@ func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 			Build:   project.BuildTimestamp(),
 			Commit:  project.GitSHA(),
 			Agent:   process.Status(),
+			Mode:    mode,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -55,9 +57,9 @@ func handleStatus(process *claudepkg.Process) http.HandlerFunc {
 	}
 }
 
-func registerOperationalRoutes(mux *http.ServeMux, process *claudepkg.Process) {
+func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string) {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz)
-	mux.HandleFunc("/status", handleStatus(process))
+	mux.HandleFunc("/status", handleStatus(process, mode))
 	mux.HandleFunc("/", handleRoot)
 }

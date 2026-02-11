@@ -18,7 +18,17 @@ type Server struct {
 	mcpServer  *mcpserver.StreamableHTTPServer
 }
 
-func New(process *claudepkg.Process, port string) *Server {
+// ProcessMode describes the operating mode of the claude process.
+const (
+	ModeSingleShot = "single-shot"
+	ModePersistent = "persistent"
+)
+
+func New(process claudepkg.Prompter, port string) *Server {
+	return NewWithMode(process, port, ModeSingleShot)
+}
+
+func NewWithMode(process claudepkg.Prompter, port string, mode string) *Server {
 	mcpSrv := mcppkg.NewServer(process)
 
 	mux := http.NewServeMux()
@@ -31,7 +41,7 @@ func New(process *claudepkg.Process, port string) *Server {
 	mux.Handle("/mcp", mcpSrv)
 
 	// Operational endpoints.
-	registerOperationalRoutes(mux, process)
+	registerOperationalRoutes(mux, process, mode)
 
 	s.httpServer = &http.Server{
 		Addr:              ":" + port,

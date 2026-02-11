@@ -91,6 +91,7 @@ Configuration is primarily via environment variables:
   CLAUDE_ACTIVE_AGENT        -- Default named agent to use
   CLAUDE_INCLUDE_PARTIAL_MESSAGES -- Emit partial message chunks (true/false)
   CLAUDE_NO_SESSION_PERSISTENCE  -- Disable session persistence (true/false)
+  CLAUDE_PERSISTENT_MODE         -- Use persistent subprocess mode (true/false)
   PORT                           -- HTTP server port (default: 8080)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load TLS paths from environment if not provided via flags.
@@ -291,7 +292,15 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	}
 
 	// Create the Claude process manager.
-	process := claude.NewProcess(opts)
+	// Persistent mode maintains a long-running subprocess for multi-turn conversations.
+	persistentMode := parseBool(os.Getenv("CLAUDE_PERSISTENT_MODE"))
+	var process claude.Prompter
+	if persistentMode {
+		log.Println("Starting in persistent mode (bidirectional stream-json)")
+		process = claude.NewPersistentProcess(opts)
+	} else {
+		process = claude.NewProcess(opts)
+	}
 
 	// Determine listen port: flag > env > default.
 	port := portFlag
@@ -309,10 +318,14 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	if enableOAuth {
 		return runWithOAuth(process, port, oauthConfig, quit)
 	}
-	return runWithoutOAuth(process, port, quit)
+	mode := server.ModeSingleShot
+	if persistentMode {
+		mode = server.ModePersistent
+	}
+	return runWithoutOAuth(process, port, mode, quit)
 }
 
-func runWithOAuth(process *claude.Process, port string, config server.OAuthConfig, quit chan os.Signal) error {
+func runWithOAuth(process claude.Prompter, port string, config server.OAuthConfig, quit chan os.Signal) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -342,8 +355,8 @@ func runWithOAuth(process *claude.Process, port string, config server.OAuthConfi
 	)
 }
 
-func runWithoutOAuth(process *claude.Process, port string, quit chan os.Signal) error {
-	srv := server.New(process, port)
+func runWithoutOAuth(process claude.Prompter, port string, mode string, quit chan os.Signal) error {
+	srv := server.NewWithMode(process, port, mode)
 	return runServerLifecycle(srv.Start, srv.Shutdown, process, quit)
 }
 
@@ -352,7 +365,7 @@ func runWithoutOAuth(process *claude.Process, port string, quit chan os.Signal) 
 func runServerLifecycle(
 	startFn func() error,
 	shutdownFn func(context.Context) error,
-	process *claude.Process,
+	process claude.Prompter,
 	quit <-chan os.Signal,
 ) error {
 	serverDone := make(chan error, 1)

@@ -1,0 +1,546 @@
+package claude
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"os/exec"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// PersistentProcess maintains a long-running Claude subprocess for multi-turn
+// conversations using bidirectional stream-json. Instead of spawning a new
+// subprocess per prompt, it writes user messages to stdin and reads responses
+// from stdout, providing conversation continuity and lower latency.
+type PersistentProcess struct {
+	opts Options
+
+	mu            sync.RWMutex
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	status        ProcessStatus
+	sessionID     string
+	lastError     string
+	totalCost     float64
+	messageCount  int
+	toolCallCount int
+	lastMessage   string
+	lastToolName  string
+
+	// responseCh receives stream-json messages during an active prompt.
+	// It is set by Send and cleared when the response is complete.
+	responseCh chan StreamMessage
+
+	// done is closed when the current prompt response is complete.
+	done chan struct{}
+
+	// processDone is closed when the subprocess exits entirely.
+	processDone chan struct{}
+
+	// cancel cancels the stdout reader goroutine.
+	cancel context.CancelFunc
+}
+
+// NewPersistentProcess returns a PersistentProcess. Call Start() to launch
+// the subprocess before sending prompts.
+func NewPersistentProcess(opts Options) *PersistentProcess {
+	done := make(chan struct{})
+	close(done) // Pre-closed: no active prompt.
+	processDone := make(chan struct{})
+	close(processDone) // Pre-closed: not started.
+	return &PersistentProcess{
+		opts:        opts,
+		status:      ProcessStatusIdle,
+		done:        done,
+		processDone: processDone,
+	}
+}
+
+// persistentArgs builds the CLI argument list for persistent mode.
+// This uses --input-format stream-json for bidirectional communication.
+func (p *PersistentProcess) persistentArgs() []string {
+	o := p.opts
+
+	args := []string{
+		"--print",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+
+	if o.Model != "" {
+		args = append(args, "--model", o.Model)
+	}
+
+	if o.FallbackModel != "" {
+		args = append(args, "--fallback-model", o.FallbackModel)
+	}
+
+	if o.SystemPrompt != "" {
+		args = append(args, "--system-prompt", o.SystemPrompt)
+	}
+
+	if o.AppendSystemPrompt != "" {
+		args = append(args, "--append-system-prompt", o.AppendSystemPrompt)
+	}
+
+	if o.MaxTurns > 0 {
+		args = append(args, "--max-turns", fmt.Sprintf("%d", o.MaxTurns))
+	}
+
+	if o.PermissionMode != "" {
+		args = append(args, "--permission-mode", o.PermissionMode)
+	}
+
+	if o.PermissionMode == "bypassPermissions" {
+		args = append(args, "--dangerously-skip-permissions")
+	}
+
+	if o.MCPConfigPath != "" {
+		args = append(args, "--mcp-config", o.MCPConfigPath)
+	}
+
+	if o.StrictMCPConfig {
+		args = append(args, "--strict-mcp-config")
+	}
+
+	if len(o.AllowedTools) > 0 {
+		args = append(args, "--allowedTools", joinStrings(o.AllowedTools))
+	}
+
+	if len(o.DisallowedTools) > 0 {
+		args = append(args, "--disallowedTools", joinStrings(o.DisallowedTools))
+	}
+
+	if len(o.Tools) > 0 {
+		args = append(args, "--tools", joinStrings(o.Tools))
+	}
+
+	if o.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", o.MaxBudgetUSD))
+	}
+
+	if o.Effort != "" {
+		args = append(args, "--effort", o.Effort)
+	}
+
+	if o.NoSessionPersistence {
+		args = append(args, "--no-session-persistence")
+	}
+
+	if len(o.Agents) > 0 {
+		data, err := json.Marshal(o.Agents)
+		if err == nil {
+			args = append(args, "--agents", string(data))
+		}
+	}
+
+	if o.ActiveAgent != "" {
+		args = append(args, "--agent", o.ActiveAgent)
+	}
+
+	if o.JSONSchema != "" {
+		args = append(args, "--json-schema", o.JSONSchema)
+	}
+
+	if o.IncludePartialMessages {
+		args = append(args, "--include-partial-messages")
+	}
+
+	if o.SettingsFile != "" {
+		args = append(args, "--settings", o.SettingsFile)
+	}
+
+	if o.SettingSources != "" {
+		args = append(args, "--setting-sources", o.SettingSources)
+	}
+
+	for _, dir := range o.PluginDirs {
+		args = append(args, "--plugin-dir", dir)
+	}
+
+	return args
+}
+
+// joinStrings joins a string slice with commas.
+func joinStrings(ss []string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += ","
+		}
+		result += s
+	}
+	return result
+}
+
+// Start launches the persistent Claude subprocess. It must be called before
+// sending prompts. The subprocess runs until Stop() is called or it exits.
+func (p *PersistentProcess) Start(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.cmd != nil {
+		return fmt.Errorf("persistent process already running")
+	}
+
+	p.status = ProcessStatusStarting
+
+	args := p.persistentArgs()
+
+	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
+	if p.opts.WorkDir != "" {
+		cmd.Dir = p.opts.WorkDir
+	}
+
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		p.status = ProcessStatusError
+		p.lastError = fmt.Sprintf("failed to create stdin pipe: %v", err)
+		return err
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		p.status = ProcessStatusError
+		p.lastError = fmt.Sprintf("failed to create stdout pipe: %v", err)
+		return err
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		p.status = ProcessStatusError
+		p.lastError = fmt.Sprintf("failed to create stderr pipe: %v", err)
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		p.status = ProcessStatusError
+		p.lastError = fmt.Sprintf("failed to start claude: %v", err)
+		return fmt.Errorf("failed to start claude: %w", err)
+	}
+
+	p.cmd = cmd
+	p.stdin = stdinPipe
+	p.status = ProcessStatusIdle
+
+	processDone := make(chan struct{})
+	p.processDone = processDone
+
+	readerCtx, cancel := context.WithCancel(ctx)
+	p.cancel = cancel
+
+	// Read stderr in background.
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			log.Printf("[claude persistent stderr] %s", scanner.Text())
+		}
+	}()
+
+	// Read stdout stream-json messages and dispatch to active response channel.
+	go p.readLoop(readerCtx, stdout, cmd, processDone)
+
+	log.Println("[claude] persistent subprocess started")
+	return nil
+}
+
+// readLoop continuously reads stream-json messages from stdout and dispatches
+// them to the active response channel. It detects result messages to mark the
+// end of a response cycle.
+func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, cmd *exec.Cmd, processDone chan struct{}) {
+	defer func() {
+		waitErr := cmd.Wait()
+		p.mu.Lock()
+		p.cmd = nil
+		p.stdin = nil
+		if waitErr != nil && p.status != ProcessStatusStopped {
+			p.status = ProcessStatusError
+			p.lastError = waitErr.Error()
+		} else if p.status != ProcessStatusStopped {
+			p.status = ProcessStatusIdle
+		}
+		// Close any pending response channel.
+		if p.responseCh != nil {
+			close(p.responseCh)
+			p.responseCh = nil
+		}
+		// Close the done channel for any active prompt.
+		select {
+		case <-p.done:
+			// Already closed.
+		default:
+			close(p.done)
+		}
+		close(processDone)
+		p.mu.Unlock()
+		log.Println("[claude] persistent subprocess exited")
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+
+	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		msg, parseErr := ParseStreamMessage(line)
+		if parseErr != nil {
+			log.Printf("[claude persistent] failed to parse stream message: %v (line: %s)", parseErr, string(line))
+			continue
+		}
+
+		p.mu.Lock()
+		p.messageCount++
+
+		if msg.Type == MessageTypeSystem && msg.SessionID != "" {
+			p.sessionID = msg.SessionID
+		}
+		if msg.Type == MessageTypeAssistant {
+			if msg.Subtype == SubtypeText && msg.Text != "" {
+				p.lastMessage = truncate(msg.Text, 200)
+			}
+			if msg.Subtype == SubtypeToolUse {
+				p.toolCallCount++
+				p.lastToolName = msg.ToolName
+			}
+		}
+		if msg.Type == MessageTypeResult {
+			p.totalCost = msg.TotalCost
+		}
+
+		// Dispatch to the active response channel if one exists.
+		ch := p.responseCh
+		p.mu.Unlock()
+
+		if ch != nil {
+			ch <- msg
+		}
+
+		// A result message marks the end of the current response cycle.
+		if msg.Type == MessageTypeResult {
+			p.mu.Lock()
+			if p.responseCh != nil {
+				close(p.responseCh)
+				p.responseCh = nil
+			}
+			if p.status == ProcessStatusBusy {
+				p.status = ProcessStatusIdle
+			}
+			// Signal done for this prompt.
+			select {
+			case <-p.done:
+				// Already closed.
+			default:
+				close(p.done)
+			}
+			p.mu.Unlock()
+		}
+	}
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		log.Printf("[claude persistent] stdout scanner error: %v", scanErr)
+	}
+}
+
+// stdinMessage is the JSON structure written to the subprocess stdin
+// in stream-json input mode.
+type stdinMessage struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// Run sends a prompt to the persistent subprocess and returns a channel
+// of response messages. RunOptions are partially supported -- only fields
+// relevant to multi-turn conversation (like ActiveAgent) take effect;
+// subprocess-level flags (Model, PermissionMode, etc.) are set at Start time.
+func (p *PersistentProcess) Run(ctx context.Context, prompt string) (<-chan StreamMessage, error) {
+	return p.RunWithOptions(ctx, prompt, nil)
+}
+
+// RunWithOptions sends a prompt with optional per-invocation overrides.
+// In persistent mode, most overrides are ignored since the subprocess flags
+// were set at Start time. However, some options (like effort) are noted for
+// future use when the Claude CLI supports per-message configuration.
+func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, _ *RunOptions) (<-chan StreamMessage, error) {
+	p.mu.Lock()
+
+	if p.cmd == nil {
+		p.mu.Unlock()
+		// Auto-start if not yet started.
+		if err := p.Start(ctx); err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+	}
+
+	if p.status == ProcessStatusBusy {
+		p.mu.Unlock()
+		return nil, fmt.Errorf("claude process is already busy")
+	}
+
+	p.status = ProcessStatusBusy
+	p.lastError = ""
+	p.messageCount = 0
+	p.toolCallCount = 0
+	p.lastMessage = ""
+	p.lastToolName = ""
+
+	// Create response channel and done channel for this prompt.
+	ch := make(chan StreamMessage, 100)
+	p.responseCh = ch
+	done := make(chan struct{})
+	p.done = done
+
+	stdin := p.stdin
+	p.mu.Unlock()
+
+	// Write the user message to stdin as stream-json.
+	msg := stdinMessage{
+		Type: "user",
+		Text: prompt,
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		p.setError(fmt.Sprintf("failed to marshal stdin message: %v", err))
+		close(ch)
+		close(done)
+		return nil, fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	// Append newline delimiter for stream-json protocol.
+	data = append(data, '\n')
+
+	if _, err := stdin.Write(data); err != nil {
+		p.setError(fmt.Sprintf("failed to write to stdin: %v", err))
+		close(ch)
+		close(done)
+		return nil, fmt.Errorf("failed to write to stdin: %w", err)
+	}
+
+	return ch, nil
+}
+
+// RunSyncWithOptions sends a prompt and blocks until the response is complete.
+func (p *PersistentProcess) RunSyncWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (string, []StreamMessage, error) {
+	ch, err := p.RunWithOptions(ctx, prompt, runOpts)
+	if err != nil {
+		return "", nil, err
+	}
+
+	var messages []StreamMessage
+	var resultText string
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			// For persistent process, we don't stop the whole subprocess,
+			// just cancel the current prompt wait.
+			return "", messages, ctx.Err()
+		case msg, ok := <-ch:
+			if !ok {
+				break loop
+			}
+			messages = append(messages, msg)
+			if msg.Type == MessageTypeResult {
+				resultText = msg.Result
+			}
+		}
+	}
+
+	if resultText == "" {
+		for _, msg := range messages {
+			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
+				resultText += msg.Text
+			}
+		}
+	}
+
+	return resultText, messages, nil
+}
+
+// Stop sends SIGTERM to the persistent subprocess and waits for it to exit.
+func (p *PersistentProcess) Stop() error {
+	p.mu.Lock()
+	cmd := p.cmd
+	processDone := p.processDone
+	if cmd == nil || cmd.Process == nil {
+		p.mu.Unlock()
+		return nil
+	}
+	p.status = ProcessStatusStopped
+	if p.cancel != nil {
+		p.cancel()
+	}
+	// Close stdin to signal EOF.
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+		p.stdin = nil
+	}
+	p.mu.Unlock()
+
+	// Send SIGTERM first.
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		log.Printf("[claude persistent] SIGTERM failed (process may have already exited): %v", err)
+		return nil
+	}
+
+	// Wait up to 10 seconds for graceful shutdown.
+	select {
+	case <-processDone:
+		return nil
+	case <-time.After(10 * time.Second):
+		log.Printf("[claude persistent] process did not exit after SIGTERM, sending SIGKILL")
+		return cmd.Process.Kill()
+	}
+}
+
+// Status returns the current status information.
+func (p *PersistentProcess) Status() StatusInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return StatusInfo{
+		Status:        p.status,
+		SessionID:     p.sessionID,
+		ErrorMessage:  p.lastError,
+		TotalCost:     p.totalCost,
+		MessageCount:  p.messageCount,
+		ToolCallCount: p.toolCallCount,
+		LastMessage:   p.lastMessage,
+		LastToolName:  p.lastToolName,
+	}
+}
+
+// Done returns a channel closed when the current prompt response is complete.
+func (p *PersistentProcess) Done() <-chan struct{} {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.done
+}
+
+// MarshalStatus returns the status as JSON.
+func (p *PersistentProcess) MarshalStatus() ([]byte, error) {
+	return json.Marshal(p.Status())
+}
+
+func (p *PersistentProcess) setError(msg string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.status = ProcessStatusError
+	p.lastError = msg
+}

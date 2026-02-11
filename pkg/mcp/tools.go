@@ -12,7 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-func RegisterTools(s *server.MCPServer, process *claudepkg.Process) {
+func RegisterTools(s *server.MCPServer, process claudepkg.Prompter) {
 	s.AddTools(
 		promptTool(process),
 		statusTool(process),
@@ -20,7 +20,7 @@ func RegisterTools(s *server.MCPServer, process *claudepkg.Process) {
 	)
 }
 
-func promptTool(process *claudepkg.Process) server.ServerTool {
+func promptTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("prompt",
 		mcp.WithDescription("Send a prompt to the Claude Code agent and receive the response. "+
 			"The agent will autonomously read files, run commands, and edit code to complete the task."),
@@ -30,6 +30,12 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 		),
 		mcp.WithString("session_id",
 			mcp.Description("Optional session UUID to use or resume a specific conversation"),
+		),
+		mcp.WithString("resume",
+			mcp.Description("Optional session ID to resume a previous conversation"),
+		),
+		mcp.WithBoolean("continue",
+			mcp.Description("Optional: continue the most recent conversation in the working directory"),
 		),
 		mcp.WithString("agent",
 			mcp.Description("Optional named agent persona to use for this prompt (must be defined in server config)"),
@@ -67,6 +73,18 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			runOpts.SessionID = v
 		}
 
+		if v, err := optionalString(request, "resume"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v != "" {
+			runOpts.Resume = v
+		}
+
+		if v, err := optionalBool(request, "continue"); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		} else if v {
+			runOpts.ContinueSession = true
+		}
+
 		if v, err := optionalString(request, "agent"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		} else if v != "" {
@@ -97,9 +115,66 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			runOpts.ForkSession = true
 		}
 
-		result, messages, err := process.RunSyncWithOptions(ctx, message, &runOpts)
+		// Extract progress token for streaming progress notifications.
+		var progressToken mcp.ProgressToken
+		if request.Params.Meta != nil {
+			progressToken = request.Params.Meta.ProgressToken
+		}
+
+		// Use the streaming Run method so we can send progress notifications.
+		ch, err := process.RunWithOptions(ctx, message, &runOpts)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
+		}
+
+		mcpServer := server.ServerFromContext(ctx)
+
+		var messages []claudepkg.StreamMessage
+		var resultText string
+		var progressCount float64
+
+	loop:
+		for {
+			select {
+			case <-ctx.Done():
+				_ = process.Stop()
+				return mcp.NewToolResultError(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
+			case msg, ok := <-ch:
+				if !ok {
+					break loop
+				}
+				messages = append(messages, msg)
+
+				if msg.Type == claudepkg.MessageTypeResult {
+					resultText = msg.Result
+				}
+
+				// Send progress notification if client requested it.
+				if progressToken != nil && mcpServer != nil {
+					progressCount++
+					progressMsg := progressMessage(msg)
+					if progressMsg != "" {
+						_ = mcpServer.SendNotificationToClient(
+							ctx,
+							"notifications/progress",
+							map[string]any{
+								"progressToken": progressToken,
+								"progress":      progressCount,
+								"message":       progressMsg,
+							},
+						)
+					}
+				}
+			}
+		}
+
+		if resultText == "" {
+			// Collect text from assistant messages as fallback.
+			for _, msg := range messages {
+				if msg.Type == claudepkg.MessageTypeAssistant && msg.Subtype == claudepkg.SubtypeText {
+					resultText += msg.Text
+				}
+			}
 		}
 
 		// Build a structured response including cost info.
@@ -109,7 +184,7 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 			TotalCost    float64 `json:"total_cost_usd,omitempty"`
 			SessionID    string  `json:"session_id,omitempty"`
 		}{
-			Result:       result,
+			Result:       resultText,
 			MessageCount: len(messages),
 		}
 
@@ -129,7 +204,7 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 
 		data, err := json.Marshal(response)
 		if err != nil {
-			return mcp.NewToolResultText(result), nil
+			return mcp.NewToolResultText(resultText), nil
 		}
 
 		return mcp.NewToolResultText(string(data)), nil
@@ -138,7 +213,32 @@ func promptTool(process *claudepkg.Process) server.ServerTool {
 	return server.ServerTool{Tool: tool, Handler: handler}
 }
 
-func statusTool(process *claudepkg.Process) server.ServerTool {
+// progressMessage returns a human-readable progress message for a stream message,
+// or empty string if the message isn't worth reporting.
+func progressMessage(msg claudepkg.StreamMessage) string {
+	switch msg.Type {
+	case claudepkg.MessageTypeSystem:
+		if msg.SessionID != "" {
+			return fmt.Sprintf("Session started: %s", msg.SessionID)
+		}
+	case claudepkg.MessageTypeAssistant:
+		if msg.Subtype == claudepkg.SubtypeToolUse {
+			return fmt.Sprintf("Using tool: %s", msg.ToolName)
+		}
+		if msg.Subtype == claudepkg.SubtypeText && msg.Text != "" {
+			text := msg.Text
+			if len([]rune(text)) > 100 {
+				text = string([]rune(text)[:100]) + "..."
+			}
+			return fmt.Sprintf("Assistant: %s", text)
+		}
+	case claudepkg.MessageTypeResult:
+		return "Task completed"
+	}
+	return ""
+}
+
+func statusTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("status",
 		mcp.WithDescription("Get the current status of the Claude Code agent including progress information "+
 			"(status, session_id, cost, message_count, tool_call_count, last_message, last_tool_name)"),
@@ -155,7 +255,7 @@ func statusTool(process *claudepkg.Process) server.ServerTool {
 	return server.ServerTool{Tool: tool, Handler: handler}
 }
 
-func stopTool(process *claudepkg.Process) server.ServerTool {
+func stopTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("stop",
 		mcp.WithDescription("Stop the currently running Claude Code agent task"),
 	)
