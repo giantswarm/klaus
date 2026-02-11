@@ -106,6 +106,9 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 		if v, err := optionalString(request, "effort"); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		} else if v != "" {
+			if err := claudepkg.ValidateEffort(v); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			runOpts.Effort = v
 		}
 

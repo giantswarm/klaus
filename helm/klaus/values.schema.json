@@ -25,22 +25,117 @@
       "type": "object",
       "properties": {
         "model": {
-          "type": "string"
+          "type": "string",
+          "description": "Claude model to use (e.g. claude-sonnet-4-20250514, sonnet, opus)"
         },
         "maxTurns": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Max agentic turns per prompt (0 = unlimited)"
         },
         "permissionMode": {
-          "type": "string"
+          "type": "string",
+          "description": "Permission mode for tool usage",
+          "enum": ["default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "delegate"]
         },
         "systemPrompt": {
-          "type": "string"
+          "type": "string",
+          "description": "Override the default system prompt"
         },
         "appendSystemPrompt": {
-          "type": "string"
+          "type": "string",
+          "description": "Append to the default system prompt"
         },
         "mcpConfig": {
-          "type": "string"
+          "type": "string",
+          "description": "Inline MCP configuration JSON"
+        },
+        "strictMcpConfig": {
+          "type": "boolean",
+          "description": "Only use MCP servers from mcpConfig"
+        },
+        "maxBudgetUSD": {
+          "type": "number",
+          "description": "Maximum dollar spend per invocation (0 = no limit)"
+        },
+        "effort": {
+          "type": "string",
+          "description": "Effort level for responses",
+          "enum": ["", "low", "medium", "high"]
+        },
+        "fallbackModel": {
+          "type": "string",
+          "description": "Fallback model when primary is overloaded"
+        },
+        "jsonSchema": {
+          "type": "string",
+          "description": "JSON Schema for structured output validation"
+        },
+        "settingsFile": {
+          "type": "string",
+          "description": "Path to settings JSON file inside the container"
+        },
+        "settingSources": {
+          "type": "string",
+          "description": "Setting sources to load (comma-separated: user,project,local)"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Base set of built-in tools available"
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool access patterns to allow"
+        },
+        "disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool patterns to explicitly block"
+        },
+        "pluginDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Directories to load plugins from"
+        },
+        "agents": {
+          "type": "object",
+          "description": "Named agent personas with descriptions and prompts",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "activeAgent": {
+          "type": "string",
+          "description": "Default named agent to use"
+        },
+        "includePartialMessages": {
+          "type": "boolean",
+          "description": "Emit partial message chunks during streaming"
+        },
+        "persistentMode": {
+          "type": "boolean",
+          "description": "Enable bidirectional stream-json persistent subprocess mode"
+        },
+        "noSessionPersistence": {
+          "type": "boolean",
+          "description": "Disable saving sessions to disk"
         }
       }
     },

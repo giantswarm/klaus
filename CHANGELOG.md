@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PersistentProcess now passes `--replay-user-messages` for reliable request/response synchronization in stream-json mode.
+- PersistentProcess now includes a background watchdog that automatically restarts the subprocess on unexpected exit, with a 2-second backoff to prevent tight restart loops.
+- MCP `prompt` tool now validates per-invocation `effort` overrides against known valid levels, returning a clear error for invalid values instead of passing them through to the CLI.
+- Helm `values.schema.json` updated with all new configuration options (strictMcpConfig, maxBudgetUSD, effort, fallbackModel, etc.) for proper CI validation.
+- Added comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
 - Permission mode default changed from invalid `accept-all` to `bypassPermissions` with `--dangerously-skip-permissions` flag.
 - Permission mode is now validated at startup against known valid values.
 - Effort level validated at startup against known values (`low`, `medium`, `high`).

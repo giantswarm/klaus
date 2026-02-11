@@ -111,9 +111,10 @@ func TestPersistentProcess_PersistentArgs(t *testing.T) {
 	process := NewPersistentProcess(opts)
 	args := process.persistentArgs()
 
-	// Persistent mode uses --input-format stream-json.
+	// Persistent mode uses --input-format stream-json with --replay-user-messages.
 	assertContainsSequence(t, args, "--input-format", "stream-json")
 	assertContainsSequence(t, args, "--output-format", "stream-json")
+	assertContains(t, args, "--replay-user-messages")
 	assertContains(t, args, "--print")
 	assertContains(t, args, "--verbose")
 
@@ -155,6 +156,7 @@ func TestPersistentProcess_PersistentArgs_Minimal(t *testing.T) {
 
 	assertContainsSequence(t, args, "--input-format", "stream-json")
 	assertContainsSequence(t, args, "--output-format", "stream-json")
+	assertContains(t, args, "--replay-user-messages")
 	assertContains(t, args, "--print")
 	assertContains(t, args, "--verbose")
 	assertContains(t, args, "--permission-mode")

@@ -44,10 +44,19 @@ type PersistentProcess struct {
 
 	// cancel cancels the stdout reader goroutine.
 	cancel context.CancelFunc
+
+	// autoRestart enables the background watchdog that restarts the
+	// subprocess when it crashes unexpectedly.
+	autoRestart bool
+
+	// watchdogCtx controls the lifetime of the watchdog goroutine.
+	watchdogCtx    context.Context
+	watchdogCancel context.CancelFunc
 }
 
 // NewPersistentProcess returns a PersistentProcess. Call Start() to launch
-// the subprocess before sending prompts.
+// the subprocess before sending prompts. The process includes a background
+// watchdog that automatically restarts the subprocess if it crashes.
 func NewPersistentProcess(opts Options) *PersistentProcess {
 	done := make(chan struct{})
 	close(done) // Pre-closed: no active prompt.
@@ -58,6 +67,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		status:      ProcessStatusIdle,
 		done:        done,
 		processDone: processDone,
+		autoRestart: true,
 	}
 }
 
@@ -70,6 +80,7 @@ func (p *PersistentProcess) persistentArgs() []string {
 		"--print",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
+		"--replay-user-messages",
 		"--verbose",
 	}
 
@@ -246,8 +257,60 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	// Read stdout stream-json messages and dispatch to active response channel.
 	go p.readLoop(readerCtx, stdout, cmd, processDone)
 
+	// Start the background watchdog that auto-restarts on unexpected exit.
+	if p.autoRestart {
+		p.startWatchdog(ctx, processDone)
+	}
+
 	log.Println("[claude] persistent subprocess started")
 	return nil
+}
+
+// restartBackoff is the minimum time to wait between restart attempts to
+// prevent tight restart loops when the subprocess fails immediately.
+const restartBackoff = 2 * time.Second
+
+// startWatchdog launches a background goroutine that watches for unexpected
+// subprocess exits and restarts the process automatically. It cancels any
+// previously running watchdog to avoid duplicates.
+func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan struct{}) {
+	// Cancel any existing watchdog before starting a new one.
+	if p.watchdogCancel != nil {
+		p.watchdogCancel()
+	}
+
+	watchCtx, watchCancel := context.WithCancel(ctx)
+	p.watchdogCtx = watchCtx
+	p.watchdogCancel = watchCancel
+
+	go func() {
+		select {
+		case <-watchCtx.Done():
+			return
+		case <-processDone:
+		}
+
+		p.mu.RLock()
+		status := p.status
+		p.mu.RUnlock()
+
+		// Only restart if the process exited unexpectedly (not via Stop).
+		if status == ProcessStatusStopped {
+			return
+		}
+
+		log.Printf("[claude] persistent subprocess exited unexpectedly (status=%s), restarting in %v", status, restartBackoff)
+
+		select {
+		case <-watchCtx.Done():
+			return
+		case <-time.After(restartBackoff):
+		}
+
+		if err := p.Start(watchCtx); err != nil {
+			log.Printf("[claude] failed to restart persistent subprocess: %v", err)
+		}
+	}()
 }
 
 // readLoop continuously reads stream-json messages from stdout and dispatches
@@ -474,7 +537,13 @@ loop:
 }
 
 // Stop sends SIGTERM to the persistent subprocess and waits for it to exit.
+// It also cancels the background watchdog to prevent auto-restart.
 func (p *PersistentProcess) Stop() error {
+	// Cancel the watchdog first to prevent restart during shutdown.
+	if p.watchdogCancel != nil {
+		p.watchdogCancel()
+	}
+
 	p.mu.Lock()
 	cmd := p.cmd
 	processDone := p.processDone
