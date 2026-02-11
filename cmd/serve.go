@@ -150,7 +150,6 @@ Configuration is primarily via environment variables:
 					KeyFile:  tlsKeyFile,
 				},
 				DisableStreaming: disableStreaming,
-				DebugMode:        false,
 			}
 
 			return runServe(port, enableOAuth, oauthConfig)
@@ -201,7 +200,11 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		opts.AppendSystemPrompt = v
 	}
 	if v := os.Getenv("CLAUDE_MAX_TURNS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid CLAUDE_MAX_TURNS %q: %w", v, err)
+		}
+		if n > 0 {
 			opts.MaxTurns = n
 		}
 	}
@@ -220,7 +223,11 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 
 	// Operational controls.
 	if v := os.Getenv("CLAUDE_MAX_BUDGET_USD"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("invalid CLAUDE_MAX_BUDGET_USD %q: %w", v, err)
+		}
+		if f > 0 {
 			opts.MaxBudgetUSD = f
 		}
 	}
@@ -315,17 +322,18 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	if enableOAuth {
-		return runWithOAuth(process, port, oauthConfig, quit)
-	}
 	mode := server.ModeSingleShot
 	if persistentMode {
 		mode = server.ModePersistent
 	}
+
+	if enableOAuth {
+		return runWithOAuth(process, port, mode, oauthConfig, quit)
+	}
 	return runWithoutOAuth(process, port, mode, quit)
 }
 
-func runWithOAuth(process claude.Prompter, port string, config server.OAuthConfig, quit chan os.Signal) error {
+func runWithOAuth(process claude.Prompter, port string, mode string, config server.OAuthConfig, quit chan os.Signal) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -348,7 +356,7 @@ func runWithOAuth(process claude.Prompter, port string, config server.OAuthConfi
 
 	addr := ":" + port
 	return runServerLifecycle(
-		func() error { return oauthSrv.Start(addr, config) },
+		func() error { return oauthSrv.Start(addr, mode, config) },
 		oauthSrv.Shutdown,
 		process,
 		quit,

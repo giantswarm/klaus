@@ -129,13 +129,12 @@ func ValidateEffort(effort string) error {
 	return fmt.Errorf("invalid effort level %q; valid levels: %s", effort, strings.Join(ValidEffortLevels, ", "))
 }
 
-// args builds the CLI argument list for the claude command.
-func (o Options) args() []string {
-	args := []string{
-		"--print",
-		"--output-format", "stream-json",
-		"--verbose",
-	}
+// baseArgs returns the CLI arguments shared by both single-shot and persistent modes.
+// This includes model, prompts, permissions, MCP config, tools, operational controls,
+// agents, structured output, settings, and plugins. It does NOT include mode-specific
+// prefixes or session management flags (which differ between modes).
+func (o Options) baseArgs() []string {
+	var args []string
 
 	if o.Model != "" {
 		args = append(args, "--model", o.Model)
@@ -195,23 +194,6 @@ func (o Options) args() []string {
 		args = append(args, "--effort", o.Effort)
 	}
 
-	// Session management.
-	if o.SessionID != "" {
-		args = append(args, "--session-id", o.SessionID)
-	}
-
-	if o.Resume != "" {
-		args = append(args, "--resume", o.Resume)
-	}
-
-	if o.ContinueSession {
-		args = append(args, "--continue")
-	}
-
-	if o.ForkSession {
-		args = append(args, "--fork-session")
-	}
-
 	if o.NoSessionPersistence {
 		args = append(args, "--no-session-persistence")
 	}
@@ -251,5 +233,50 @@ func (o Options) args() []string {
 		args = append(args, "--plugin-dir", dir)
 	}
 
+	return args
+}
+
+// args builds the full CLI argument list for single-shot mode.
+func (o Options) args() []string {
+	args := []string{
+		"--print",
+		"--output-format", "stream-json",
+		"--verbose",
+	}
+	args = append(args, o.baseArgs()...)
+
+	// Session management (per-subprocess, only for single-shot mode).
+	if o.SessionID != "" {
+		args = append(args, "--session-id", o.SessionID)
+	}
+
+	if o.Resume != "" {
+		args = append(args, "--resume", o.Resume)
+	}
+
+	if o.ContinueSession {
+		args = append(args, "--continue")
+	}
+
+	if o.ForkSession {
+		args = append(args, "--fork-session")
+	}
+
+	return args
+}
+
+// PersistentArgs builds the CLI argument list for persistent (bidirectional stream-json) mode.
+// It shares the base arguments with single-shot mode but adds --input-format stream-json
+// and --replay-user-messages, and omits session management flags since the persistent
+// subprocess maintains a single long-running session.
+func (o Options) PersistentArgs() []string {
+	args := []string{
+		"--print",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--replay-user-messages",
+		"--verbose",
+	}
+	args = append(args, o.baseArgs()...)
 	return args
 }

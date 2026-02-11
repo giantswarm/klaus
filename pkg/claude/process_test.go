@@ -62,6 +62,11 @@ func TestProcess_MarshalStatus(t *testing.T) {
 	}
 }
 
+func TestProcess_ImplementsPrompter(t *testing.T) {
+	// Compile-time check that Process implements Prompter.
+	var _ Prompter = (*Process)(nil)
+}
+
 func TestProcess_StopWhenNotRunning(t *testing.T) {
 	process := NewProcess(DefaultOptions())
 
@@ -191,10 +196,43 @@ func TestTruncate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := truncate(tt.input, tt.maxLen)
+			got := Truncate(tt.input, tt.maxLen)
 			if got != tt.want {
-				t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
+				t.Errorf("Truncate(%q, %d) = %q, want %q", tt.input, tt.maxLen, got, tt.want)
 			}
 		})
 	}
+}
+
+func TestCollectResultText(t *testing.T) {
+	t.Run("returns result from result message", func(t *testing.T) {
+		messages := []StreamMessage{
+			{Type: MessageTypeSystem, SessionID: "sess-1"},
+			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "thinking..."},
+			{Type: MessageTypeResult, Result: "final answer"},
+		}
+		got := CollectResultText(messages)
+		if got != "final answer" {
+			t.Errorf("expected %q, got %q", "final answer", got)
+		}
+	})
+
+	t.Run("falls back to assistant text", func(t *testing.T) {
+		messages := []StreamMessage{
+			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "part 1 "},
+			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "part 2"},
+			{Type: MessageTypeResult},
+		}
+		got := CollectResultText(messages)
+		if got != "part 1 part 2" {
+			t.Errorf("expected %q, got %q", "part 1 part 2", got)
+		}
+	})
+
+	t.Run("empty messages returns empty", func(t *testing.T) {
+		got := CollectResultText(nil)
+		if got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
 }

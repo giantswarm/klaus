@@ -24,6 +24,9 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "ok")
 }
 
+// handleReadyz returns readiness status. Currently identical to healthz.
+// TODO: check Claude process health (e.g., not in error state) to properly
+// signal readiness to Kubernetes for load balancing.
 func handleReadyz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "ok")

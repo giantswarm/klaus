@@ -81,3 +81,33 @@ type StatusInfo struct {
 	LastMessage   string        `json:"last_message,omitempty"`
 	LastToolName  string        `json:"last_tool_name,omitempty"`
 }
+
+// Truncate returns s truncated to maxLen runes with "..." appended if truncated.
+// It operates on runes to ensure clean truncation of multi-byte UTF-8 strings.
+func Truncate(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+// CollectResultText extracts the result text from a completed set of stream messages.
+// It returns the text from the last result message, falling back to concatenated
+// assistant text messages if no result message contains text.
+func CollectResultText(messages []StreamMessage) string {
+	// Try to get result from the last result message.
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Type == MessageTypeResult && messages[i].Result != "" {
+			return messages[i].Result
+		}
+	}
+	// Fallback: concatenate assistant text messages.
+	var text string
+	for _, msg := range messages {
+		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
+			text += msg.Text
+		}
+	}
+	return text
+}

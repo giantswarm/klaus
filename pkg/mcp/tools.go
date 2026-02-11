@@ -133,7 +133,6 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 		mcpServer := server.ServerFromContext(ctx)
 
 		var messages []claudepkg.StreamMessage
-		var resultText string
 		var progressCount float64
 
 	loop:
@@ -148,15 +147,11 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 				}
 				messages = append(messages, msg)
 
-				if msg.Type == claudepkg.MessageTypeResult {
-					resultText = msg.Result
-				}
-
 				// Send progress notification if client requested it.
 				if progressToken != nil && mcpServer != nil {
-					progressCount++
 					progressMsg := progressMessage(msg)
 					if progressMsg != "" {
+						progressCount++
 						_ = mcpServer.SendNotificationToClient(
 							ctx,
 							"notifications/progress",
@@ -171,14 +166,7 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 			}
 		}
 
-		if resultText == "" {
-			// Collect text from assistant messages as fallback.
-			for _, msg := range messages {
-				if msg.Type == claudepkg.MessageTypeAssistant && msg.Subtype == claudepkg.SubtypeText {
-					resultText += msg.Text
-				}
-			}
-		}
+		resultText := claudepkg.CollectResultText(messages)
 
 		// Build a structured response including cost info.
 		response := struct {
@@ -229,11 +217,7 @@ func progressMessage(msg claudepkg.StreamMessage) string {
 			return fmt.Sprintf("Using tool: %s", msg.ToolName)
 		}
 		if msg.Subtype == claudepkg.SubtypeText && msg.Text != "" {
-			text := msg.Text
-			if len([]rune(text)) > 100 {
-				text = string([]rune(text)[:100]) + "..."
-			}
-			return fmt.Sprintf("Assistant: %s", text)
+			return fmt.Sprintf("Assistant: %s", claudepkg.Truncate(msg.Text, 100))
 		}
 	case claudepkg.MessageTypeResult:
 		return "Task completed"

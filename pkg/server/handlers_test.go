@@ -100,6 +100,25 @@ func TestHandleStatus(t *testing.T) {
 	}
 }
 
+func TestHandleStatus_PersistentMode(t *testing.T) {
+	process := claude.NewProcess(claude.DefaultOptions())
+
+	handler := handleStatus(process, ModePersistent)
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	var status statusResponse
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if status.Mode != ModePersistent {
+		t.Errorf("expected mode %q, got %q", ModePersistent, status.Mode)
+	}
+}
+
 func TestRegisterOperationalRoutes(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()

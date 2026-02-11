@@ -33,6 +33,41 @@ type RunOptions struct {
 	Effort string
 }
 
+// ignoredFields returns the names of fields that have non-zero values.
+// This is used to log which per-invocation overrides cannot be applied
+// in persistent mode.
+func (ro *RunOptions) ignoredFields() []string {
+	if ro == nil {
+		return nil
+	}
+	var fields []string
+	if ro.SessionID != "" {
+		fields = append(fields, "session_id")
+	}
+	if ro.Resume != "" {
+		fields = append(fields, "resume")
+	}
+	if ro.ContinueSession {
+		fields = append(fields, "continue")
+	}
+	if ro.ForkSession {
+		fields = append(fields, "fork_session")
+	}
+	if ro.ActiveAgent != "" {
+		fields = append(fields, "agent")
+	}
+	if ro.JSONSchema != "" {
+		fields = append(fields, "json_schema")
+	}
+	if ro.MaxBudgetUSD > 0 {
+		fields = append(fields, "max_budget_usd")
+	}
+	if ro.Effort != "" {
+		fields = append(fields, "effort")
+	}
+	return fields
+}
+
 // Process manages a Claude CLI subprocess lifecycle and streams its output.
 type Process struct {
 	opts Options
@@ -48,7 +83,8 @@ type Process struct {
 	lastMessage   string
 	lastToolName  string
 
-	done chan struct{}
+	done      chan struct{}
+	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
 
 // NewProcess returns a Process ready to run. The Done channel is pre-closed
@@ -151,9 +187,14 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
 
+	// Create a context for the stdout-reading goroutine so it can be
+	// cancelled by Stop() without blocking on a full output channel.
+	runCtx, runCancel := context.WithCancel(context.Background())
+
 	p.mu.Lock()
 	p.cmd = cmd
 	p.status = ProcessStatusBusy
+	p.runCancel = runCancel
 	p.mu.Unlock()
 
 	out := make(chan StreamMessage, 100)
@@ -216,7 +257,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			}
 			if msg.Type == MessageTypeAssistant {
 				if msg.Subtype == SubtypeText && msg.Text != "" {
-					p.lastMessage = truncate(msg.Text, 200)
+					p.lastMessage = Truncate(msg.Text, 200)
 				}
 				if msg.Subtype == SubtypeToolUse {
 					p.toolCallCount++
@@ -228,7 +269,13 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			}
 			p.mu.Unlock()
 
-			out <- msg
+			// Use select to prevent blocking if the consumer stops reading
+			// (e.g., after context cancellation in the MCP handler).
+			select {
+			case out <- msg:
+			case <-runCtx.Done():
+				return
+			}
 		}
 
 		if scanErr := scanner.Err(); scanErr != nil {
@@ -253,7 +300,6 @@ func (p *Process) RunSyncWithOptions(ctx context.Context, prompt string, runOpts
 	}
 
 	var messages []StreamMessage
-	var resultText string
 
 loop:
 	for {
@@ -266,22 +312,10 @@ loop:
 				break loop
 			}
 			messages = append(messages, msg)
-			if msg.Type == MessageTypeResult {
-				resultText = msg.Result
-			}
 		}
 	}
 
-	if resultText == "" {
-		// Collect text from assistant messages as fallback.
-		for _, msg := range messages {
-			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
-				resultText += msg.Text
-			}
-		}
-	}
-
-	return resultText, messages, nil
+	return CollectResultText(messages), messages, nil
 }
 
 // Stop sends SIGTERM and waits up to 10s before SIGKILL.
@@ -294,6 +328,11 @@ func (p *Process) Stop() error {
 		return nil
 	}
 	p.status = ProcessStatusStopped
+	// Cancel the stdout-reading goroutine so it doesn't block on a full
+	// output channel while we wait for the process to exit.
+	if p.runCancel != nil {
+		p.runCancel()
+	}
 	p.mu.Unlock()
 
 	// Send SIGTERM first.
@@ -345,13 +384,4 @@ func (p *Process) setError(msg string) {
 	defer p.mu.Unlock()
 	p.status = ProcessStatusError
 	p.lastError = msg
-}
-
-// truncate returns s truncated to maxLen runes with "..." appended if truncated.
-func truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
 }

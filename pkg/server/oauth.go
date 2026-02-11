@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -87,9 +88,6 @@ type OAuthConfig struct {
 
 	// DisableStreaming disables streaming for streamable-http transport.
 	DisableStreaming bool
-
-	// DebugMode enables debug logging.
-	DebugMode bool
 }
 
 // GoogleOAuthConfig holds Google OAuth provider settings.
@@ -216,7 +214,7 @@ func NewOAuthServer(process claudepkg.Prompter, config OAuthConfig) (*OAuthServe
 }
 
 // Start validates the config, registers routes, and begins serving.
-func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
+func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error {
 	if err := ValidateHTTPSRequirement(config.BaseURL); err != nil {
 		return err
 	}
@@ -230,7 +228,7 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 	s.setupMCPRoutes(mux, config)
 
 	// Health and status endpoints (unprotected).
-	registerOperationalRoutes(mux, s.process, ModeSingleShot)
+	registerOperationalRoutes(mux, s.process, mode)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -262,15 +260,18 @@ func (s *OAuthServer) Start(addr string, config OAuthConfig) error {
 }
 
 func (s *OAuthServer) Shutdown(ctx context.Context) error {
+	var errs []error
 	if s.oauthServer != nil {
 		if err := s.oauthServer.Shutdown(ctx); err != nil {
-			return fmt.Errorf("failed to shutdown OAuth server: %w", err)
+			errs = append(errs, fmt.Errorf("OAuth server shutdown: %w", err))
 		}
 	}
 	if s.httpServer != nil {
-		return s.httpServer.Shutdown(ctx)
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("HTTP server shutdown: %w", err))
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (s *OAuthServer) setupOAuthRoutes(mux *http.ServeMux) {
@@ -299,14 +300,7 @@ func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
 }
 
 func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
-	var logger *slog.Logger
-	if config.DebugMode {
-		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		}))
-	} else {
-		logger = slog.Default()
-	}
+	logger := slog.Default()
 
 	redirectURL := config.BaseURL + "/oauth/callback"
 	var provider providers.Provider

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,125 +72,6 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 	}
 }
 
-// persistentArgs builds the CLI argument list for persistent mode.
-// This uses --input-format stream-json for bidirectional communication.
-func (p *PersistentProcess) persistentArgs() []string {
-	o := p.opts
-
-	args := []string{
-		"--print",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--replay-user-messages",
-		"--verbose",
-	}
-
-	if o.Model != "" {
-		args = append(args, "--model", o.Model)
-	}
-
-	if o.FallbackModel != "" {
-		args = append(args, "--fallback-model", o.FallbackModel)
-	}
-
-	if o.SystemPrompt != "" {
-		args = append(args, "--system-prompt", o.SystemPrompt)
-	}
-
-	if o.AppendSystemPrompt != "" {
-		args = append(args, "--append-system-prompt", o.AppendSystemPrompt)
-	}
-
-	if o.MaxTurns > 0 {
-		args = append(args, "--max-turns", fmt.Sprintf("%d", o.MaxTurns))
-	}
-
-	if o.PermissionMode != "" {
-		args = append(args, "--permission-mode", o.PermissionMode)
-	}
-
-	if o.PermissionMode == "bypassPermissions" {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-
-	if o.MCPConfigPath != "" {
-		args = append(args, "--mcp-config", o.MCPConfigPath)
-	}
-
-	if o.StrictMCPConfig {
-		args = append(args, "--strict-mcp-config")
-	}
-
-	if len(o.AllowedTools) > 0 {
-		args = append(args, "--allowedTools", joinStrings(o.AllowedTools))
-	}
-
-	if len(o.DisallowedTools) > 0 {
-		args = append(args, "--disallowedTools", joinStrings(o.DisallowedTools))
-	}
-
-	if len(o.Tools) > 0 {
-		args = append(args, "--tools", joinStrings(o.Tools))
-	}
-
-	if o.MaxBudgetUSD > 0 {
-		args = append(args, "--max-budget-usd", fmt.Sprintf("%.2f", o.MaxBudgetUSD))
-	}
-
-	if o.Effort != "" {
-		args = append(args, "--effort", o.Effort)
-	}
-
-	if o.NoSessionPersistence {
-		args = append(args, "--no-session-persistence")
-	}
-
-	if len(o.Agents) > 0 {
-		data, err := json.Marshal(o.Agents)
-		if err == nil {
-			args = append(args, "--agents", string(data))
-		}
-	}
-
-	if o.ActiveAgent != "" {
-		args = append(args, "--agent", o.ActiveAgent)
-	}
-
-	if o.JSONSchema != "" {
-		args = append(args, "--json-schema", o.JSONSchema)
-	}
-
-	if o.IncludePartialMessages {
-		args = append(args, "--include-partial-messages")
-	}
-
-	if o.SettingsFile != "" {
-		args = append(args, "--settings", o.SettingsFile)
-	}
-
-	if o.SettingSources != "" {
-		args = append(args, "--setting-sources", o.SettingSources)
-	}
-
-	for _, dir := range o.PluginDirs {
-		args = append(args, "--plugin-dir", dir)
-	}
-
-	return args
-}
-
-// joinStrings joins a string slice with commas.
-func joinStrings(ss []string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += ","
-		}
-		result += s
-	}
-	return result
-}
-
 // Start launches the persistent Claude subprocess. It must be called before
 // sending prompts. The subprocess runs until Stop() is called or it exits.
 func (p *PersistentProcess) Start(ctx context.Context) error {
@@ -202,7 +84,7 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 
 	p.status = ProcessStatusStarting
 
-	args := p.persistentArgs()
+	args := p.opts.PersistentArgs()
 
 	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
 	if p.opts.WorkDir != "" {
@@ -374,7 +256,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		}
 		if msg.Type == MessageTypeAssistant {
 			if msg.Subtype == SubtypeText && msg.Text != "" {
-				p.lastMessage = truncate(msg.Text, 200)
+				p.lastMessage = Truncate(msg.Text, 200)
 			}
 			if msg.Subtype == SubtypeToolUse {
 				p.toolCallCount++
@@ -390,7 +272,11 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		p.mu.Unlock()
 
 		if ch != nil {
-			ch <- msg
+			select {
+			case ch <- msg:
+			case <-ctx.Done():
+				return
+			}
 		}
 
 		// A result message marks the end of the current response cycle.
@@ -435,10 +321,16 @@ func (p *PersistentProcess) Run(ctx context.Context, prompt string) (<-chan Stre
 }
 
 // RunWithOptions sends a prompt with optional per-invocation overrides.
-// In persistent mode, most overrides are ignored since the subprocess flags
-// were set at Start time. However, some options (like effort) are noted for
-// future use when the Claude CLI supports per-message configuration.
-func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, _ *RunOptions) (<-chan StreamMessage, error) {
+// In persistent mode, per-invocation overrides cannot be applied since the
+// subprocess flags were set at Start time. If non-empty overrides are provided,
+// a warning is logged listing which fields were ignored.
+func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (<-chan StreamMessage, error) {
+	if runOpts != nil {
+		if ignored := runOpts.ignoredFields(); len(ignored) > 0 {
+			log.Printf("[claude persistent] WARNING: per-invocation overrides ignored in persistent mode: %s", strings.Join(ignored, ", "))
+		}
+	}
+
 	p.mu.Lock()
 
 	if p.cmd == nil {
@@ -505,7 +397,6 @@ func (p *PersistentProcess) RunSyncWithOptions(ctx context.Context, prompt strin
 	}
 
 	var messages []StreamMessage
-	var resultText string
 
 loop:
 	for {
@@ -519,21 +410,10 @@ loop:
 				break loop
 			}
 			messages = append(messages, msg)
-			if msg.Type == MessageTypeResult {
-				resultText = msg.Result
-			}
 		}
 	}
 
-	if resultText == "" {
-		for _, msg := range messages {
-			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
-				resultText += msg.Text
-			}
-		}
-	}
-
-	return resultText, messages, nil
+	return CollectResultText(messages), messages, nil
 }
 
 // Stop sends SIGTERM to the persistent subprocess and waits for it to exit.

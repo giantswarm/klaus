@@ -76,11 +76,6 @@ func TestPersistentProcess_ImplementsPrompter(t *testing.T) {
 	var _ Prompter = (*PersistentProcess)(nil)
 }
 
-func TestProcess_ImplementsPrompter(t *testing.T) {
-	// Compile-time check that Process implements Prompter.
-	var _ Prompter = (*Process)(nil)
-}
-
 func TestPersistentProcess_PersistentArgs(t *testing.T) {
 	opts := Options{
 		Model:              "claude-sonnet-4-20250514",
@@ -108,8 +103,7 @@ func TestPersistentProcess_PersistentArgs(t *testing.T) {
 		NoSessionPersistence:   true,
 	}
 
-	process := NewPersistentProcess(opts)
-	args := process.persistentArgs()
+	args := opts.PersistentArgs()
 
 	// Persistent mode uses --input-format stream-json with --replay-user-messages.
 	assertContainsSequence(t, args, "--input-format", "stream-json")
@@ -151,8 +145,7 @@ func TestPersistentProcess_PersistentArgs(t *testing.T) {
 }
 
 func TestPersistentProcess_PersistentArgs_Minimal(t *testing.T) {
-	process := NewPersistentProcess(DefaultOptions())
-	args := process.persistentArgs()
+	args := DefaultOptions().PersistentArgs()
 
 	assertContainsSequence(t, args, "--input-format", "stream-json")
 	assertContainsSequence(t, args, "--output-format", "stream-json")
@@ -182,22 +175,30 @@ func TestStdinMessage_JSON(t *testing.T) {
 	}
 }
 
-func TestJoinStrings(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    []string
-		expected string
-	}{
-		{"empty", nil, ""},
-		{"single", []string{"a"}, "a"},
-		{"multiple", []string{"a", "b", "c"}, "a,b,c"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := joinStrings(tt.input)
-			if got != tt.expected {
-				t.Errorf("joinStrings(%v) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
+func TestRunOptions_IgnoredFields(t *testing.T) {
+	t.Run("nil returns empty", func(t *testing.T) {
+		var ro *RunOptions
+		if fields := ro.ignoredFields(); len(fields) != 0 {
+			t.Errorf("expected empty, got %v", fields)
+		}
+	})
+
+	t.Run("zero value returns empty", func(t *testing.T) {
+		ro := &RunOptions{}
+		if fields := ro.ignoredFields(); len(fields) != 0 {
+			t.Errorf("expected empty, got %v", fields)
+		}
+	})
+
+	t.Run("non-zero fields listed", func(t *testing.T) {
+		ro := &RunOptions{
+			SessionID:    "sess-1",
+			ActiveAgent:  "reviewer",
+			MaxBudgetUSD: 5.0,
+		}
+		fields := ro.ignoredFields()
+		if len(fields) != 3 {
+			t.Errorf("expected 3 fields, got %d: %v", len(fields), fields)
+		}
+	})
 }
