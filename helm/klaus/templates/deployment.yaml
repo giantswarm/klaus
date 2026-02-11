@@ -123,7 +123,7 @@ spec:
               value: {{ join "," .Values.claude.pluginDirs | quote }}
             {{- end }}
             # Named agents
-            {{- if .Values.claude.agents }}
+            {{- if and .Values.claude.agents (ne (toJson .Values.claude.agents) "{}") }}
             - name: CLAUDE_AGENTS
               valueFrom:
                 configMapKeyRef:

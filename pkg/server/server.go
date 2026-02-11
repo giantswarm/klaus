@@ -24,10 +24,6 @@ const (
 	ModePersistent = "persistent"
 )
 
-func New(process claudepkg.Prompter, port string) *Server {
-	return NewWithMode(process, port, ModeSingleShot)
-}
-
 func NewWithMode(process claudepkg.Prompter, port string, mode string) *Server {
 	mcpSrv := mcppkg.NewServer(process)
 

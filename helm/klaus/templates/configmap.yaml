@@ -18,6 +18,6 @@ data:
   {{- if .Values.claude.jsonSchema }}
   json-schema: {{ .Values.claude.jsonSchema | quote }}
   {{- end }}
-  {{- if .Values.claude.agents }}
+  {{- if and .Values.claude.agents (ne (toJson .Values.claude.agents) "{}") }}
   agents: {{ .Values.claude.agents | toJson | quote }}
   {{- end }}

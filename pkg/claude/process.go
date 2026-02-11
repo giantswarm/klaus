@@ -172,17 +172,20 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to create stdout pipe: %v", err))
 		return nil, err
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to create stderr pipe: %v", err))
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to start claude: %v", err))
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
