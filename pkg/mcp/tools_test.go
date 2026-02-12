@@ -476,7 +476,7 @@ func TestStatusTool(t *testing.T) {
 func TestStatusTool_WithResult(t *testing.T) {
 	mock := &mockPrompter{
 		status: claudepkg.StatusInfo{
-			Status:    claudepkg.ProcessStatusIdle,
+			Status:    claudepkg.ProcessStatusCompleted,
 			SessionID: "sess-xyz",
 			Result:    "Task completed successfully",
 		},
@@ -779,7 +779,7 @@ func TestOptionalFloat(t *testing.T) {
 func buildToolMap(process claudepkg.Prompter) map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tools := map[string]func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error){}
 
-	pt := promptTool(process)
+	pt := promptTool(context.Background(), process)
 	tools[pt.Tool.Name] = pt.Handler
 
 	st := statusTool(process)

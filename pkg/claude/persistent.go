@@ -484,6 +484,12 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 	return submitAsync(ctx, prompt, opts, p.RunWithOptions, func(rs resultState) {
 		p.mu.Lock()
 		p.result = rs
+		// When the drain goroutine finishes collecting the run output,
+		// transition from idle to completed so callers can distinguish
+		// "finished with results" from "never ran" (idle).
+		if rs.completed && p.status == ProcessStatusIdle {
+			p.status = ProcessStatusCompleted
+		}
 		p.mu.Unlock()
 	})
 }
@@ -504,7 +510,7 @@ func (p *PersistentProcess) Status() StatusInfo {
 		LastToolName:  p.lastToolName,
 	}
 
-	if p.status == ProcessStatusIdle && p.result.text != "" {
+	if p.status == ProcessStatusCompleted {
 		info.Result = Truncate(p.result.text, maxStatusResultLen)
 	}
 

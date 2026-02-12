@@ -91,7 +91,7 @@ func TestProcess_StatusNoResultWhenBusy(t *testing.T) {
 	// Simulate a process that has a stored result from a previous run
 	// but is currently busy.
 	process.mu.Lock()
-	process.result.text = "old result"
+	process.result = resultState{text: "old result", completed: true}
 	process.status = ProcessStatusBusy
 	process.mu.Unlock()
 
@@ -101,16 +101,29 @@ func TestProcess_StatusNoResultWhenBusy(t *testing.T) {
 	}
 }
 
-func TestProcess_StatusShowsResultWhenIdle(t *testing.T) {
+func TestProcess_StatusNoResultWhenIdle(t *testing.T) {
 	process := NewProcess(DefaultOptions())
 
-	// Simulate a completed Submit run that stored a result.
+	// idle with no completed result should not show result.
+	status := process.Status()
+	if status.Result != "" {
+		t.Errorf("expected empty result when idle, got %q", status.Result)
+	}
+}
+
+func TestProcess_StatusShowsResultWhenCompleted(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	// Simulate a completed Submit run.
 	process.mu.Lock()
-	process.result.text = "completed result"
-	process.status = ProcessStatusIdle
+	process.result = resultState{text: "completed result", completed: true}
+	process.status = ProcessStatusCompleted
 	process.mu.Unlock()
 
 	status := process.Status()
+	if status.Status != ProcessStatusCompleted {
+		t.Errorf("expected status %q, got %q", ProcessStatusCompleted, status.Status)
+	}
 	if status.Result != "completed result" {
 		t.Errorf("expected result %q, got %q", "completed result", status.Result)
 	}
@@ -125,8 +138,8 @@ func TestProcess_StatusTruncatesLongResult(t *testing.T) {
 		long[i] = 'x'
 	}
 	process.mu.Lock()
-	process.result.text = string(long)
-	process.status = ProcessStatusIdle
+	process.result = resultState{text: string(long), completed: true}
+	process.status = ProcessStatusCompleted
 	process.mu.Unlock()
 
 	status := process.Status()

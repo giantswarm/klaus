@@ -12,16 +12,20 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-func RegisterTools(s *server.MCPServer, process claudepkg.Prompter) {
+// RegisterTools registers all MCP tools on the given server. The serverCtx
+// controls the lifetime of background drain goroutines spawned by non-blocking
+// prompt submissions; it should be cancelled during server shutdown to ensure
+// goroutines are not orphaned.
+func RegisterTools(serverCtx context.Context, s *server.MCPServer, process claudepkg.Prompter) {
 	s.AddTools(
-		promptTool(process),
+		promptTool(serverCtx, process),
 		statusTool(process),
 		stopTool(process),
 		resultTool(process),
 	)
 }
 
-func promptTool(process claudepkg.Prompter) server.ServerTool {
+func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("prompt",
 		mcp.WithDescription("Send a prompt to the Claude Code agent. "+
 			"By default, the task runs asynchronously -- use the status tool to check progress and get the result. "+
@@ -133,9 +137,9 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 
 		// Non-blocking (default): start the task and return immediately.
 		if !blocking {
-			// Use context.Background so the drain goroutine outlives
-			// the MCP request context.
-			if err := process.Submit(context.Background(), message, &runOpts); err != nil {
+			// Use the server-scoped context so the drain goroutine
+			// outlives the MCP request but is cancelled on shutdown.
+			if err := process.Submit(serverCtx, message, &runOpts); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("failed to start task: %v", err)), nil
 			}
 
@@ -267,8 +271,9 @@ func progressMessage(msg claudepkg.StreamMessage) string {
 func statusTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("status",
 		mcp.WithDescription("Get the current status of the Claude Code agent. "+
-			"When the agent is busy, returns progress information (message_count, tool_call_count, last_tool_name, last_message). "+
-			"When idle after a completed run, includes the result field with the agent's final output (truncated; use the result tool for the full text). "+
+			"Possible statuses: idle (never ran or no result), busy (task running), completed (task finished with result available), "+
+			"starting, stopped, error. When busy, returns progress (message_count, tool_call_count, last_tool_name, last_message). "+
+			"When completed, includes the result field with the agent's final output (truncated; use the result tool for the full text). "+
 			"This is the primary way to check progress and retrieve results for non-blocking prompts."),
 	)
 

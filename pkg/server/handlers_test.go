@@ -91,6 +91,11 @@ func TestHandleReadyz(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			name:       "ready when completed",
+			status:     claude.ProcessStatusCompleted,
+			wantStatus: http.StatusOK,
+		},
+		{
 			name:       "not ready when starting",
 			status:     claude.ProcessStatusStarting,
 			wantStatus: http.StatusServiceUnavailable,

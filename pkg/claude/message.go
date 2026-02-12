@@ -67,11 +67,12 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 type ProcessStatus string
 
 const (
-	ProcessStatusStarting ProcessStatus = "starting"
-	ProcessStatusIdle     ProcessStatus = "idle"
-	ProcessStatusBusy     ProcessStatus = "busy"
-	ProcessStatusStopped  ProcessStatus = "stopped"
-	ProcessStatusError    ProcessStatus = "error"
+	ProcessStatusStarting  ProcessStatus = "starting"
+	ProcessStatusIdle      ProcessStatus = "idle"
+	ProcessStatusBusy      ProcessStatus = "busy"
+	ProcessStatusCompleted ProcessStatus = "completed"
+	ProcessStatusStopped   ProcessStatus = "stopped"
+	ProcessStatusError     ProcessStatus = "error"
 )
 
 // maxStatusResultLen is the maximum number of runes included in the
@@ -89,9 +90,14 @@ type StatusInfo struct {
 	LastMessage   string        `json:"last_message,omitempty"`
 	LastToolName  string        `json:"last_tool_name,omitempty"`
 	// Result contains the agent's final output text from the last completed
-	// run, truncated to maxStatusResultLen runes. It is populated when the
-	// status is idle after a non-blocking Submit. Use the result debug tool
+	// non-blocking Submit run, truncated to maxStatusResultLen runes. It is
+	// populated when the status is "completed". Use the result debug tool
 	// for the full untruncated text.
+	//
+	// The result persists until the next Submit call clears it (along with
+	// resetting the status to "busy"). There is no explicit "consumed"
+	// acknowledgement; callers should track whether they have already
+	// processed a given result.
 	Result string `json:"result,omitempty"`
 }
 
@@ -111,8 +117,9 @@ type ResultDetailInfo struct {
 // resultState holds the output of the last completed Submit run.
 // Access must be synchronized by the parent process's mutex.
 type resultState struct {
-	text     string
-	messages []StreamMessage
+	text      string
+	messages  []StreamMessage
+	completed bool // true after the drain goroutine finishes; false when cleared
 }
 
 // submitDrain starts a background goroutine that reads all messages from ch,
@@ -156,7 +163,7 @@ func submitAsync(
 	setResult(resultState{}) // Clear previous result now that the new run started.
 
 	submitDrain(ctx, ch, func(text string, messages []StreamMessage) {
-		setResult(resultState{text: text, messages: messages})
+		setResult(resultState{text: text, messages: messages, completed: true})
 	})
 	return nil
 }

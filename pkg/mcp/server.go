@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"context"
+
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/project"
 
@@ -8,8 +10,10 @@ import (
 )
 
 // NewServer returns a StreamableHTTPServer that serves MCP at /mcp.
-func NewServer(process claudepkg.Prompter) *server.StreamableHTTPServer {
-	mcpServer := NewMCPServer(process)
+// The serverCtx controls the lifetime of background goroutines; it should
+// be cancelled during server shutdown.
+func NewServer(serverCtx context.Context, process claudepkg.Prompter) *server.StreamableHTTPServer {
+	mcpServer := NewMCPServer(serverCtx, process)
 
 	httpServer := server.NewStreamableHTTPServer(mcpServer,
 		server.WithEndpointPath("/mcp"),
@@ -19,8 +23,10 @@ func NewServer(process claudepkg.Prompter) *server.StreamableHTTPServer {
 }
 
 // NewMCPServer returns the raw MCPServer with tools registered, for use
-// when wrapping with custom middleware (e.g. OAuth).
-func NewMCPServer(process claudepkg.Prompter) *server.MCPServer {
+// when wrapping with custom middleware (e.g. OAuth). The serverCtx controls
+// the lifetime of background goroutines; it should be cancelled during
+// server shutdown.
+func NewMCPServer(serverCtx context.Context, process claudepkg.Prompter) *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		project.Name,
 		project.Version(),
@@ -29,7 +35,7 @@ func NewMCPServer(process claudepkg.Prompter) *server.MCPServer {
 		server.WithInstructions("Klaus wraps a Claude Code agent. Use the 'prompt' tool to send tasks."),
 	)
 
-	RegisterTools(mcpServer, process)
+	RegisterTools(serverCtx, mcpServer, process)
 
 	return mcpServer
 }

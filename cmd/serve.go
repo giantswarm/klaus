@@ -328,18 +328,23 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
+	// Server-scoped context: cancelled during shutdown to clean up
+	// background drain goroutines from non-blocking prompt submissions.
+	serverCtx, serverCancel := context.WithCancel(context.Background())
+	defer serverCancel()
+
 	mode := server.ModeSingleShot
 	if persistentMode {
 		mode = server.ModePersistent
 	}
 
 	if enableOAuth {
-		return runWithOAuth(process, port, mode, oauthConfig, quit)
+		return runWithOAuth(serverCtx, process, port, mode, oauthConfig, quit)
 	}
-	return runWithoutOAuth(process, port, mode, quit)
+	return runWithoutOAuth(serverCtx, process, port, mode, quit)
 }
 
-func runWithOAuth(process claude.Prompter, port string, mode string, config server.OAuthConfig, quit chan os.Signal) error {
+func runWithOAuth(serverCtx context.Context, process claude.Prompter, port string, mode string, config server.OAuthConfig, quit chan os.Signal) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -355,7 +360,7 @@ func runWithOAuth(process claude.Prompter, port string, mode string, config serv
 		log.Println("WARNING: OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(process, config)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}
@@ -369,8 +374,8 @@ func runWithOAuth(process claude.Prompter, port string, mode string, config serv
 	)
 }
 
-func runWithoutOAuth(process claude.Prompter, port string, mode string, quit chan os.Signal) error {
-	srv := server.NewWithMode(process, port, mode)
+func runWithoutOAuth(serverCtx context.Context, process claude.Prompter, port string, mode string, quit chan os.Signal) error {
+	srv := server.NewWithMode(serverCtx, process, port, mode)
 	return runServerLifecycle(srv.Start, srv.Shutdown, process, quit)
 }
 

@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
-- **`status` MCP tool now includes result on completion**: When idle after a completed run, the status response includes a `result` field with the agent's final output text, making it the primary way to retrieve results from non-blocking prompts.
+- **`status` MCP tool now includes result on completion**: When a non-blocking run completes, the status transitions to `completed` with a `result` field containing the agent's final output text. The `completed` status distinguishes "task finished with results" from `idle` ("never ran / no results").
+- **Non-blocking drain goroutines now use a server-scoped context**: Previously, drain goroutines used `context.Background()` and could be orphaned during server shutdown. They now use a server-scoped context that is cancelled during graceful shutdown, ensuring clean goroutine cleanup.
 
 ### Added
 
+- **`completed` process status**: New status that indicates a non-blocking Submit run has finished and results are available. Callers can now distinguish "task finished" (`completed`) from "never ran" (`idle`), making polling loops unambiguous.
 - **`result` MCP debug tool**: New tool that returns the full untruncated result text and detailed metadata (message history, costs, session info) from the last completed run. Intended for debugging and troubleshooting when the agent produces unexpected output.
 - `Submit()` method on `Prompter` interface for non-blocking prompt execution with background result collection.
 - `ResultDetail()` method on `Prompter` interface for retrieving full debug output from the last completed run.

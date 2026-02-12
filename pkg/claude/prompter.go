@@ -22,11 +22,15 @@ type Prompter interface {
 	// background goroutine to drain the message channel and store results,
 	// then returns immediately. The ctx should be a server-scoped context
 	// (not an MCP request context) so the drain goroutine outlives the caller.
-	// Use Status() to check progress and retrieve the result when complete.
+	// When the drain completes, the status transitions to "completed" and the
+	// result is available via Status() and ResultDetail(). The result persists
+	// until the next Submit call clears it.
 	Submit(ctx context.Context, prompt string, opts *RunOptions) error
 
-	// Status returns the current status information. When idle after a
-	// completed Submit run, the Result field contains the agent's output.
+	// Status returns the current status information. When the status is
+	// "completed" (after a non-blocking Submit finishes), the Result field
+	// contains the agent's truncated output. Use ResultDetail() for the
+	// full untruncated text.
 	Status() StatusInfo
 
 	// Stop stops the current operation or subprocess.

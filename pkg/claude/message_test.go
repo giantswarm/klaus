@@ -110,6 +110,7 @@ func TestProcessStatus_Values(t *testing.T) {
 		ProcessStatusStarting,
 		ProcessStatusIdle,
 		ProcessStatusBusy,
+		ProcessStatusCompleted,
 		ProcessStatusStopped,
 		ProcessStatusError,
 	}
