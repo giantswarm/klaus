@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/giantswarm/klaus/pkg/metrics"
 )
 
 // PersistentProcess maintains a long-running Claude subprocess for multi-turn
@@ -125,6 +127,7 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	p.cmd = cmd
 	p.stdin = stdinPipe
 	p.status = ProcessStatusIdle
+	metrics.SetProcessStatus(string(ProcessStatusIdle))
 
 	processDone := make(chan struct{})
 	p.processDone = processDone
@@ -188,6 +191,7 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 		}
 
 		log.Printf("[claude] persistent subprocess exited unexpectedly (status=%s), restarting in %v", status, restartBackoff)
+		metrics.ProcessRestartsTotal.Inc()
 
 		select {
 		case <-watchCtx.Done():
@@ -228,8 +232,10 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		default:
 			close(p.done)
 		}
+		status := p.status
 		close(processDone)
 		p.mu.Unlock()
+		metrics.SetProcessStatus(string(status))
 		log.Println("[claude] persistent subprocess exited")
 	}()
 
@@ -277,6 +283,15 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		ch := p.responseCh
 		p.mu.Unlock()
 
+		// Record Prometheus metrics.
+		metrics.MessagesTotal.WithLabelValues(string(msg.Type)).Inc()
+		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse {
+			metrics.ToolCallsTotal.WithLabelValues(msg.ToolName).Inc()
+		}
+		if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
+			metrics.SessionCostUSDTotal.Add(msg.TotalCost)
+		}
+
 		if ch != nil {
 			select {
 			case ch <- msg:
@@ -302,7 +317,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			default:
 				close(p.done)
 			}
+			status := p.status
 			p.mu.Unlock()
+			metrics.SetProcessStatus(string(status))
 		}
 	}
 
@@ -376,6 +393,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	stdin := p.stdin
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusBusy))
 
 	// Write the user message to stdin as stream-json.
 	msg := stdinMessage{
@@ -458,6 +476,7 @@ func (p *PersistentProcess) Stop() error {
 		p.stdin = nil
 	}
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusStopped))
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -551,4 +570,5 @@ func (p *PersistentProcess) setError(msg string) {
 	defer p.mu.Unlock()
 	p.status = ProcessStatusError
 	p.lastError = msg
+	metrics.SetProcessStatus(string(ProcessStatusError))
 }

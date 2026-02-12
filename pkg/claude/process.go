@@ -10,6 +10,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/giantswarm/klaus/pkg/metrics"
 )
 
 // RunOptions allows overriding base Options on a per-invocation basis.
@@ -203,6 +205,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.status = ProcessStatusBusy
 	p.runCancel = runCancel
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusBusy))
 
 	out := make(chan StreamMessage, 100)
 
@@ -238,8 +241,10 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			} else if p.status == ProcessStatusBusy {
 				p.status = ProcessStatusIdle
 			}
+			status := p.status
 			close(done)
 			p.mu.Unlock()
+			metrics.SetProcessStatus(string(status))
 		}()
 
 		scanner := bufio.NewScanner(stdout)
@@ -275,6 +280,15 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 				p.totalCost = msg.TotalCost
 			}
 			p.mu.Unlock()
+
+			// Record Prometheus metrics.
+			metrics.MessagesTotal.WithLabelValues(string(msg.Type)).Inc()
+			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse {
+				metrics.ToolCallsTotal.WithLabelValues(msg.ToolName).Inc()
+			}
+			if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
+				metrics.SessionCostUSDTotal.Add(msg.TotalCost)
+			}
 
 			// Use select to prevent blocking if the consumer stops reading
 			// (e.g., after context cancellation in the MCP handler).
@@ -341,6 +355,7 @@ func (p *Process) Stop() error {
 		p.runCancel()
 	}
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusStopped))
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -433,4 +448,5 @@ func (p *Process) setError(msg string) {
 	defer p.mu.Unlock()
 	p.status = ProcessStatusError
 	p.lastError = msg
+	metrics.SetProcessStatus(string(ProcessStatusError))
 }

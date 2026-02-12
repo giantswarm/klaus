@@ -1,0 +1,18 @@
+{{- if .Values.telemetry.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "klaus.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "klaus.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "klaus.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.telemetry.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.telemetry.serviceMonitor.scrapeTimeout }}
+{{- end }}

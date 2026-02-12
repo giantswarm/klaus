@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/metrics"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -140,8 +142,11 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 			// Use the server-scoped context so the drain goroutine
 			// outlives the MCP request but is cancelled on shutdown.
 			if err := process.Submit(serverCtx, message, &runOpts); err != nil {
+				metrics.PromptsTotal.WithLabelValues("error", "async").Inc()
 				return mcp.NewToolResultError(fmt.Sprintf("failed to start task: %v", err)), nil
 			}
+
+			metrics.PromptsTotal.WithLabelValues("started", "async").Inc()
 
 			status := process.Status()
 			response := struct {
@@ -160,6 +165,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 		}
 
 		// Blocking: wait for completion and return the full result.
+		promptStart := time.Now()
 
 		// Extract progress token for streaming progress notifications.
 		var progressToken mcp.ProgressToken
@@ -170,6 +176,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 		// Use the streaming Run method so we can send progress notifications.
 		ch, err := process.RunWithOptions(ctx, message, &runOpts)
 		if err != nil {
+			metrics.PromptsTotal.WithLabelValues("error", "blocking").Inc()
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
 		}
 
@@ -183,6 +190,8 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 			select {
 			case <-ctx.Done():
 				_ = process.Stop()
+				metrics.PromptsTotal.WithLabelValues("error", "blocking").Inc()
+				metrics.PromptDurationSeconds.WithLabelValues("error", "blocking").Observe(time.Since(promptStart).Seconds())
 				return mcp.NewToolResultError(fmt.Sprintf("cancelled: %v", ctx.Err())), nil
 			case msg, ok := <-ch:
 				if !ok {
@@ -235,6 +244,9 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 				break
 			}
 		}
+
+		metrics.PromptsTotal.WithLabelValues("completed", "blocking").Inc()
+		metrics.PromptDurationSeconds.WithLabelValues("completed", "blocking").Observe(time.Since(promptStart).Seconds())
 
 		data, err := json.Marshal(response)
 		if err != nil {

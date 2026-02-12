@@ -143,6 +143,53 @@ spec:
             # Session persistence
             - name: CLAUDE_NO_SESSION_PERSISTENCE
               value: {{ .Values.claude.noSessionPersistence | quote }}
+            # OpenTelemetry monitoring (Claude Code native telemetry)
+            {{- if .Values.telemetry.enabled }}
+            - name: CLAUDE_CODE_ENABLE_TELEMETRY
+              value: "1"
+            {{- if .Values.telemetry.metricsExporter }}
+            - name: OTEL_METRICS_EXPORTER
+              value: {{ .Values.telemetry.metricsExporter | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.logsExporter }}
+            - name: OTEL_LOGS_EXPORTER
+              value: {{ .Values.telemetry.logsExporter | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.otlp.protocol }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .Values.telemetry.otlp.protocol | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.otlp.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlp.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.telemetry.otlp.headers }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              value: {{ .Values.telemetry.otlp.headers | quote }}
+            {{- end }}
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: {{ .Values.telemetry.metricExportIntervalMs | quote }}
+            - name: OTEL_LOGS_EXPORT_INTERVAL
+              value: {{ .Values.telemetry.logsExportIntervalMs | quote }}
+            {{- if .Values.telemetry.logUserPrompts }}
+            - name: OTEL_LOG_USER_PROMPTS
+              value: "1"
+            {{- end }}
+            {{- if .Values.telemetry.logToolDetails }}
+            - name: OTEL_LOG_TOOL_DETAILS
+              value: "1"
+            {{- end }}
+            - name: OTEL_METRICS_INCLUDE_SESSION_ID
+              value: {{ .Values.telemetry.includeSessionId | quote }}
+            - name: OTEL_METRICS_INCLUDE_VERSION
+              value: {{ .Values.telemetry.includeVersion | quote }}
+            - name: OTEL_METRICS_INCLUDE_ACCOUNT_UUID
+              value: {{ .Values.telemetry.includeAccountUuid | quote }}
+            {{- if .Values.telemetry.resourceAttributes }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ .Values.telemetry.resourceAttributes | quote }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             {{- if .Values.claude.mcpConfig }}
             - name: mcp-config

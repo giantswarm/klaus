@@ -112,6 +112,42 @@ workspace:
   # existingClaim allows using a pre-existing PVC.
   existingClaim: ""
 
+# OpenTelemetry monitoring configuration.
+# These env vars are inherited by the Claude Code subprocess, enabling its
+# native telemetry (tokens, cost, sessions, tool events, API requests).
+# See https://code.claude.com/docs/en/monitoring-usage for details.
+telemetry:
+  enabled: false
+  # metricsExporter selects the metrics exporter: "otlp", "prometheus", "console".
+  metricsExporter: "otlp"
+  # logsExporter selects the logs/events exporter: "otlp", "console".
+  logsExporter: "otlp"
+  # otlp configures the OTLP exporter endpoint.
+  otlp:
+    protocol: "grpc"
+    endpoint: ""
+    # headers for authentication (e.g. "Authorization=Bearer token").
+    headers: ""
+  # exportIntervals control how often data is flushed (milliseconds).
+  metricExportIntervalMs: 60000
+  logsExportIntervalMs: 5000
+  # Privacy controls.
+  logUserPrompts: false
+  logToolDetails: false
+  # Cardinality controls.
+  includeSessionId: true
+  includeVersion: false
+  includeAccountUuid: true
+  # Custom resource attributes for team identification (W3C Baggage format).
+  # Example: "department=engineering,team.id=platform,cost_center=eng-123"
+  resourceAttributes: ""
+  # serviceMonitor configures a Prometheus Operator ServiceMonitor for
+  # scraping the /metrics endpoint exposed by klaus itself.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+
 resources:
   limits:
     cpu: "2"
