@@ -166,6 +166,114 @@
           "type": "string"
         }
       }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "OpenTelemetry monitoring and Prometheus metrics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable OTel env var pass-through to the Claude Code subprocess"
+        },
+        "metricsExporter": {
+          "type": "string",
+          "description": "Metrics exporter for Claude Code telemetry",
+          "enum": ["otlp", "prometheus", "console"]
+        },
+        "logsExporter": {
+          "type": "string",
+          "description": "Logs/events exporter for Claude Code telemetry",
+          "enum": ["otlp", "console"]
+        },
+        "otlp": {
+          "type": "object",
+          "description": "OTLP exporter configuration",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "description": "OTLP transport protocol",
+              "enum": ["grpc", "http/protobuf"]
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "OTLP collector endpoint URL"
+            },
+            "headers": {
+              "type": "string",
+              "description": "OTLP headers for authentication (e.g. Authorization=Bearer token)"
+            }
+          }
+        },
+        "metricExportIntervalMs": {
+          "type": "integer",
+          "description": "Metric flush interval in milliseconds"
+        },
+        "logsExportIntervalMs": {
+          "type": "integer",
+          "description": "Logs flush interval in milliseconds"
+        },
+        "logUserPrompts": {
+          "type": "boolean",
+          "description": "Include user prompt text in OTel log events (privacy sensitive)"
+        },
+        "logToolDetails": {
+          "type": "boolean",
+          "description": "Include tool input/output in OTel log events (privacy sensitive)"
+        },
+        "includeSessionId": {
+          "type": "boolean",
+          "description": "Include session_id label in OTel metrics"
+        },
+        "includeVersion": {
+          "type": "boolean",
+          "description": "Include version label in OTel metrics"
+        },
+        "includeAccountUuid": {
+          "type": "boolean",
+          "description": "Include account_uuid label in OTel metrics"
+        },
+        "resourceAttributes": {
+          "type": "string",
+          "description": "Custom OTEL_RESOURCE_ATTRIBUTES in W3C Baggage format"
+        },
+        "scrapeAnnotations": {
+          "type": "boolean",
+          "description": "Add prometheus.io/* scrape annotations to the Service"
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "description": "Prometheus Operator ServiceMonitor configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create a ServiceMonitor resource for Prometheus Operator"
+            },
+            "interval": {
+              "type": "string",
+              "description": "Scrape interval (e.g. 30s)"
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "description": "Scrape timeout (e.g. 10s)"
+            },
+            "namespaceSelector": {
+              "type": "object",
+              "description": "Optional namespace selector for cross-namespace monitoring",
+              "properties": {
+                "any": {
+                  "type": "boolean"
+                },
+                "matchNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

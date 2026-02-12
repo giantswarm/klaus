@@ -7,6 +7,8 @@
 package metrics
 
 import (
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -20,6 +22,11 @@ const (
 	messageTypeResult    = "result"
 	subtypeToolUse       = "tool_use"
 )
+
+// maxToolNameLabels is the maximum number of distinct tool_name label values
+// tracked by ToolCallsTotal. Once this limit is reached, any new tool names
+// are bucketed under the "other" label to prevent unbounded cardinality.
+const maxToolNameLabels = 50
 
 // PromptsTotal counts the number of prompt invocations.
 var PromptsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -60,9 +67,9 @@ var MessagesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 
 // ToolCallsTotal counts tool invocations by the Claude subprocess.
 // The tool_name label values come from the Claude CLI's finite built-in tool
-// set (Bash, Read, Edit, etc.). If user-defined tools are ever forwarded
-// through this path, consider constraining or bucketing the label to avoid
-// unbounded cardinality.
+// set (Bash, Read, Edit, etc.). A cardinality guard (maxToolNameLabels)
+// prevents unbounded series growth if user-defined tools are ever forwarded
+// through this path; excess tool names are bucketed under "other".
 var ToolCallsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: namespace,
 	Name:      "tool_calls_total",
@@ -81,9 +88,16 @@ var ProcessRestartsTotal = promauto.NewCounter(prometheus.CounterOpts{
 // package test in sync_test.go enforces this at test time.
 var AllStatuses = []string{"starting", "idle", "busy", "completed", "stopped", "error"}
 
+// statusMu serialises SetProcessStatus calls so that a concurrent scrape
+// never observes a partially-updated gauge (e.g. two statuses at 1 or all
+// at 0).
+var statusMu sync.Mutex
+
 // SetProcessStatus sets the process status gauge, setting the given status to 1
-// and all others to 0.
+// and all others to 0. The update is atomic with respect to concurrent callers.
 func SetProcessStatus(status string) {
+	statusMu.Lock()
+	defer statusMu.Unlock()
 	for _, s := range AllStatuses {
 		if s == status {
 			ProcessStatusGauge.WithLabelValues(s).Set(1)
@@ -93,13 +107,35 @@ func SetProcessStatus(status string) {
 	}
 }
 
+// toolNamesMu guards knownToolNames.
+var toolNamesMu sync.Mutex
+
+// knownToolNames tracks the distinct tool names we have seen so far. Once
+// the set reaches maxToolNameLabels, new names are bucketed as "other".
+var knownToolNames = make(map[string]struct{})
+
+// safeToolName returns toolName if it is already known or we have capacity
+// for a new label, otherwise it returns "other" to bound cardinality.
+func safeToolName(toolName string) string {
+	toolNamesMu.Lock()
+	defer toolNamesMu.Unlock()
+	if _, ok := knownToolNames[toolName]; ok {
+		return toolName
+	}
+	if len(knownToolNames) < maxToolNameLabels {
+		knownToolNames[toolName] = struct{}{}
+		return toolName
+	}
+	return "other"
+}
+
 // RecordStreamMessage records per-message Prometheus metrics from a parsed
 // stream-json message. The caller passes the raw string values of the message
 // fields to avoid a circular import on pkg/claude.
 func RecordStreamMessage(msgType, subtype, toolName string) {
 	MessagesTotal.WithLabelValues(msgType).Inc()
 	if msgType == messageTypeAssistant && subtype == subtypeToolUse {
-		ToolCallsTotal.WithLabelValues(toolName).Inc()
+		ToolCallsTotal.WithLabelValues(safeToolName(toolName)).Inc()
 	}
 }
 

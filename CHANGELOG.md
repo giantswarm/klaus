@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Prometheus `/metrics` endpoint**: Server-side Prometheus metrics exposed via `promhttp.Handler` at `/metrics`, always available regardless of OTel configuration. Metrics include `klaus_prompts_total`, `klaus_prompt_duration_seconds`, `klaus_process_status`, `klaus_session_cost_usd_total`, `klaus_messages_total`, `klaus_tool_calls_total`, and `klaus_process_restarts_total`.
+- **OpenTelemetry pass-through configuration**: New `telemetry` section in Helm values for passing `OTEL_*` environment variables to the Claude Code subprocess, enabling its native telemetry for tokens, cost, sessions, and tool events. Gated behind `telemetry.enabled`.
+- **ServiceMonitor template**: Optional Prometheus Operator `ServiceMonitor` resource (`telemetry.serviceMonitor.enabled`) with configurable interval, timeout, and namespace selector for cross-namespace monitoring.
+- **Prometheus scrape annotations**: Independently toggleable `prometheus.io/*` annotations on the Service via `telemetry.scrapeAnnotations`, decoupled from OTel pass-through.
 - **`completed` process status**: New status that indicates a non-blocking Submit run has finished and results are available. Callers can now distinguish "task finished" (`completed`) from "never ran" (`idle`), making polling loops unambiguous.
 - **`result` MCP debug tool**: New tool that returns the full untruncated result text and detailed metadata (message history, costs, session info) from the last completed run. Intended for debugging and troubleshooting when the agent produces unexpected output.
 - `Submit()` method on `Prompter` interface for non-blocking prompt execution with background result collection.

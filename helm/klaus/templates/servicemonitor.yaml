@@ -10,6 +10,10 @@ spec:
   selector:
     matchLabels:
       {{- include "klaus.selectorLabels" . | nindent 6 }}
+  {{- with .Values.telemetry.serviceMonitor.namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   endpoints:
     - port: http
       path: /metrics

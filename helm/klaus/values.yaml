@@ -118,9 +118,12 @@ workspace:
 # See https://code.claude.com/docs/en/monitoring-usage for details.
 #
 # Note: the /metrics endpoint (Prometheus format) is always served by klaus
-# regardless of this flag. Setting enabled=true controls the OTel env vars
-# passed to the Claude subprocess, adds Service scrape annotations, and
-# optionally creates a ServiceMonitor for Prometheus Operator discovery.
+# regardless of the enabled flag. Setting enabled=true controls the OTel
+# env vars passed to the Claude subprocess.
+#
+# Prometheus scrape annotations (scrapeAnnotations) and the ServiceMonitor
+# are independently toggleable so you can scrape /metrics without injecting
+# OTel env vars into the Claude subprocess.
 telemetry:
   enabled: false
   # metricsExporter selects the metrics exporter: "otlp", "prometheus", "console".
@@ -146,12 +149,21 @@ telemetry:
   # Custom resource attributes for team identification (W3C Baggage format).
   # Example: "department=engineering,team.id=platform,cost_center=eng-123"
   resourceAttributes: ""
+  # scrapeAnnotations adds prometheus.io/* annotations to the Service,
+  # independent of the OTel enabled flag above. Enable this when you want
+  # annotation-based Prometheus discovery of the /metrics endpoint.
+  scrapeAnnotations: false
   # serviceMonitor configures a Prometheus Operator ServiceMonitor for
-  # scraping the /metrics endpoint exposed by klaus itself.
+  # scraping the /metrics endpoint exposed by klaus itself. This is also
+  # independent of the OTel enabled flag.
   serviceMonitor:
     enabled: false
     interval: "30s"
     scrapeTimeout: "10s"
+    # namespaceSelector restricts which namespaces the ServiceMonitor
+    # matches. Leave empty to match only the release namespace (default).
+    # Set any=true for cross-namespace matching, or use matchNames.
+    namespaceSelector: {}
 
 resources:
   limits:

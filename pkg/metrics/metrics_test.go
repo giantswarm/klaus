@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -128,6 +129,68 @@ func TestRecordCost(t *testing.T) {
 func TestPromptDurationSeconds(t *testing.T) {
 	PromptDurationSeconds.WithLabelValues("completed", "blocking").Observe(5.0)
 	PromptDurationSeconds.WithLabelValues("error", "blocking").Observe(1.0)
+
+	// Verify the histogram was actually recorded by gathering metrics and
+	// checking the sample count.
+	metricFamilies, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("failed to gather metrics: %v", err)
+	}
+
+	var found bool
+	for _, mf := range metricFamilies {
+		if mf.GetName() != "klaus_prompt_duration_seconds" {
+			continue
+		}
+		found = true
+		// Sum up sample counts across all label combinations.
+		var totalCount uint64
+		for _, m := range mf.GetMetric() {
+			totalCount += m.GetHistogram().GetSampleCount()
+		}
+		if totalCount < 2 {
+			t.Errorf("expected at least 2 observations, got %d", totalCount)
+		}
+		break
+	}
+	if !found {
+		t.Error("klaus_prompt_duration_seconds not found in gathered metrics")
+	}
+}
+
+func TestSafeToolName_CardinalityGuard(t *testing.T) {
+	// Reset knownToolNames for this test to get deterministic behaviour.
+	toolNamesMu.Lock()
+	saved := knownToolNames
+	knownToolNames = make(map[string]struct{})
+	toolNamesMu.Unlock()
+
+	defer func() {
+		toolNamesMu.Lock()
+		knownToolNames = saved
+		toolNamesMu.Unlock()
+	}()
+
+	// Fill up to the limit with unique tool names.
+	for i := 0; i < maxToolNameLabels; i++ {
+		name := fmt.Sprintf("Tool_%d", i)
+		got := safeToolName(name)
+		if got != name {
+			t.Errorf("safeToolName(%q) = %q, want %q (under limit)", name, got, name)
+		}
+	}
+
+	// The next new tool name should be bucketed as "other".
+	got := safeToolName("OverflowTool")
+	if got != "other" {
+		t.Errorf("safeToolName(OverflowTool) = %q, want %q (over limit)", got, "other")
+	}
+
+	// An already-known tool should still return its real name.
+	got = safeToolName("Tool_0")
+	if got != "Tool_0" {
+		t.Errorf("safeToolName(Tool_0) = %q, want %q (already known)", got, "Tool_0")
+	}
 }
 
 // --- helpers -----------------------------------------------------------------

@@ -282,7 +282,10 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			p.mu.Unlock()
 
 			// Record Prometheus metrics. In single-shot mode each process
-			// starts fresh, so TotalCost equals the per-run cost.
+			// starts fresh so TotalCost equals the per-run cost and can
+			// be passed directly. If single-shot ever supports session
+			// resumption (where TotalCost becomes cumulative), this must
+			// be changed to compute a delta like persistent mode does.
 			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
 			if msg.Type == MessageTypeResult {
 				metrics.RecordCost(msg.TotalCost)
