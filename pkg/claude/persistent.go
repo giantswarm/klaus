@@ -33,6 +33,11 @@ type PersistentProcess struct {
 	lastMessage   string
 	lastToolName  string
 
+	// resultText and resultMessages store the output of the last completed
+	// Submit run, allowing callers to retrieve results asynchronously.
+	resultText     string
+	resultMessages []StreamMessage
+
 	// responseCh receives stream-json messages during an active prompt.
 	// It is set by Send and cleared when the response is complete.
 	responseCh chan StreamMessage
@@ -471,12 +476,37 @@ func (p *PersistentProcess) Stop() error {
 	}
 }
 
+// Submit starts a prompt non-blocking. It calls RunWithOptions, spawns a
+// background goroutine to drain the message channel and store results, then
+// returns immediately. The ctx should be a server-scoped context so the drain
+// goroutine outlives the MCP request.
+func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *RunOptions) error {
+	p.mu.Lock()
+	p.resultText = ""
+	p.resultMessages = nil
+	p.mu.Unlock()
+
+	ch, err := p.RunWithOptions(ctx, prompt, opts)
+	if err != nil {
+		return err
+	}
+
+	submitDrain(ctx, ch, func(text string, messages []StreamMessage) {
+		p.mu.Lock()
+		p.resultText = text
+		p.resultMessages = messages
+		p.mu.Unlock()
+	})
+
+	return nil
+}
+
 // Status returns the current status information.
 func (p *PersistentProcess) Status() StatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return StatusInfo{
+	info := StatusInfo{
 		Status:        p.status,
 		SessionID:     p.sessionID,
 		ErrorMessage:  p.lastError,
@@ -485,6 +515,29 @@ func (p *PersistentProcess) Status() StatusInfo {
 		ToolCallCount: p.toolCallCount,
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
+	}
+
+	if p.status == ProcessStatusIdle && p.resultText != "" {
+		info.Result = p.resultText
+	}
+
+	return info
+}
+
+// ResultDetail returns the full untruncated result and detailed metadata from
+// the last completed Submit run. Intended for debugging and troubleshooting.
+func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return ResultDetailInfo{
+		ResultText:   p.resultText,
+		Messages:     p.resultMessages,
+		MessageCount: len(p.resultMessages),
+		TotalCost:    p.totalCost,
+		SessionID:    p.sessionID,
+		Status:       p.status,
+		ErrorMessage: p.lastError,
 	}
 }
 

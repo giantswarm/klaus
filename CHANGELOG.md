@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
+- **`status` MCP tool now includes result on completion**: When idle after a completed run, the status response includes a `result` field with the agent's final output text, making it the primary way to retrieve results from non-blocking prompts.
+
+### Added
+
+- **`result` MCP debug tool**: New tool that returns the full untruncated result text and detailed metadata (message history, costs, session info) from the last completed run. Intended for debugging and troubleshooting when the agent produces unexpected output.
+- `Submit()` method on `Prompter` interface for non-blocking prompt execution with background result collection.
+- `ResultDetail()` method on `Prompter` interface for retrieving full debug output from the last completed run.
+
 ### Fixed
 
 - **Persistent mode stream-json input format updated for claude-code v2.1+**: The `stdinMessage` format now uses `{"type":"user","message":{"role":"user","content":"..."}}` instead of the deprecated `{"type":"user","text":"..."}` format, fixing immediate subprocess crashes on every prompt in persistent mode.

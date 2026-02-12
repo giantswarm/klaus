@@ -76,6 +76,52 @@ func TestPersistentProcess_ImplementsPrompter(t *testing.T) {
 	var _ Prompter = (*PersistentProcess)(nil)
 }
 
+func TestPersistentProcess_ResultDetail_InitialState(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+	detail := process.ResultDetail()
+
+	if detail.ResultText != "" {
+		t.Errorf("expected empty result text, got %q", detail.ResultText)
+	}
+	if detail.Messages != nil {
+		t.Errorf("expected nil messages, got %v", detail.Messages)
+	}
+	if detail.MessageCount != 0 {
+		t.Errorf("expected 0 message count, got %d", detail.MessageCount)
+	}
+	if detail.Status != ProcessStatusIdle {
+		t.Errorf("expected status %q, got %q", ProcessStatusIdle, detail.Status)
+	}
+}
+
+func TestPersistentProcess_StatusNoResultWhenBusy(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.resultText = "old result"
+	process.status = ProcessStatusBusy
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.Result != "" {
+		t.Errorf("expected empty result when busy, got %q", status.Result)
+	}
+}
+
+func TestPersistentProcess_StatusShowsResultWhenIdle(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.resultText = "completed result"
+	process.status = ProcessStatusIdle
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.Result != "completed result" {
+		t.Errorf("expected result %q, got %q", "completed result", status.Result)
+	}
+}
+
 func TestPersistentProcess_PersistentArgs(t *testing.T) {
 	opts := Options{
 		Model:              "claude-sonnet-4-20250514",

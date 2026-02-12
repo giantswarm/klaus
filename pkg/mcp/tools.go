@@ -17,16 +17,23 @@ func RegisterTools(s *server.MCPServer, process claudepkg.Prompter) {
 		promptTool(process),
 		statusTool(process),
 		stopTool(process),
+		resultTool(process),
 	)
 }
 
 func promptTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("prompt",
-		mcp.WithDescription("Send a prompt to the Claude Code agent and receive the response. "+
-			"The agent will autonomously read files, run commands, and edit code to complete the task."),
+		mcp.WithDescription("Send a prompt to the Claude Code agent. "+
+			"By default, the task runs asynchronously -- use the status tool to check progress and get the result. "+
+			"Set blocking=true to wait for the task to complete and return the full result inline."),
 		mcp.WithString("message",
 			mcp.Required(),
 			mcp.Description("The prompt or task description to send to the Claude agent"),
+		),
+		mcp.WithBoolean("blocking",
+			mcp.Description("If true, wait for the task to complete and return the full result. "+
+				"If false (default), start the task and return immediately with status info. "+
+				"Use the status tool to check progress and get the result when not blocking."),
 		),
 		mcp.WithString("session_id",
 			mcp.Description("Optional session UUID to use or resume a specific conversation"),
@@ -62,6 +69,12 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 
 		if strings.TrimSpace(message) == "" {
 			return mcp.NewToolResultError("message must not be empty"), nil
+		}
+
+		// Parse blocking mode (default: false = non-blocking).
+		blocking, err := optionalBool(request, "blocking")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 
 		// Build per-run overrides from optional parameters.
@@ -117,6 +130,32 @@ func promptTool(process claudepkg.Prompter) server.ServerTool {
 		} else if v {
 			runOpts.ForkSession = true
 		}
+
+		// Non-blocking (default): start the task and return immediately.
+		if !blocking {
+			// Use context.Background so the drain goroutine outlives
+			// the MCP request context.
+			if err := process.Submit(context.Background(), message, &runOpts); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to start task: %v", err)), nil
+			}
+
+			status := process.Status()
+			response := struct {
+				Status    string `json:"status"`
+				SessionID string `json:"session_id,omitempty"`
+			}{
+				Status:    "started",
+				SessionID: status.SessionID,
+			}
+
+			data, err := json.Marshal(response)
+			if err != nil {
+				return mcp.NewToolResultText(`{"status":"started"}`), nil
+			}
+			return mcp.NewToolResultText(string(data)), nil
+		}
+
+		// Blocking: wait for completion and return the full result.
 
 		// Extract progress token for streaming progress notifications.
 		var progressToken mcp.ProgressToken
@@ -227,8 +266,10 @@ func progressMessage(msg claudepkg.StreamMessage) string {
 
 func statusTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("status",
-		mcp.WithDescription("Get the current status of the Claude Code agent including progress information "+
-			"(status, session_id, cost, message_count, tool_call_count, last_message, last_tool_name)"),
+		mcp.WithDescription("Get the current status of the Claude Code agent. "+
+			"When the agent is busy, returns progress information (message_count, tool_call_count, last_tool_name, last_message). "+
+			"When idle after a completed run, includes the result field with the agent's final output. "+
+			"This is the primary way to check progress and retrieve results for non-blocking prompts."),
 	)
 
 	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -252,6 +293,25 @@ func stopTool(process claudepkg.Prompter) server.ServerTool {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to stop agent: %v", err)), nil
 		}
 		return mcp.NewToolResultText("agent stopped"), nil
+	}
+
+	return server.ServerTool{Tool: tool, Handler: handler}
+}
+
+func resultTool(process claudepkg.Prompter) server.ServerTool {
+	tool := mcp.NewTool("result",
+		mcp.WithDescription("Get the full untruncated result and detailed metadata from the last completed run. "+
+			"This is a debugging tool for troubleshooting only -- for normal use, check the result field in the status tool output. "+
+			"Use this when the agent produced unexpected results or failed, and you need the full output and message history."),
+	)
+
+	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		detail := process.ResultDetail()
+		data, err := json.Marshal(detail)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result detail: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
 	}
 
 	return server.ServerTool{Tool: tool, Handler: handler}

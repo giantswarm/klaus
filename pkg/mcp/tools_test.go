@@ -24,6 +24,11 @@ type mockPrompter struct {
 	runErr     error
 	status     claudepkg.StatusInfo
 	stopCalled bool
+
+	// submitCalled tracks whether Submit was called instead of RunWithOptions.
+	submitCalled bool
+	// resultDetail is returned by ResultDetail.
+	resultDetail claudepkg.ResultDetailInfo
 }
 
 func (m *mockPrompter) Run(ctx context.Context, prompt string) (<-chan claudepkg.StreamMessage, error) {
@@ -72,7 +77,19 @@ func (m *mockPrompter) RunSyncWithOptions(ctx context.Context, prompt string, op
 	return m.result, msgs, nil
 }
 
+func (m *mockPrompter) Submit(_ context.Context, prompt string, opts *claudepkg.RunOptions) error {
+	m.lastPrompt = prompt
+	m.lastRunOpts = opts
+	m.submitCalled = true
+	if m.runErr != nil {
+		return m.runErr
+	}
+	return nil
+}
+
 func (m *mockPrompter) Status() claudepkg.StatusInfo { return m.status }
+
+func (m *mockPrompter) ResultDetail() claudepkg.ResultDetailInfo { return m.resultDetail }
 
 func (m *mockPrompter) Stop() error {
 	m.stopCalled = true
@@ -91,7 +108,7 @@ func (m *mockPrompter) MarshalStatus() ([]byte, error) {
 
 // --- Prompt tool tests ---
 
-func TestPromptTool_BasicPrompt(t *testing.T) {
+func TestPromptTool_BlockingBasic(t *testing.T) {
 	mock := &mockPrompter{
 		result:    "Hello, world!",
 		sessionID: "sess-123",
@@ -102,7 +119,8 @@ func TestPromptTool_BasicPrompt(t *testing.T) {
 	handler := tools["prompt"]
 
 	request := newCallToolRequest("prompt", map[string]any{
-		"message": "Say hello",
+		"message":  "Say hello",
+		"blocking": true,
 	})
 
 	result, err := handler(context.Background(), request)
@@ -115,6 +133,9 @@ func TestPromptTool_BasicPrompt(t *testing.T) {
 
 	if mock.lastPrompt != "Say hello" {
 		t.Errorf("expected prompt %q, got %q", "Say hello", mock.lastPrompt)
+	}
+	if mock.submitCalled {
+		t.Error("expected RunWithOptions (not Submit) for blocking mode")
 	}
 
 	// Parse the JSON result.
@@ -164,13 +185,14 @@ func TestPromptTool_MissingMessage(t *testing.T) {
 	}
 }
 
-func TestPromptTool_WithRunOptions(t *testing.T) {
+func TestPromptTool_BlockingWithRunOptions(t *testing.T) {
 	mock := &mockPrompter{result: "ok"}
 	tools := buildToolMap(mock)
 	handler := tools["prompt"]
 
 	request := newCallToolRequest("prompt", map[string]any{
 		"message":        "Do something",
+		"blocking":       true,
 		"session_id":     "sess-abc",
 		"resume":         "sess-old",
 		"continue":       true,
@@ -224,9 +246,11 @@ func TestPromptTool_InvalidEffort(t *testing.T) {
 	tools := buildToolMap(mock)
 	handler := tools["prompt"]
 
+	// Invalid effort is rejected regardless of blocking mode.
 	request := newCallToolRequest("prompt", map[string]any{
-		"message": "Do something",
-		"effort":  "extreme",
+		"message":  "Do something",
+		"blocking": true,
+		"effort":   "extreme",
 	})
 
 	result, err := handler(context.Background(), request)
@@ -258,7 +282,112 @@ func TestPromptTool_InvalidParameterType(t *testing.T) {
 	}
 }
 
-func TestPromptTool_RunError(t *testing.T) {
+// --- Non-blocking prompt tests ---
+
+func TestPromptTool_NonBlockingDefault(t *testing.T) {
+	mock := &mockPrompter{
+		result:    "Hello, world!",
+		sessionID: "sess-123",
+	}
+	mock.status = claudepkg.StatusInfo{SessionID: "sess-123"}
+
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	// Default (no blocking param) should be non-blocking.
+	request := newCallToolRequest("prompt", map[string]any{
+		"message": "Do something",
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	if !mock.submitCalled {
+		t.Error("expected Submit() to be called for non-blocking mode")
+	}
+	if mock.lastPrompt != "Do something" {
+		t.Errorf("expected prompt %q, got %q", "Do something", mock.lastPrompt)
+	}
+
+	// Parse response -- should be {status: "started", session_id: "..."}.
+	text := extractText(t, result)
+	var resp struct {
+		Status    string `json:"status"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal([]byte(text), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v (text: %s)", err, text)
+	}
+	if resp.Status != "started" {
+		t.Errorf("expected status %q, got %q", "started", resp.Status)
+	}
+	if resp.SessionID != "sess-123" {
+		t.Errorf("expected session_id %q, got %q", "sess-123", resp.SessionID)
+	}
+}
+
+func TestPromptTool_NonBlockingExplicit(t *testing.T) {
+	mock := &mockPrompter{result: "ok"}
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":  "Do something",
+		"blocking": false,
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+	if !mock.submitCalled {
+		t.Error("expected Submit() to be called for blocking=false")
+	}
+}
+
+func TestPromptTool_NonBlockingWithRunOptions(t *testing.T) {
+	mock := &mockPrompter{result: "ok"}
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":    "Do something",
+		"session_id": "sess-abc",
+		"effort":     "high",
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	if !mock.submitCalled {
+		t.Error("expected Submit() to be called")
+	}
+	opts := mock.lastRunOpts
+	if opts == nil {
+		t.Fatal("expected RunOptions to be set")
+	}
+	if opts.SessionID != "sess-abc" {
+		t.Errorf("expected session_id %q, got %q", "sess-abc", opts.SessionID)
+	}
+	if opts.Effort != "high" {
+		t.Errorf("expected effort %q, got %q", "high", opts.Effort)
+	}
+}
+
+func TestPromptTool_NonBlockingRunError(t *testing.T) {
 	mock := &mockPrompter{
 		runErr: fmt.Errorf("subprocess crashed"),
 	}
@@ -267,6 +396,27 @@ func TestPromptTool_RunError(t *testing.T) {
 
 	request := newCallToolRequest("prompt", map[string]any{
 		"message": "Hello",
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error when Submit fails")
+	}
+}
+
+func TestPromptTool_BlockingRunError(t *testing.T) {
+	mock := &mockPrompter{
+		runErr: fmt.Errorf("subprocess crashed"),
+	}
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":  "Hello",
+		"blocking": true,
 	})
 
 	result, err := handler(context.Background(), request)
@@ -320,6 +470,109 @@ func TestStatusTool(t *testing.T) {
 	}
 	if info.ToolCallCount != 2 {
 		t.Errorf("expected tool_call_count 2, got %d", info.ToolCallCount)
+	}
+}
+
+func TestStatusTool_WithResult(t *testing.T) {
+	mock := &mockPrompter{
+		status: claudepkg.StatusInfo{
+			Status:    claudepkg.ProcessStatusIdle,
+			SessionID: "sess-xyz",
+			Result:    "Task completed successfully",
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["status"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	text := extractText(t, result)
+	var info claudepkg.StatusInfo
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatalf("failed to parse status JSON: %v (text: %s)", err, text)
+	}
+
+	if info.Result != "Task completed successfully" {
+		t.Errorf("expected result %q, got %q", "Task completed successfully", info.Result)
+	}
+}
+
+// --- Result tool tests ---
+
+func TestResultTool(t *testing.T) {
+	mock := &mockPrompter{
+		resultDetail: claudepkg.ResultDetailInfo{
+			ResultText:   "Full result text here",
+			MessageCount: 5,
+			TotalCost:    0.15,
+			SessionID:    "sess-123",
+			Status:       claudepkg.ProcessStatusIdle,
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["result"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	text := extractText(t, result)
+	var detail claudepkg.ResultDetailInfo
+	if err := json.Unmarshal([]byte(text), &detail); err != nil {
+		t.Fatalf("failed to parse result detail JSON: %v (text: %s)", err, text)
+	}
+
+	if detail.ResultText != "Full result text here" {
+		t.Errorf("expected result_text %q, got %q", "Full result text here", detail.ResultText)
+	}
+	if detail.MessageCount != 5 {
+		t.Errorf("expected message_count 5, got %d", detail.MessageCount)
+	}
+	if detail.TotalCost != 0.15 {
+		t.Errorf("expected total_cost_usd 0.15, got %f", detail.TotalCost)
+	}
+	if detail.SessionID != "sess-123" {
+		t.Errorf("expected session_id %q, got %q", "sess-123", detail.SessionID)
+	}
+}
+
+func TestResultTool_EmptyResult(t *testing.T) {
+	mock := &mockPrompter{
+		resultDetail: claudepkg.ResultDetailInfo{
+			Status: claudepkg.ProcessStatusIdle,
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["result"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	text := extractText(t, result)
+	var detail claudepkg.ResultDetailInfo
+	if err := json.Unmarshal([]byte(text), &detail); err != nil {
+		t.Fatalf("failed to parse result detail JSON: %v (text: %s)", err, text)
+	}
+	if detail.ResultText != "" {
+		t.Errorf("expected empty result_text, got %q", detail.ResultText)
 	}
 }
 
@@ -534,6 +787,9 @@ func buildToolMap(process claudepkg.Prompter) map[string]func(context.Context, m
 
 	stp := stopTool(process)
 	tools[stp.Tool.Name] = stp.Handler
+
+	rt := resultTool(process)
+	tools[rt.Tool.Name] = rt.Handler
 
 	return tools
 }

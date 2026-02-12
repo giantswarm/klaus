@@ -31,6 +31,10 @@ func (m *mockPrompter) RunSyncWithOptions(_ context.Context, _ string, _ *claude
 	return "", nil, nil
 }
 
+func (m *mockPrompter) Submit(_ context.Context, _ string, _ *claude.RunOptions) error {
+	return nil
+}
+
 func (m *mockPrompter) Status() claude.StatusInfo {
 	return m.status
 }
@@ -43,6 +47,10 @@ func (m *mockPrompter) Done() <-chan struct{} {
 	ch := make(chan struct{})
 	close(ch)
 	return ch
+}
+
+func (m *mockPrompter) ResultDetail() claude.ResultDetailInfo {
+	return claude.ResultDetailInfo{}
 }
 
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {

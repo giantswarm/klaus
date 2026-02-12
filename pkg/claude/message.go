@@ -1,6 +1,9 @@
 package claude
 
-import "encoding/json"
+import (
+	"context"
+	"encoding/json"
+)
 
 // MessageType identifies the kind of message in the stream-json protocol.
 type MessageType string
@@ -80,6 +83,43 @@ type StatusInfo struct {
 	ToolCallCount int           `json:"tool_call_count,omitempty"`
 	LastMessage   string        `json:"last_message,omitempty"`
 	LastToolName  string        `json:"last_tool_name,omitempty"`
+	// Result contains the agent's final output text from the last completed
+	// run. It is populated when the status is idle after a non-blocking Submit.
+	Result string `json:"result,omitempty"`
+}
+
+// ResultDetailInfo contains the full untruncated result and detailed metadata
+// from the last completed run. Intended for debugging and troubleshooting.
+type ResultDetailInfo struct {
+	ResultText   string          `json:"result_text"`
+	Messages     []StreamMessage `json:"messages,omitempty"`
+	MessageCount int             `json:"message_count"`
+	TotalCost    float64         `json:"total_cost_usd,omitempty"`
+	SessionID    string          `json:"session_id,omitempty"`
+	Status       ProcessStatus   `json:"status"`
+	ErrorMessage string          `json:"error,omitempty"`
+}
+
+// submitDrain starts a background goroutine that reads all messages from ch,
+// collects the result text, and calls storeFn with the result when complete.
+// ctx controls the drain goroutine's lifetime.
+func submitDrain(ctx context.Context, ch <-chan StreamMessage, storeFn func(string, []StreamMessage)) {
+	go func() {
+		var messages []StreamMessage
+		for {
+			select {
+			case <-ctx.Done():
+				storeFn(CollectResultText(messages), messages)
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					storeFn(CollectResultText(messages), messages)
+					return
+				}
+				messages = append(messages, msg)
+			}
+		}
+	}()
 }
 
 // Truncate returns s truncated to maxLen runes with "..." appended if truncated.

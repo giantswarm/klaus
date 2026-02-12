@@ -1,7 +1,9 @@
 package claude
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 func TestParseStreamMessage_System(t *testing.T) {
@@ -116,4 +118,101 @@ func TestProcessStatus_Values(t *testing.T) {
 			t.Error("expected non-empty status value")
 		}
 	}
+}
+
+func TestSubmitDrain(t *testing.T) {
+	t.Run("drains messages and calls storeFn", func(t *testing.T) {
+		ch := make(chan StreamMessage, 3)
+		ch <- StreamMessage{Type: MessageTypeSystem, SessionID: "sess-1"}
+		ch <- StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "working..."}
+		ch <- StreamMessage{Type: MessageTypeResult, Result: "done"}
+		close(ch)
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(context.Background(), ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete in time")
+		}
+
+		if gotText != "done" {
+			t.Errorf("expected result text %q, got %q", "done", gotText)
+		}
+		if len(gotMessages) != 3 {
+			t.Errorf("expected 3 messages, got %d", len(gotMessages))
+		}
+	})
+
+	t.Run("handles context cancellation", func(t *testing.T) {
+		ch := make(chan StreamMessage, 1)
+		ch <- StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "partial"}
+		// Don't close ch -- let context cancellation trigger the drain.
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(ctx, ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		// Cancel context to trigger drain completion.
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete after context cancellation")
+		}
+
+		// Should have collected partial messages.
+		if len(gotMessages) != 1 {
+			t.Errorf("expected 1 message, got %d", len(gotMessages))
+		}
+		// Fallback to assistant text since no result message.
+		if gotText != "partial" {
+			t.Errorf("expected result text %q, got %q", "partial", gotText)
+		}
+	})
+
+	t.Run("empty channel returns empty result", func(t *testing.T) {
+		ch := make(chan StreamMessage)
+		close(ch)
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(context.Background(), ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete in time")
+		}
+
+		if gotText != "" {
+			t.Errorf("expected empty result text, got %q", gotText)
+		}
+		if len(gotMessages) != 0 {
+			t.Errorf("expected 0 messages, got %d", len(gotMessages))
+		}
+	})
 }
