@@ -75,6 +75,17 @@ const (
 	ProcessStatusError     ProcessStatus = "error"
 )
 
+// AllProcessStatuses is the canonical list of all ProcessStatus values.
+// Used by the metrics package to initialise the process_status gauge.
+var AllProcessStatuses = []ProcessStatus{
+	ProcessStatusStarting,
+	ProcessStatusIdle,
+	ProcessStatusBusy,
+	ProcessStatusCompleted,
+	ProcessStatusStopped,
+	ProcessStatusError,
+}
+
 // maxStatusResultLen is the maximum number of runes included in the
 // StatusInfo.Result field. Longer results are truncated with "...";
 // use the result debug tool for the full untruncated text.

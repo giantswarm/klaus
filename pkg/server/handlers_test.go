@@ -214,7 +214,7 @@ func TestRegisterOperationalRoutes(t *testing.T) {
 
 	registerOperationalRoutes(mux, process, ModeSingleShot)
 
-	paths := []string{"/healthz", "/readyz", "/status", "/"}
+	paths := []string{"/healthz", "/readyz", "/status", "/", "/metrics"}
 	for _, path := range paths {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
@@ -224,6 +224,29 @@ func TestRegisterOperationalRoutes(t *testing.T) {
 		if w.Result().StatusCode != http.StatusOK {
 			t.Errorf("path %s: expected status 200, got %d", path, w.Result().StatusCode)
 		}
+	}
+}
+
+func TestHandleMetrics(t *testing.T) {
+	process := claude.NewProcess(claude.DefaultOptions())
+	mux := http.NewServeMux()
+
+	registerOperationalRoutes(mux, process, ModeSingleShot)
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	body := w.Body.String()
+	// Prometheus metrics endpoint should contain standard Go runtime metrics.
+	if !strings.Contains(body, "go_goroutines") {
+		t.Error("expected /metrics to contain go_goroutines metric")
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/project"
 )
@@ -73,5 +75,6 @@ func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, m
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz(process))
 	mux.HandleFunc("/status", handleStatus(process, mode))
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/", handleRoot)
 }
