@@ -116,6 +116,11 @@ workspace:
 # These env vars are inherited by the Claude Code subprocess, enabling its
 # native telemetry (tokens, cost, sessions, tool events, API requests).
 # See https://code.claude.com/docs/en/monitoring-usage for details.
+#
+# Note: the /metrics endpoint (Prometheus format) is always served by klaus
+# regardless of this flag. Setting enabled=true controls the OTel env vars
+# passed to the Claude subprocess, adds Service scrape annotations, and
+# optionally creates a ServiceMonitor for Prometheus Operator discovery.
 telemetry:
   enabled: false
   # metricsExporter selects the metrics exporter: "otlp", "prometheus", "console".

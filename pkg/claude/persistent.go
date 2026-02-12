@@ -275,7 +275,11 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				p.lastToolName = msg.ToolName
 			}
 		}
+		// Compute the cost delta before overwriting the running total so we
+		// only add the incremental cost to the Prometheus counter.
+		var costDelta float64
 		if msg.Type == MessageTypeResult {
+			costDelta = msg.TotalCost - p.totalCost
 			p.totalCost = msg.TotalCost
 		}
 
@@ -284,12 +288,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		p.mu.Unlock()
 
 		// Record Prometheus metrics.
-		metrics.MessagesTotal.WithLabelValues(string(msg.Type)).Inc()
-		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse {
-			metrics.ToolCallsTotal.WithLabelValues(msg.ToolName).Inc()
-		}
-		if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
-			metrics.SessionCostUSDTotal.Add(msg.TotalCost)
+		metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
+		if msg.Type == MessageTypeResult {
+			metrics.RecordCost(costDelta)
 		}
 
 		if ch != nil {

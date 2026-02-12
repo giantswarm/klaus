@@ -24,8 +24,8 @@ func TestSetProcessStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			SetProcessStatus(tc.setStatus)
 
-			for _, s := range allStatuses {
-				gauge, err := ProcessStatus.GetMetricWithLabelValues(s)
+			for _, s := range AllStatuses {
+				gauge, err := ProcessStatusGauge.GetMetricWithLabelValues(s)
 				if err != nil {
 					t.Fatalf("failed to get metric for status %q: %v", s, err)
 				}
@@ -49,7 +49,16 @@ func TestSetProcessStatus(t *testing.T) {
 }
 
 func TestMetricsRegistered(t *testing.T) {
-	// Verify all metrics are registered with the default Prometheus registry.
+	// Initialise at least one series per metric so they appear in the gather
+	// output (counters/histograms without observations are not reported).
+	PromptsTotal.WithLabelValues("test", "test")
+	PromptDurationSeconds.WithLabelValues("test", "test").Observe(1.0)
+	MessagesTotal.WithLabelValues("test")
+	ToolCallsTotal.WithLabelValues("test")
+	SessionCostUSDTotal.Add(0)
+	ProcessRestartsTotal.Inc()
+	SetProcessStatus("idle")
+
 	metricFamilies, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		t.Fatalf("failed to gather metrics: %v", err)
@@ -65,20 +74,6 @@ func TestMetricsRegistered(t *testing.T) {
 		"klaus_process_restarts_total":  false,
 	}
 
-	// Initialize at least one series so they appear in the gather output.
-	PromptsTotal.WithLabelValues("test", "test")
-	PromptDurationSeconds.WithLabelValues("test", "test").Observe(1.0)
-	MessagesTotal.WithLabelValues("test")
-	ToolCallsTotal.WithLabelValues("test")
-	SessionCostUSDTotal.Add(0)
-	ProcessRestartsTotal.Inc()
-	SetProcessStatus("idle")
-
-	metricFamilies, err = prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("failed to gather metrics: %v", err)
-	}
-
 	for _, mf := range metricFamilies {
 		if _, ok := wantNames[mf.GetName()]; ok {
 			wantNames[mf.GetName()] = true
@@ -92,40 +87,90 @@ func TestMetricsRegistered(t *testing.T) {
 	}
 }
 
-func TestPromptsTotal(t *testing.T) {
-	// Verify the counter can be incremented without panic.
-	PromptsTotal.WithLabelValues("started", "async").Inc()
-	PromptsTotal.WithLabelValues("completed", "blocking").Inc()
-	PromptsTotal.WithLabelValues("error", "async").Inc()
+func TestRecordStreamMessage(t *testing.T) {
+	// Record an assistant text message.
+	RecordStreamMessage("assistant", "text", "")
+	assertCounterValue(t, MessagesTotal, "assistant", 1)
+
+	// Record an assistant tool_use message -- should also bump ToolCallsTotal.
+	RecordStreamMessage("assistant", "tool_use", "Bash")
+	assertCounterValue(t, MessagesTotal, "assistant", 2)
+	assertToolCallValue(t, "Bash", 1)
+
+	// Record a result message.
+	RecordStreamMessage("result", "", "")
+	assertCounterValue(t, MessagesTotal, "result", 1)
 }
 
-func TestSessionCostUSDTotal(t *testing.T) {
-	// Verify the counter can be incremented without panic.
-	SessionCostUSDTotal.Add(0.05)
-	SessionCostUSDTotal.Add(0.10)
-}
+func TestRecordCost(t *testing.T) {
+	// Capture the counter before our additions.
+	before := readCounter(t, SessionCostUSDTotal)
 
-func TestMessagesTotal(t *testing.T) {
-	// Verify counters can be incremented for all message types without panic.
-	MessagesTotal.WithLabelValues("system").Inc()
-	MessagesTotal.WithLabelValues("assistant").Inc()
-	MessagesTotal.WithLabelValues("result").Inc()
-}
+	RecordCost(0.05)
+	RecordCost(0.10)
 
-func TestToolCallsTotal(t *testing.T) {
-	// Verify the counter can be incremented with various tool names without panic.
-	ToolCallsTotal.WithLabelValues("Bash").Inc()
-	ToolCallsTotal.WithLabelValues("Edit").Inc()
-	ToolCallsTotal.WithLabelValues("Read").Inc()
-}
+	after := readCounter(t, SessionCostUSDTotal)
+	delta := after - before
+	if delta < 0.14 || delta > 0.16 {
+		t.Errorf("expected cumulative cost delta ~0.15, got %f", delta)
+	}
 
-func TestProcessRestartsTotal(t *testing.T) {
-	// Verify the counter can be incremented without panic.
-	ProcessRestartsTotal.Inc()
+	// Negative or zero deltas must be ignored.
+	RecordCost(0)
+	RecordCost(-1.0)
+
+	afterNoop := readCounter(t, SessionCostUSDTotal)
+	if afterNoop != after {
+		t.Errorf("expected no change for non-positive delta, got %f -> %f", after, afterNoop)
+	}
 }
 
 func TestPromptDurationSeconds(t *testing.T) {
-	// Verify the histogram can record observations without panic.
 	PromptDurationSeconds.WithLabelValues("completed", "blocking").Observe(5.0)
 	PromptDurationSeconds.WithLabelValues("error", "blocking").Observe(1.0)
+}
+
+// --- helpers -----------------------------------------------------------------
+
+// assertCounterValue checks the counter value for a given label on a CounterVec.
+// Because tests share the default registry, the assertion uses >=.
+func assertCounterValue(t *testing.T, vec *prometheus.CounterVec, label string, wantAtLeast float64) {
+	t.Helper()
+	c, err := vec.GetMetricWithLabelValues(label)
+	if err != nil {
+		t.Fatalf("failed to get counter for label %q: %v", label, err)
+	}
+	var m dto.Metric
+	if err := c.(prometheus.Metric).Write(&m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
+	got := m.GetCounter().GetValue()
+	if got < wantAtLeast {
+		t.Errorf("counter{%q}: expected >= %f, got %f", label, wantAtLeast, got)
+	}
+}
+
+func assertToolCallValue(t *testing.T, toolName string, wantAtLeast float64) {
+	t.Helper()
+	c, err := ToolCallsTotal.GetMetricWithLabelValues(toolName)
+	if err != nil {
+		t.Fatalf("failed to get counter for tool %q: %v", toolName, err)
+	}
+	var m dto.Metric
+	if err := c.(prometheus.Metric).Write(&m); err != nil {
+		t.Fatalf("failed to write metric: %v", err)
+	}
+	got := m.GetCounter().GetValue()
+	if got < wantAtLeast {
+		t.Errorf("tool_calls_total{%q}: expected >= %f, got %f", toolName, wantAtLeast, got)
+	}
+}
+
+func readCounter(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		t.Fatalf("failed to read counter: %v", err)
+	}
+	return m.GetCounter().GetValue()
 }

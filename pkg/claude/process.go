@@ -281,13 +281,11 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			}
 			p.mu.Unlock()
 
-			// Record Prometheus metrics.
-			metrics.MessagesTotal.WithLabelValues(string(msg.Type)).Inc()
-			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse {
-				metrics.ToolCallsTotal.WithLabelValues(msg.ToolName).Inc()
-			}
-			if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
-				metrics.SessionCostUSDTotal.Add(msg.TotalCost)
+			// Record Prometheus metrics. In single-shot mode each process
+			// starts fresh, so TotalCost equals the per-run cost.
+			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
+			if msg.Type == MessageTypeResult {
+				metrics.RecordCost(msg.TotalCost)
 			}
 
 			// Use select to prevent blocking if the consumer stops reading
