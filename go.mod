@@ -1,6 +1,6 @@
 module github.com/giantswarm/klaus
 
-go 1.25
+go 1.25.7
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
