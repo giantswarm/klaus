@@ -47,6 +47,9 @@ jobs:
       - name: Run Helm linter
         run: make helm-lint
 
+      - name: Run Helm unit tests
+        run: make helm-test
+
       - name: Run govulncheck (Security Scan)
         run: make govulncheck
 

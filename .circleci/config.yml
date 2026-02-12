@@ -1,42 +1,51 @@
 version: 2.1
-
 orbs:
-  architect: giantswarm/architect@6.10.0
+  architect: giantswarm/architect@6.12.0
 
 workflows:
   build:
     jobs:
-      - architect/go-build:
-          name: go-build-klaus
-          binary: klaus
-          filters:
-            tags:
-              only: /^v.*/
+    - architect/go-build:
+        name: go-build-klaus
+        binary: klaus
+        filters:
+          tags:
+            only: /^v.*/
 
-      - architect/push-to-registries:
-          context: architect
-          name: push-to-registries
-          requires:
-            - go-build-klaus
-          filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore:
-                - main
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries
+        requires:
+        - go-build-klaus
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore:
+            - main
 
-  package-and-push-chart-on-tag:
-    jobs:
-      - architect/push-to-app-catalog:
-          context: architect
-          executor: app-build-suite
-          name: package and push klaus chart
-          app_catalog: giantswarm-catalog
-          app_catalog_test: giantswarm-test-catalog
-          chart: klaus
-          filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore:
-                - main
+    - architect/push-to-app-catalog:
+        executor: app-build-suite
+        context: architect
+        name: push-klaus-to-giantswarm-app-catalog
+        app_catalog: giantswarm-catalog
+        app_catalog_test: giantswarm-test-catalog
+        chart: klaus
+        requires:
+        - push-to-registries
+        persist_chart_archive: true
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore:
+            - main
+
+    - architect/run-tests-with-ats:
+        name: execute chart tests
+        filters:
+          branches:
+            ignore:
+            - main
+        requires:
+        - push-klaus-to-giantswarm-app-catalog

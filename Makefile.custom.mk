@@ -29,6 +29,11 @@ helm-lint: ## Lint Helm chart
 	@echo "Linting Helm chart..."
 	@helm lint ./helm/klaus
 
+.PHONY: helm-test
+helm-test: ## Run Helm chart unit tests (requires helm-unittest plugin)
+	@echo "Running Helm unit tests..."
+	@helm unittest ./helm/klaus
+
 .PHONY: test-vet
 test-vet: ## Run go test and go vet
 	@echo "Running Go tests (with NO_COLOR=true)..."
