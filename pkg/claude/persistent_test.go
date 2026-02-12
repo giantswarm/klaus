@@ -98,7 +98,7 @@ func TestPersistentProcess_StatusNoResultWhenBusy(t *testing.T) {
 	process := NewPersistentProcess(DefaultOptions())
 
 	process.mu.Lock()
-	process.resultText = "old result"
+	process.result.text = "old result"
 	process.status = ProcessStatusBusy
 	process.mu.Unlock()
 
@@ -112,13 +112,39 @@ func TestPersistentProcess_StatusShowsResultWhenIdle(t *testing.T) {
 	process := NewPersistentProcess(DefaultOptions())
 
 	process.mu.Lock()
-	process.resultText = "completed result"
+	process.result.text = "completed result"
 	process.status = ProcessStatusIdle
 	process.mu.Unlock()
 
 	status := process.Status()
 	if status.Result != "completed result" {
 		t.Errorf("expected result %q, got %q", "completed result", status.Result)
+	}
+}
+
+func TestPersistentProcess_StatusTruncatesLongResult(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	// Create a result longer than maxStatusResultLen.
+	long := make([]rune, maxStatusResultLen+100)
+	for i := range long {
+		long[i] = 'x'
+	}
+	process.mu.Lock()
+	process.result.text = string(long)
+	process.status = ProcessStatusIdle
+	process.mu.Unlock()
+
+	status := process.Status()
+	expected := string(long[:maxStatusResultLen]) + "..."
+	if status.Result != expected {
+		t.Errorf("expected truncated result of length %d, got length %d",
+			len([]rune(expected)), len([]rune(status.Result)))
+	}
+
+	detail := process.ResultDetail()
+	if detail.ResultText != string(long) {
+		t.Error("expected ResultDetail to return full untruncated text")
 	}
 }
 

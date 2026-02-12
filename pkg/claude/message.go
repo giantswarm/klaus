@@ -74,6 +74,11 @@ const (
 	ProcessStatusError    ProcessStatus = "error"
 )
 
+// maxStatusResultLen is the maximum number of runes included in the
+// StatusInfo.Result field. Longer results are truncated with "...";
+// use the result debug tool for the full untruncated text.
+const maxStatusResultLen = 4000
+
 type StatusInfo struct {
 	Status        ProcessStatus `json:"status"`
 	SessionID     string        `json:"session_id,omitempty"`
@@ -84,12 +89,15 @@ type StatusInfo struct {
 	LastMessage   string        `json:"last_message,omitempty"`
 	LastToolName  string        `json:"last_tool_name,omitempty"`
 	// Result contains the agent's final output text from the last completed
-	// run. It is populated when the status is idle after a non-blocking Submit.
+	// run, truncated to maxStatusResultLen runes. It is populated when the
+	// status is idle after a non-blocking Submit. Use the result debug tool
+	// for the full untruncated text.
 	Result string `json:"result,omitempty"`
 }
 
 // ResultDetailInfo contains the full untruncated result and detailed metadata
 // from the last completed run. Intended for debugging and troubleshooting.
+// Unlike StatusInfo.Result, ResultText is never truncated.
 type ResultDetailInfo struct {
 	ResultText   string          `json:"result_text"`
 	Messages     []StreamMessage `json:"messages,omitempty"`
@@ -98,6 +106,13 @@ type ResultDetailInfo struct {
 	SessionID    string          `json:"session_id,omitempty"`
 	Status       ProcessStatus   `json:"status"`
 	ErrorMessage string          `json:"error,omitempty"`
+}
+
+// resultState holds the output of the last completed Submit run.
+// Access must be synchronized by the parent process's mutex.
+type resultState struct {
+	text     string
+	messages []StreamMessage
 }
 
 // submitDrain starts a background goroutine that reads all messages from ch,
@@ -120,6 +135,30 @@ func submitDrain(ctx context.Context, ch <-chan StreamMessage, storeFn func(stri
 			}
 		}
 	}()
+}
+
+// submitAsync is the shared implementation for non-blocking prompt submission.
+// It calls runFn to start the prompt; on success it clears previous results
+// and spawns a background drain goroutine that stores new results via setResult.
+// Previous results are preserved if runFn fails (e.g. "already busy").
+func submitAsync(
+	ctx context.Context,
+	prompt string,
+	opts *RunOptions,
+	runFn func(context.Context, string, *RunOptions) (<-chan StreamMessage, error),
+	setResult func(resultState),
+) error {
+	ch, err := runFn(ctx, prompt, opts)
+	if err != nil {
+		return err
+	}
+
+	setResult(resultState{}) // Clear previous result now that the new run started.
+
+	submitDrain(ctx, ch, func(text string, messages []StreamMessage) {
+		setResult(resultState{text: text, messages: messages})
+	})
+	return nil
 }
 
 // Truncate returns s truncated to maxLen runes with "..." appended if truncated.

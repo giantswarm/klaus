@@ -268,7 +268,7 @@ func statusTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("status",
 		mcp.WithDescription("Get the current status of the Claude Code agent. "+
 			"When the agent is busy, returns progress information (message_count, tool_call_count, last_tool_name, last_message). "+
-			"When idle after a completed run, includes the result field with the agent's final output. "+
+			"When idle after a completed run, includes the result field with the agent's final output (truncated; use the result tool for the full text). "+
 			"This is the primary way to check progress and retrieve results for non-blocking prompts."),
 	)
 

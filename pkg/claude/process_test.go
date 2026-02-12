@@ -91,7 +91,7 @@ func TestProcess_StatusNoResultWhenBusy(t *testing.T) {
 	// Simulate a process that has a stored result from a previous run
 	// but is currently busy.
 	process.mu.Lock()
-	process.resultText = "old result"
+	process.result.text = "old result"
 	process.status = ProcessStatusBusy
 	process.mu.Unlock()
 
@@ -106,13 +106,41 @@ func TestProcess_StatusShowsResultWhenIdle(t *testing.T) {
 
 	// Simulate a completed Submit run that stored a result.
 	process.mu.Lock()
-	process.resultText = "completed result"
+	process.result.text = "completed result"
 	process.status = ProcessStatusIdle
 	process.mu.Unlock()
 
 	status := process.Status()
 	if status.Result != "completed result" {
 		t.Errorf("expected result %q, got %q", "completed result", status.Result)
+	}
+}
+
+func TestProcess_StatusTruncatesLongResult(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	// Create a result longer than maxStatusResultLen.
+	long := make([]rune, maxStatusResultLen+100)
+	for i := range long {
+		long[i] = 'x'
+	}
+	process.mu.Lock()
+	process.result.text = string(long)
+	process.status = ProcessStatusIdle
+	process.mu.Unlock()
+
+	status := process.Status()
+	// Truncated result should be maxStatusResultLen runes + "...".
+	expected := string(long[:maxStatusResultLen]) + "..."
+	if status.Result != expected {
+		t.Errorf("expected truncated result of length %d, got length %d",
+			len([]rune(expected)), len([]rune(status.Result)))
+	}
+
+	// ResultDetail should return the full untruncated text.
+	detail := process.ResultDetail()
+	if detail.ResultText != string(long) {
+		t.Error("expected ResultDetail to return full untruncated text")
 	}
 }
 

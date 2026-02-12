@@ -17,6 +17,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`result` MCP debug tool**: New tool that returns the full untruncated result text and detailed metadata (message history, costs, session info) from the last completed run. Intended for debugging and troubleshooting when the agent produces unexpected output.
 - `Submit()` method on `Prompter` interface for non-blocking prompt execution with background result collection.
 - `ResultDetail()` method on `Prompter` interface for retrieving full debug output from the last completed run.
+- Initial project structure with Go app and Helm chart.
+- **Bidirectional stream-json mode** (`CLAUDE_PERSISTENT_MODE=true`): Maintains a single long-running Claude subprocess using `--input-format stream-json` for multi-turn conversations with conversation continuity, lower latency, and cost efficiency.
+- `Prompter` interface abstracting over single-shot (`Process`) and persistent (`PersistentProcess`) modes, allowing seamless switching via configuration.
+- **MCP progress notifications**: The `prompt` tool now streams real-time `notifications/progress` messages to MCP clients during task execution, reporting tool usage, assistant output, and task completion.
+- MCP `prompt` tool: added `resume` and `continue` parameters for full session management from MCP clients.
+- Budget control via `--max-budget-usd` / `CLAUDE_MAX_BUDGET_USD` to cap per-invocation spending.
+- Effort level via `--effort` / `CLAUDE_EFFORT` to control quality vs. speed tradeoff.
+- Fallback model via `--fallback-model` / `CLAUDE_FALLBACK_MODEL` for resilience when primary model is overloaded.
+- Strict MCP config via `--strict-mcp-config` / `CLAUDE_STRICT_MCP_CONFIG` to prevent loading untrusted MCP servers.
+- Session management support: `--session-id`, `--resume`, `--continue`, `--fork-session`, `--no-session-persistence`.
+- Custom named agents via `--agents` / `--agent` / `CLAUDE_AGENTS` / `CLAUDE_ACTIVE_AGENT`.
+- JSON Schema structured output via `--json-schema` / `CLAUDE_JSON_SCHEMA`.
+- Partial message streaming via `--include-partial-messages` / `CLAUDE_INCLUDE_PARTIAL_MESSAGES`.
+- Settings file support via `--settings` / `CLAUDE_SETTINGS_FILE` and `--setting-sources` / `CLAUDE_SETTING_SOURCES`.
+- Built-in tool set control via `--tools` / `CLAUDE_TOOLS`.
+- Tool access control via `CLAUDE_ALLOWED_TOOLS` and `CLAUDE_DISALLOWED_TOOLS`.
+- Plugin directory support via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`.
+- Per-invocation RunOptions allowing MCP clients to override session_id, resume, continue, agent, json_schema, max_budget_usd, effort, and fork_session per prompt.
+- Enhanced status endpoint with message count, tool call count, last message, last tool name, and operating mode for progress monitoring.
+- Helm chart values for all new Claude Code configuration options including `persistentMode`.
+- Comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
 
 ### Fixed
 
@@ -47,29 +68,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Helm: `includePartialMessages` now exposed in `values.yaml` and wired to `CLAUDE_INCLUDE_PARTIAL_MESSAGES` in deployment template.
 - Helm: `noSessionPersistence` and `strictMcpConfig` env vars are now always emitted (not only when truthy), so setting them to `false` via Helm overrides actually takes effect.
 - `ForkSession` added to `RunOptions` so MCP clients can fork sessions per-invocation via `fork_session` parameter on the `prompt` tool.
-
-### Added
-
-- Initial project structure with Go app and Helm chart.
-- **Bidirectional stream-json mode** (`CLAUDE_PERSISTENT_MODE=true`): Maintains a single long-running Claude subprocess using `--input-format stream-json` for multi-turn conversations with conversation continuity, lower latency, and cost efficiency.
-- `Prompter` interface abstracting over single-shot (`Process`) and persistent (`PersistentProcess`) modes, allowing seamless switching via configuration.
-- **MCP progress notifications**: The `prompt` tool now streams real-time `notifications/progress` messages to MCP clients during task execution, reporting tool usage, assistant output, and task completion.
-- MCP `prompt` tool: added `resume` and `continue` parameters for full session management from MCP clients.
-- Budget control via `--max-budget-usd` / `CLAUDE_MAX_BUDGET_USD` to cap per-invocation spending.
-- Effort level via `--effort` / `CLAUDE_EFFORT` to control quality vs. speed tradeoff.
-- Fallback model via `--fallback-model` / `CLAUDE_FALLBACK_MODEL` for resilience when primary model is overloaded.
-- Strict MCP config via `--strict-mcp-config` / `CLAUDE_STRICT_MCP_CONFIG` to prevent loading untrusted MCP servers.
-- Session management support: `--session-id`, `--resume`, `--continue`, `--fork-session`, `--no-session-persistence`.
-- Custom named agents via `--agents` / `--agent` / `CLAUDE_AGENTS` / `CLAUDE_ACTIVE_AGENT`.
-- JSON Schema structured output via `--json-schema` / `CLAUDE_JSON_SCHEMA`.
-- Partial message streaming via `--include-partial-messages` / `CLAUDE_INCLUDE_PARTIAL_MESSAGES`.
-- Settings file support via `--settings` / `CLAUDE_SETTINGS_FILE` and `--setting-sources` / `CLAUDE_SETTING_SOURCES`.
-- Built-in tool set control via `--tools` / `CLAUDE_TOOLS`.
-- Tool access control via `CLAUDE_ALLOWED_TOOLS` and `CLAUDE_DISALLOWED_TOOLS`.
-- Plugin directory support via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`.
-- Per-invocation RunOptions allowing MCP clients to override session_id, resume, continue, agent, json_schema, max_budget_usd, effort, and fork_session per prompt.
-- Enhanced status endpoint with message count, tool call count, last message, last tool name, and operating mode for progress monitoring.
-- Helm chart values for all new Claude Code configuration options including `persistentMode`.
-- Comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
 
 [Unreleased]: https://github.com/giantswarm/klaus/tree/main
