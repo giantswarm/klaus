@@ -307,11 +307,19 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 	}
 }
 
+// stdinMessageContent represents the nested message payload in the
+// stream-json input format expected by claude-code v2.1+.
+type stdinMessageContent struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // stdinMessage is the JSON structure written to the subprocess stdin
-// in stream-json input mode.
+// in stream-json input mode. claude-code v2.1+ expects a "message"
+// object with "role" and "content" fields instead of a flat "text" field.
 type stdinMessage struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type    string              `json:"type"`
+	Message stdinMessageContent `json:"message"`
 }
 
 // Run sends a prompt to the persistent subprocess and returns a channel
@@ -368,7 +376,10 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	// Write the user message to stdin as stream-json.
 	msg := stdinMessage{
 		Type: "user",
-		Text: prompt,
+		Message: stdinMessageContent{
+			Role:    "user",
+			Content: prompt,
+		},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {

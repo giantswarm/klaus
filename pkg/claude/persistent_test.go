@@ -163,13 +163,19 @@ func TestPersistentProcess_PersistentArgs_Minimal(t *testing.T) {
 }
 
 func TestStdinMessage_JSON(t *testing.T) {
-	msg := stdinMessage{Type: "user", Text: "hello world"}
+	msg := stdinMessage{
+		Type: "user",
+		Message: stdinMessageContent{
+			Role:    "user",
+			Content: "hello world",
+		},
+	}
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := `{"type":"user","text":"hello world"}`
+	expected := `{"type":"user","message":{"role":"user","content":"hello world"}}`
 	if string(data) != expected {
 		t.Errorf("expected %q, got %q", expected, string(data))
 	}
