@@ -192,13 +192,17 @@ func (c OAuthConfig) Validate() error {
 
 // OAuthServer wraps the MCP endpoint with OAuth 2.1 authentication.
 type OAuthServer struct {
+	serverCtx    context.Context
 	process      claudepkg.Prompter
 	oauthServer  *oauth.Server
 	oauthHandler *oauth.Handler
 	httpServer   *http.Server
 }
 
-func NewOAuthServer(process claudepkg.Prompter, config OAuthConfig) (*OAuthServer, error) {
+// NewOAuthServer creates an OAuth-protected MCP server. The serverCtx
+// controls the lifetime of background goroutines; it should be cancelled
+// during server shutdown.
+func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, config OAuthConfig) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
@@ -207,6 +211,7 @@ func NewOAuthServer(process claudepkg.Prompter, config OAuthConfig) (*OAuthServe
 	oauthHandler := oauth.NewHandler(oauthSrv, oauthSrv.Logger)
 
 	return &OAuthServer{
+		serverCtx:    serverCtx,
 		process:      process,
 		oauthServer:  oauthSrv,
 		oauthHandler: oauthHandler,
@@ -286,7 +291,7 @@ func (s *OAuthServer) setupOAuthRoutes(mux *http.ServeMux) {
 }
 
 func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
-	mcpSrv := mcppkg.NewMCPServer(s.process)
+	mcpSrv := mcppkg.NewMCPServer(s.serverCtx, s.process)
 
 	opts := []mcpserver.StreamableHTTPOption{
 		mcpserver.WithEndpointPath("/mcp"),

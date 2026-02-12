@@ -83,6 +83,10 @@ type Process struct {
 	lastMessage   string
 	lastToolName  string
 
+	// result stores the output of the last completed Submit run,
+	// allowing callers to retrieve results asynchronously.
+	result resultState
+
 	done      chan struct{}
 	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
@@ -355,11 +359,30 @@ func (p *Process) Stop() error {
 	}
 }
 
+// Submit starts a prompt non-blocking. It calls RunWithOptions, spawns a
+// background goroutine to drain the message channel and store results, then
+// returns immediately. The ctx should be a server-scoped context so the drain
+// goroutine outlives the MCP request. Previous results are preserved if the
+// run fails to start (e.g. process is already busy).
+func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) error {
+	return submitAsync(ctx, prompt, opts, p.RunWithOptions, func(rs resultState) {
+		p.mu.Lock()
+		p.result = rs
+		// When the drain goroutine finishes collecting the run output,
+		// transition from idle to completed so callers can distinguish
+		// "finished with results" from "never ran" (idle).
+		if rs.completed && p.status == ProcessStatusIdle {
+			p.status = ProcessStatusCompleted
+		}
+		p.mu.Unlock()
+	})
+}
+
 func (p *Process) Status() StatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return StatusInfo{
+	info := StatusInfo{
 		Status:        p.status,
 		SessionID:     p.sessionID,
 		ErrorMessage:  p.lastError,
@@ -368,6 +391,29 @@ func (p *Process) Status() StatusInfo {
 		ToolCallCount: p.toolCallCount,
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
+	}
+
+	if p.status == ProcessStatusCompleted {
+		info.Result = Truncate(p.result.text, maxStatusResultLen)
+	}
+
+	return info
+}
+
+// ResultDetail returns the full untruncated result and detailed metadata from
+// the last completed Submit run. Intended for debugging and troubleshooting.
+func (p *Process) ResultDetail() ResultDetailInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return ResultDetailInfo{
+		ResultText:   p.result.text,
+		Messages:     p.result.messages,
+		MessageCount: len(p.result.messages),
+		TotalCost:    p.totalCost,
+		SessionID:    p.sessionID,
+		Status:       p.status,
+		ErrorMessage: p.lastError,
 	}
 }
 

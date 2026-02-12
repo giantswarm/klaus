@@ -76,6 +76,91 @@ func TestPersistentProcess_ImplementsPrompter(t *testing.T) {
 	var _ Prompter = (*PersistentProcess)(nil)
 }
 
+func TestPersistentProcess_ResultDetail_InitialState(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+	detail := process.ResultDetail()
+
+	if detail.ResultText != "" {
+		t.Errorf("expected empty result text, got %q", detail.ResultText)
+	}
+	if detail.Messages != nil {
+		t.Errorf("expected nil messages, got %v", detail.Messages)
+	}
+	if detail.MessageCount != 0 {
+		t.Errorf("expected 0 message count, got %d", detail.MessageCount)
+	}
+	if detail.Status != ProcessStatusIdle {
+		t.Errorf("expected status %q, got %q", ProcessStatusIdle, detail.Status)
+	}
+}
+
+func TestPersistentProcess_StatusNoResultWhenBusy(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.result = resultState{text: "old result", completed: true}
+	process.status = ProcessStatusBusy
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.Result != "" {
+		t.Errorf("expected empty result when busy, got %q", status.Result)
+	}
+}
+
+func TestPersistentProcess_StatusNoResultWhenIdle(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	// idle with no completed result should not show result.
+	status := process.Status()
+	if status.Result != "" {
+		t.Errorf("expected empty result when idle, got %q", status.Result)
+	}
+}
+
+func TestPersistentProcess_StatusShowsResultWhenCompleted(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.result = resultState{text: "completed result", completed: true}
+	process.status = ProcessStatusCompleted
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.Status != ProcessStatusCompleted {
+		t.Errorf("expected status %q, got %q", ProcessStatusCompleted, status.Status)
+	}
+	if status.Result != "completed result" {
+		t.Errorf("expected result %q, got %q", "completed result", status.Result)
+	}
+}
+
+func TestPersistentProcess_StatusTruncatesLongResult(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	// Create a result longer than maxStatusResultLen.
+	long := make([]rune, maxStatusResultLen+100)
+	for i := range long {
+		long[i] = 'x'
+	}
+	process.mu.Lock()
+	process.result = resultState{text: string(long), completed: true}
+	process.status = ProcessStatusCompleted
+	process.mu.Unlock()
+
+	status := process.Status()
+	expected := string(long[:maxStatusResultLen]) + "..."
+	if status.Result != expected {
+		t.Errorf("expected truncated result of length %d, got length %d",
+			len([]rune(expected)), len([]rune(status.Result)))
+	}
+
+	detail := process.ResultDetail()
+	if detail.ResultText != string(long) {
+		t.Error("expected ResultDetail to return full untruncated text")
+	}
+}
+
 func TestPersistentProcess_PersistentArgs(t *testing.T) {
 	opts := Options{
 		Model:              "claude-sonnet-4-20250514",

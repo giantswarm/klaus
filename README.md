@@ -10,9 +10,32 @@ Klaus runs the Claude Code CLI as a managed subprocess and exposes it over HTTP 
 
 | Tool | Description |
 |------|-------------|
-| `prompt` | Send a task to the Claude agent |
-| `status` | Query agent state, cost, and message count |
+| `prompt` | Send a task to the Claude agent. Non-blocking by default (set `blocking=true` to wait for completion). |
+| `status` | Query agent state, progress, and result. Returns `completed` with result when a non-blocking task finishes. |
 | `stop` | Terminate the running agent |
+| `result` | Get full untruncated result and message history from the last run (debugging tool) |
+
+### Non-blocking workflow
+
+By default, `prompt` returns immediately and the task runs in the background:
+
+```
+1. prompt(message: "Refactor the auth module")
+   -> {status: "started", session_id: "..."}
+
+2. status()                          # poll periodically
+   -> {status: "busy", message_count: 12, tool_call_count: 5, last_tool_name: "Edit", ...}
+
+3. status()                          # when complete
+   -> {status: "completed", result: "I've refactored...", total_cost_usd: 0.45, session_id: "..."}
+
+4. result()                          # optional: full debug output
+   -> {result_text: "...", messages: [...], message_count: 42, ...}
+```
+
+For short queries, use `prompt(message: "...", blocking: true)` to get the result inline.
+
+**Status lifecycle:** `idle` (never ran) -> `busy` (task running) -> `completed` (result available). The result and `completed` status persist until the next `prompt` call clears them. There is no explicit "consumed" acknowledgement, so callers that poll should track whether they have already processed a given result.
 
 ### HTTP Endpoints
 

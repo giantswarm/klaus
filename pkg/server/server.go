@@ -24,8 +24,11 @@ const (
 	ModePersistent = "persistent"
 )
 
-func NewWithMode(process claudepkg.Prompter, port string, mode string) *Server {
-	mcpSrv := mcppkg.NewServer(process)
+// NewWithMode creates a Server that serves MCP and operational endpoints.
+// The serverCtx controls the lifetime of background goroutines; it should
+// be cancelled during server shutdown to ensure drain goroutines are cleaned up.
+func NewWithMode(serverCtx context.Context, process claudepkg.Prompter, port string, mode string) *Server {
+	mcpSrv := mcppkg.NewServer(serverCtx, process)
 
 	mux := http.NewServeMux()
 
