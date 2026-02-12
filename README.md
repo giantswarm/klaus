@@ -23,16 +23,47 @@ Klaus runs the Claude Code CLI as a managed subprocess and exposes it over HTTP 
 | `/readyz` | Readiness probe (Claude process state) |
 | `/status` | JSON status (version, agent state, cost) |
 
+## Quick Start
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+klaus serve
+# MCP endpoint available at http://localhost:8080/mcp
+```
+
 ## Architecture
 
 ```
-HTTP Client --> /mcp --> MCP Server --> Prompter --> Claude Code CLI (subprocess)
+MCP Client --> /mcp --> MCP Server --> Prompter --> Claude Code CLI (subprocess)
 ```
 
 The container image is based on `node:22-slim` with the Claude Code CLI installed globally via npm. The Go binary manages the Claude subprocess in one of two modes:
 
-- **Single-shot** (default): new subprocess per prompt
-- **Persistent**: long-running subprocess with multi-turn conversations
+- **Single-shot** (default): spawns a new subprocess per prompt. Supports per-invocation overrides (`session_id`, `resume`, `effort`, `agent`). Session persistence is optional via `--resume`.
+- **Persistent** (`CLAUDE_PERSISTENT_MODE=true`): maintains a long-running subprocess with bidirectional stream-json. Provides multi-turn conversation memory, cumulative cost tracking, and lower latency (no startup overhead per prompt). A watchdog auto-restarts the subprocess on crash.
+
+## Configuration
+
+All Claude options are configured via environment variables. The `ANTHROPIC_API_KEY` is the only requirement.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key (required) | -- |
+| `PORT` | HTTP server port | `8080` |
+| `CLAUDE_MODEL` | Model name or alias (`sonnet`, `opus`, `haiku`) | CLI default |
+| `CLAUDE_SYSTEM_PROMPT` | Override the default system prompt | -- |
+| `CLAUDE_APPEND_SYSTEM_PROMPT` | Append to the default system prompt | -- |
+| `CLAUDE_MAX_TURNS` | Max agentic turns per prompt (0 = unlimited) | `0` |
+| `CLAUDE_MAX_BUDGET_USD` | Spending cap per invocation in USD | -- |
+| `CLAUDE_EFFORT` | Effort level: `low`, `medium`, `high` | CLI default |
+| `CLAUDE_PERMISSION_MODE` | `bypassPermissions`, `acceptEdits`, `plan`, `delegate`, `default` | `bypassPermissions` |
+| `CLAUDE_WORKSPACE` | Working directory for the agent | -- |
+| `CLAUDE_PERSISTENT_MODE` | Use persistent subprocess mode | `false` |
+| `CLAUDE_MCP_CONFIG` | Path to MCP servers config file | -- |
+| `CLAUDE_AGENTS` | JSON object defining named agent personas | -- |
+| `CLAUDE_ACTIVE_AGENT` | Default named agent to use | -- |
+
+See `klaus serve --help` and the [Helm values](helm/klaus/values.yaml) for the full list including OAuth, tools, plugins, and session options.
 
 ## Deployment
 
