@@ -265,6 +265,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- include "klaus.validatePlugins" . }}
       volumes:
         - name: config
           configMap:
@@ -274,6 +275,11 @@ spec:
           configMap:
             name: {{ include "klaus.fullname" . }}
             defaultMode: 0755
+            items:
+              {{- range $name, $_ := .Values.claude.hookScripts }}
+              - key: hookscript-{{ $name }}
+                path: hookscript-{{ $name }}
+              {{- end }}
         {{- end }}
         {{- range .Values.claude.plugins }}
         {{- $pluginName := .repository | splitList "/" | last }}

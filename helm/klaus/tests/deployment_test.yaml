@@ -266,7 +266,7 @@ tests:
             name: CLAUDE_PLUGIN_DIRS
             value: "/var/lib/klaus/plugins/gs-base"
 
-  - it: should create config-scripts volume when hookScripts defined
+  - it: should create config-scripts volume with items filter when hookScripts defined
     documentIndex: 0
     template: templates/deployment.yaml
     set:
@@ -283,6 +283,9 @@ tests:
             configMap:
               name: RELEASE-NAME-klaus
               defaultMode: 493
+              items:
+                - key: hookscript-validate.sh
+                  path: hookscript-validate.sh
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
@@ -290,3 +293,28 @@ tests:
             mountPath: /etc/klaus/hooks/validate.sh
             subPath: hookscript-validate.sh
             readOnly: true
+
+  - it: should fail when plugin has neither tag nor digest
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+    asserts:
+      - failedTemplate:
+          errorMessage: "plugin gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base requires either tag or digest"
+
+  - it: should fail when two plugins share the same short name
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+          - repository: other.registry.io/custom/gs-base
+            tag: v1.0.0
+    asserts:
+      - failedTemplate:
+          errorMessage: 'duplicate plugin short name "gs-base" (from gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base and other.registry.io/custom/gs-base); use unique final path segments'

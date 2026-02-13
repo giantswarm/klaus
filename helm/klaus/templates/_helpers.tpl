@@ -95,3 +95,21 @@ Returns non-empty string when true.
 {{- define "klaus.needsScriptsVolume" -}}
 {{- if .Values.claude.hookScripts -}}true{{- end -}}
 {{- end -}}
+
+{{/*
+Validate plugins: each must have tag or digest, and short names must be unique.
+Call once from deployment.yaml; emits nothing on success, fails on error.
+*/}}
+{{- define "klaus.validatePlugins" -}}
+{{- $seen := dict -}}
+{{- range .Values.claude.plugins -}}
+{{- if and (not .tag) (not .digest) -}}
+{{- fail (printf "plugin %s requires either tag or digest" .repository) -}}
+{{- end -}}
+{{- $short := .repository | splitList "/" | last -}}
+{{- if hasKey $seen $short -}}
+{{- fail (printf "duplicate plugin short name %q (from %s and %s); use unique final path segments" $short (get $seen $short) .repository) -}}
+{{- end -}}
+{{- $_ := set $seen $short .repository -}}
+{{- end -}}
+{{- end -}}

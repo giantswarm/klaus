@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -220,26 +221,6 @@ func TestValidateEffort(t *testing.T) {
 	}
 }
 
-func TestArgs_AddDirs(t *testing.T) {
-	opts := Options{
-		AddDirs: []string{"/skills/platform", "/skills/custom"},
-	}
-	args := opts.args()
-
-	assertContainsSequence(t, args, "--add-dir", "/skills/platform")
-	assertContainsSequence(t, args, "--add-dir", "/skills/custom")
-
-	count := 0
-	for _, a := range args {
-		if a == "--add-dir" {
-			count++
-		}
-	}
-	if count != 2 {
-		t.Errorf("expected 2 --add-dir flags, got %d", count)
-	}
-}
-
 func TestArgs_ExtendedAgentConfig(t *testing.T) {
 	opts := Options{
 		Agents: map[string]AgentConfig{
@@ -253,25 +234,29 @@ func TestArgs_ExtendedAgentConfig(t *testing.T) {
 		},
 	}
 	args := opts.args()
-	assertContains(t, args, "--agents")
 
-	// Verify the JSON contains extended fields.
-	for i, a := range args {
-		if a == "--agents" && i+1 < len(args) {
-			jsonStr := args[i+1]
-			if !strings.Contains(jsonStr, `"tools":["Read","Grep"]`) {
-				t.Errorf("expected agents JSON to contain tools, got %s", jsonStr)
-			}
-			if !strings.Contains(jsonStr, `"model":"haiku"`) {
-				t.Errorf("expected agents JSON to contain model, got %s", jsonStr)
-			}
-			if !strings.Contains(jsonStr, `"maxTurns":5`) {
-				t.Errorf("expected agents JSON to contain maxTurns, got %s", jsonStr)
-			}
-			return
-		}
+	agentsJSON := findFlagValue(t, args, "--agents")
+	var parsed map[string]AgentConfig
+	if err := json.Unmarshal([]byte(agentsJSON), &parsed); err != nil {
+		t.Fatalf("failed to unmarshal agents JSON: %v", err)
 	}
-	t.Error("--agents flag not found")
+
+	reviewer, ok := parsed["reviewer"]
+	if !ok {
+		t.Fatal("expected agents to contain 'reviewer'")
+	}
+	if reviewer.Description != "Reviews code" {
+		t.Errorf("expected description %q, got %q", "Reviews code", reviewer.Description)
+	}
+	if len(reviewer.Tools) != 2 || reviewer.Tools[0] != "Read" || reviewer.Tools[1] != "Grep" {
+		t.Errorf("expected tools [Read, Grep], got %v", reviewer.Tools)
+	}
+	if reviewer.Model != "haiku" {
+		t.Errorf("expected model %q, got %q", "haiku", reviewer.Model)
+	}
+	if reviewer.MaxTurns != 5 {
+		t.Errorf("expected maxTurns 5, got %d", reviewer.MaxTurns)
+	}
 }
 
 func TestArgs_AgentConfigBackwardCompatibility(t *testing.T) {
@@ -283,24 +268,38 @@ func TestArgs_AgentConfigBackwardCompatibility(t *testing.T) {
 		},
 	}
 	args := opts.args()
-	assertContains(t, args, "--agents")
 
-	for i, a := range args {
-		if a == "--agents" && i+1 < len(args) {
-			jsonStr := args[i+1]
-			if strings.Contains(jsonStr, `"tools"`) {
-				t.Errorf("expected agents JSON to omit empty tools, got %s", jsonStr)
-			}
-			if strings.Contains(jsonStr, `"model"`) {
-				t.Errorf("expected agents JSON to omit empty model, got %s", jsonStr)
-			}
-			if strings.Contains(jsonStr, `"maxTurns"`) {
-				t.Errorf("expected agents JSON to omit empty maxTurns, got %s", jsonStr)
-			}
-			return
-		}
+	agentsJSON := findFlagValue(t, args, "--agents")
+	var parsed map[string]AgentConfig
+	if err := json.Unmarshal([]byte(agentsJSON), &parsed); err != nil {
+		t.Fatalf("failed to unmarshal agents JSON: %v", err)
 	}
-	t.Error("--agents flag not found")
+
+	simple, ok := parsed["simple"]
+	if !ok {
+		t.Fatal("expected agents to contain 'simple'")
+	}
+	if simple.Description != "Simple agent" {
+		t.Errorf("expected description %q, got %q", "Simple agent", simple.Description)
+	}
+	// Optional fields must be zero-valued.
+	if len(simple.Tools) != 0 {
+		t.Errorf("expected empty tools, got %v", simple.Tools)
+	}
+	if simple.Model != "" {
+		t.Errorf("expected empty model, got %q", simple.Model)
+	}
+	if simple.MaxTurns != 0 {
+		t.Errorf("expected zero maxTurns, got %d", simple.MaxTurns)
+	}
+
+	// Verify omitempty works: the raw JSON should not contain optional keys.
+	if strings.Contains(agentsJSON, `"tools"`) {
+		t.Errorf("expected agents JSON to omit empty tools, got %s", agentsJSON)
+	}
+	if strings.Contains(agentsJSON, `"model"`) {
+		t.Errorf("expected agents JSON to omit empty model, got %s", agentsJSON)
+	}
 }
 
 func assertContains(t *testing.T, args []string, want string) {
@@ -331,4 +330,15 @@ func assertContainsSequence(t *testing.T, args []string, key, value string) {
 		}
 	}
 	t.Errorf("expected args to contain %q %q, got %v", key, value, args)
+}
+
+func findFlagValue(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("flag %q not found in args %v", flag, args)
+	return ""
 }

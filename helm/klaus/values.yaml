@@ -120,7 +120,7 @@ claude:
 
   # -- Plugins --
   # plugins references Klaus plugins stored in OCI registries, delivered via
-  # Kubernetes OCI image volumes (requires Kubernetes 1.35+, KEP-4639).
+  # Kubernetes OCI image volumes (beta since Kubernetes 1.33, KEP-4639).
   # Each plugin is a versioned, distributable package of skills, hooks, agents,
   # and MCP servers. See giantswarm/klaus-operator#6 for the OCI artifact format.
   # Example:
