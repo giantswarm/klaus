@@ -25,22 +25,117 @@
       "type": "object",
       "properties": {
         "model": {
-          "type": "string"
+          "type": "string",
+          "description": "Claude model to use (e.g. claude-sonnet-4-20250514, sonnet, opus)"
         },
         "maxTurns": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Max agentic turns per prompt (0 = unlimited)"
         },
         "permissionMode": {
-          "type": "string"
+          "type": "string",
+          "description": "Permission mode for tool usage",
+          "enum": ["default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "delegate"]
         },
         "systemPrompt": {
-          "type": "string"
+          "type": "string",
+          "description": "Override the default system prompt"
         },
         "appendSystemPrompt": {
-          "type": "string"
+          "type": "string",
+          "description": "Append to the default system prompt"
         },
         "mcpConfig": {
-          "type": "string"
+          "type": "string",
+          "description": "Inline MCP configuration JSON"
+        },
+        "strictMcpConfig": {
+          "type": "boolean",
+          "description": "Only use MCP servers from mcpConfig"
+        },
+        "maxBudgetUSD": {
+          "type": "number",
+          "description": "Maximum dollar spend per invocation (0 = no limit)"
+        },
+        "effort": {
+          "type": "string",
+          "description": "Effort level for responses",
+          "enum": ["", "low", "medium", "high"]
+        },
+        "fallbackModel": {
+          "type": "string",
+          "description": "Fallback model when primary is overloaded"
+        },
+        "jsonSchema": {
+          "type": "string",
+          "description": "JSON Schema for structured output validation"
+        },
+        "settingsFile": {
+          "type": "string",
+          "description": "Path to settings JSON file inside the container"
+        },
+        "settingSources": {
+          "type": "string",
+          "description": "Setting sources to load (comma-separated: user,project,local)"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Base set of built-in tools available"
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool access patterns to allow"
+        },
+        "disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool patterns to explicitly block"
+        },
+        "pluginDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Directories to load plugins from"
+        },
+        "agents": {
+          "type": "object",
+          "description": "Named agent personas with descriptions and prompts",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "activeAgent": {
+          "type": "string",
+          "description": "Default named agent to use"
+        },
+        "includePartialMessages": {
+          "type": "boolean",
+          "description": "Emit partial message chunks during streaming"
+        },
+        "persistentMode": {
+          "type": "boolean",
+          "description": "Enable bidirectional stream-json persistent subprocess mode"
+        },
+        "noSessionPersistence": {
+          "type": "boolean",
+          "description": "Disable saving sessions to disk"
         }
       }
     },
@@ -69,6 +164,114 @@
         },
         "existingClaim": {
           "type": "string"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "OpenTelemetry monitoring and Prometheus metrics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable OTel env var pass-through to the Claude Code subprocess"
+        },
+        "metricsExporter": {
+          "type": "string",
+          "description": "Metrics exporter for Claude Code telemetry",
+          "enum": ["otlp", "prometheus", "console"]
+        },
+        "logsExporter": {
+          "type": "string",
+          "description": "Logs/events exporter for Claude Code telemetry",
+          "enum": ["otlp", "console"]
+        },
+        "otlp": {
+          "type": "object",
+          "description": "OTLP exporter configuration",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "description": "OTLP transport protocol",
+              "enum": ["grpc", "http/protobuf"]
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "OTLP collector endpoint URL"
+            },
+            "headers": {
+              "type": "string",
+              "description": "OTLP headers for authentication (e.g. Authorization=Bearer token)"
+            }
+          }
+        },
+        "metricExportIntervalMs": {
+          "type": "integer",
+          "description": "Metric flush interval in milliseconds"
+        },
+        "logsExportIntervalMs": {
+          "type": "integer",
+          "description": "Logs flush interval in milliseconds"
+        },
+        "logUserPrompts": {
+          "type": "boolean",
+          "description": "Include user prompt text in OTel log events (privacy sensitive)"
+        },
+        "logToolDetails": {
+          "type": "boolean",
+          "description": "Include tool input/output in OTel log events (privacy sensitive)"
+        },
+        "includeSessionId": {
+          "type": "boolean",
+          "description": "Include session_id label in OTel metrics"
+        },
+        "includeVersion": {
+          "type": "boolean",
+          "description": "Include version label in OTel metrics"
+        },
+        "includeAccountUuid": {
+          "type": "boolean",
+          "description": "Include account_uuid label in OTel metrics"
+        },
+        "resourceAttributes": {
+          "type": "string",
+          "description": "Custom OTEL_RESOURCE_ATTRIBUTES in W3C Baggage format"
+        },
+        "scrapeAnnotations": {
+          "type": "boolean",
+          "description": "Add prometheus.io/* scrape annotations to the Service"
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "description": "Prometheus Operator ServiceMonitor configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create a ServiceMonitor resource for Prometheus Operator"
+            },
+            "interval": {
+              "type": "string",
+              "description": "Scrape interval (e.g. 30s)"
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "description": "Scrape timeout (e.g. 10s)"
+            },
+            "namespaceSelector": {
+              "type": "object",
+              "description": "Optional namespace selector for cross-namespace monitoring",
+              "properties": {
+                "any": {
+                  "type": "boolean"
+                },
+                "matchNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

@@ -1,0 +1,5 @@
+# Test values for ATS smoke tests.
+# Minimal configuration to verify the chart deploys successfully.
+claude:
+  permissionMode: "bypassPermissions"
+  noSessionPersistence: true

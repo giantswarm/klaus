@@ -7,11 +7,14 @@ import (
 func TestDefaultOptions(t *testing.T) {
 	opts := DefaultOptions()
 
-	if opts.PermissionMode != "accept-all" {
-		t.Errorf("expected PermissionMode %q, got %q", "accept-all", opts.PermissionMode)
+	if opts.PermissionMode != "bypassPermissions" {
+		t.Errorf("expected PermissionMode %q, got %q", "bypassPermissions", opts.PermissionMode)
 	}
 	if opts.MaxTurns != 0 {
 		t.Errorf("expected MaxTurns 0, got %d", opts.MaxTurns)
+	}
+	if !opts.NoSessionPersistence {
+		t.Error("expected NoSessionPersistence to be true by default")
 	}
 }
 
@@ -24,10 +27,29 @@ func TestArgs_Minimal(t *testing.T) {
 	assertContains(t, args, "stream-json")
 	assertContains(t, args, "--verbose")
 	assertContains(t, args, "--permission-mode")
-	assertContains(t, args, "accept-all")
+	assertContains(t, args, "bypassPermissions")
+	assertContains(t, args, "--dangerously-skip-permissions")
+	assertContains(t, args, "--no-session-persistence")
 
 	// Model should not appear when empty.
 	assertNotContains(t, args, "--model")
+	// Optional flags should not appear when empty.
+	assertNotContains(t, args, "--max-budget-usd")
+	assertNotContains(t, args, "--effort")
+	assertNotContains(t, args, "--fallback-model")
+	assertNotContains(t, args, "--json-schema")
+	assertNotContains(t, args, "--strict-mcp-config")
+	assertNotContains(t, args, "--session-id")
+	assertNotContains(t, args, "--resume")
+	assertNotContains(t, args, "--continue")
+	assertNotContains(t, args, "--fork-session")
+	assertNotContains(t, args, "--agents")
+	assertNotContains(t, args, "--agent")
+	assertNotContains(t, args, "--settings")
+	assertNotContains(t, args, "--setting-sources")
+	assertNotContains(t, args, "--tools")
+	assertNotContains(t, args, "--plugin-dir")
+	assertNotContains(t, args, "--include-partial-messages")
 }
 
 func TestArgs_AllOptions(t *testing.T) {
@@ -37,9 +59,25 @@ func TestArgs_AllOptions(t *testing.T) {
 		AppendSystemPrompt: "Be concise.",
 		AllowedTools:       []string{"read", "write"},
 		DisallowedTools:    []string{"exec"},
+		Tools:              []string{"Bash", "Edit", "Read"},
 		MaxTurns:           5,
 		MCPConfigPath:      "/etc/mcp.json",
-		PermissionMode:     "ask",
+		StrictMCPConfig:    true,
+		PermissionMode:     "acceptEdits",
+		MaxBudgetUSD:       10.50,
+		Effort:             "high",
+		FallbackModel:      "sonnet",
+		SessionID:          "abc-123",
+		JSONSchema:         `{"type":"object"}`,
+		SettingsFile:       "/etc/settings.json",
+		SettingSources:     "user,project",
+		PluginDirs:         []string{"/plugins/a", "/plugins/b"},
+		Agents: map[string]AgentConfig{
+			"reviewer": {Description: "Reviews code", Prompt: "You review"},
+		},
+		ActiveAgent:            "reviewer",
+		IncludePartialMessages: true,
+		NoSessionPersistence:   true,
 	}
 	args := opts.args()
 
@@ -47,10 +85,59 @@ func TestArgs_AllOptions(t *testing.T) {
 	assertContainsSequence(t, args, "--system-prompt", "You are helpful.")
 	assertContainsSequence(t, args, "--append-system-prompt", "Be concise.")
 	assertContainsSequence(t, args, "--max-turns", "5")
-	assertContainsSequence(t, args, "--permission-mode", "ask")
+	assertContainsSequence(t, args, "--permission-mode", "acceptEdits")
 	assertContainsSequence(t, args, "--mcp-config", "/etc/mcp.json")
+	assertContains(t, args, "--strict-mcp-config")
 	assertContainsSequence(t, args, "--allowedTools", "read,write")
 	assertContainsSequence(t, args, "--disallowedTools", "exec")
+	assertContainsSequence(t, args, "--tools", "Bash,Edit,Read")
+	assertContainsSequence(t, args, "--max-budget-usd", "10.50")
+	assertContainsSequence(t, args, "--effort", "high")
+	assertContainsSequence(t, args, "--fallback-model", "sonnet")
+	assertContainsSequence(t, args, "--session-id", "abc-123")
+	assertContainsSequence(t, args, "--json-schema", `{"type":"object"}`)
+	assertContainsSequence(t, args, "--settings", "/etc/settings.json")
+	assertContainsSequence(t, args, "--setting-sources", "user,project")
+	assertContainsSequence(t, args, "--agent", "reviewer")
+	assertContains(t, args, "--agents")
+	assertContains(t, args, "--include-partial-messages")
+	assertContains(t, args, "--no-session-persistence")
+
+	// Plugin dirs should appear as separate --plugin-dir flags.
+	pluginDirCount := 0
+	for _, a := range args {
+		if a == "--plugin-dir" {
+			pluginDirCount++
+		}
+	}
+	if pluginDirCount != 2 {
+		t.Errorf("expected 2 --plugin-dir flags, got %d", pluginDirCount)
+	}
+
+	// acceptEdits should NOT add --dangerously-skip-permissions.
+	assertNotContains(t, args, "--dangerously-skip-permissions")
+}
+
+func TestArgs_BypassPermissionsAddsDangerousFlag(t *testing.T) {
+	opts := Options{
+		PermissionMode: "bypassPermissions",
+	}
+	args := opts.args()
+
+	assertContainsSequence(t, args, "--permission-mode", "bypassPermissions")
+	assertContains(t, args, "--dangerously-skip-permissions")
+}
+
+func TestArgs_NonBypassPermissionsDoesNotAddDangerousFlag(t *testing.T) {
+	for _, mode := range []string{"default", "acceptEdits", "dontAsk", "plan", "delegate"} {
+		t.Run(mode, func(t *testing.T) {
+			opts := Options{PermissionMode: mode}
+			args := opts.args()
+
+			assertContainsSequence(t, args, "--permission-mode", mode)
+			assertNotContains(t, args, "--dangerously-skip-permissions")
+		})
+	}
 }
 
 func TestArgs_ZeroMaxTurns(t *testing.T) {
@@ -58,6 +145,65 @@ func TestArgs_ZeroMaxTurns(t *testing.T) {
 	args := opts.args()
 
 	assertNotContains(t, args, "--max-turns")
+}
+
+func TestArgs_SessionManagement(t *testing.T) {
+	// Resume
+	opts := Options{Resume: "sess-456"}
+	args := opts.args()
+	assertContainsSequence(t, args, "--resume", "sess-456")
+	assertNotContains(t, args, "--continue")
+
+	// Continue
+	opts = Options{ContinueSession: true}
+	args = opts.args()
+	assertContains(t, args, "--continue")
+	assertNotContains(t, args, "--resume")
+
+	// Fork session
+	opts = Options{Resume: "sess-789", ForkSession: true}
+	args = opts.args()
+	assertContainsSequence(t, args, "--resume", "sess-789")
+	assertContains(t, args, "--fork-session")
+}
+
+func TestValidatePermissionMode(t *testing.T) {
+	// Valid modes should not error.
+	for _, mode := range ValidPermissionModes {
+		if err := ValidatePermissionMode(mode); err != nil {
+			t.Errorf("expected mode %q to be valid, got error: %v", mode, err)
+		}
+	}
+
+	// Invalid modes should error.
+	invalidModes := []string{"accept-all", "bypass", "skip", "", "BYPASSPERMISSIONS"}
+	for _, mode := range invalidModes {
+		if err := ValidatePermissionMode(mode); err == nil {
+			t.Errorf("expected mode %q to be invalid, but got no error", mode)
+		}
+	}
+}
+
+func TestValidateEffort(t *testing.T) {
+	// Empty string should be valid (uses default).
+	if err := ValidateEffort(""); err != nil {
+		t.Errorf("expected empty effort to be valid, got error: %v", err)
+	}
+
+	// Valid levels should not error.
+	for _, level := range ValidEffortLevels {
+		if err := ValidateEffort(level); err != nil {
+			t.Errorf("expected effort %q to be valid, got error: %v", level, err)
+		}
+	}
+
+	// Invalid levels should error.
+	invalidLevels := []string{"hig", "LOW", "Medium", "extreme", "auto"}
+	for _, level := range invalidLevels {
+		if err := ValidateEffort(level); err == nil {
+			t.Errorf("expected effort %q to be invalid, but got no error", level)
+		}
+	}
 }
 
 func assertContains(t *testing.T, args []string, want string) {

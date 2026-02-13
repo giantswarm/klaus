@@ -5,6 +5,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "klaus.labels" . | nindent 4 }}
+  {{- if .Values.telemetry.scrapeAnnotations }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: {{ .Values.port | quote }}
+    prometheus.io/path: "/metrics"
+  {{- end }}
 spec:
   type: ClusterIP
   ports:

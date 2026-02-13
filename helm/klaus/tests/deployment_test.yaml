@@ -1,0 +1,126 @@
+# Deployment template tests for klaus Helm chart
+#
+# These tests verify the Deployment configuration, particularly:
+# - Security context settings
+# - Container configuration
+# - Volume mounts and environment variables
+#
+# Run with: helm unittest ./helm/klaus
+
+suite: Deployment template tests
+templates:
+  - templates/deployment.yaml
+  - templates/configmap.yaml
+tests:
+  - it: should set replicas from values
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: should run as non-root
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+
+  - it: should drop all capabilities
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value:
+            - ALL
+
+  - it: should not allow privilege escalation
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+
+  - it: should use correct container port
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8080
+
+  - it: should have liveness probe on /healthz
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+
+  - it: should have readiness probe on /readyz
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+
+  - it: should set resource limits
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.limits
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.requests
+
+  - it: should mount workspace volume when enabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        size: 1Gi
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /workspace
+
+  - it: should not have workspace volume mount when disabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_WORKSPACE
+          any: true
+
+  - it: should set CLAUDE_MODEL when configured
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        model: "sonnet"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MODEL
+            value: "sonnet"
+
+  - it: should set configmap checksum annotation
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - isNotEmpty:
+          path: spec.template.metadata.annotations["checksum/config"]

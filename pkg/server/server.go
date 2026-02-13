@@ -18,8 +18,17 @@ type Server struct {
 	mcpServer  *mcpserver.StreamableHTTPServer
 }
 
-func New(process *claudepkg.Process, port string) *Server {
-	mcpSrv := mcppkg.NewServer(process)
+// ProcessMode describes the operating mode of the claude process.
+const (
+	ModeSingleShot = "single-shot"
+	ModePersistent = "persistent"
+)
+
+// NewWithMode creates a Server that serves MCP and operational endpoints.
+// The serverCtx controls the lifetime of background goroutines; it should
+// be cancelled during server shutdown to ensure drain goroutines are cleaned up.
+func NewWithMode(serverCtx context.Context, process claudepkg.Prompter, port string, mode string) *Server {
+	mcpSrv := mcppkg.NewServer(serverCtx, process)
 
 	mux := http.NewServeMux()
 
@@ -31,7 +40,7 @@ func New(process *claudepkg.Process, port string) *Server {
 	mux.Handle("/mcp", mcpSrv)
 
 	// Operational endpoints.
-	registerOperationalRoutes(mux, process)
+	registerOperationalRoutes(mux, process, mode)
 
 	s.httpServer = &http.Server{
 		Addr:              ":" + port,
@@ -61,4 +70,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	return s.httpServer.Shutdown(ctx)
 }
-

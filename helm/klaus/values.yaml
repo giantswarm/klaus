@@ -12,16 +12,17 @@ port: 8080
 
 # Claude Code agent configuration.
 claude:
-  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514").
+  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
   # Empty string uses the Claude CLI default.
   model: ""
   # maxTurns limits the number of agentic turns per prompt.
   # 0 means no limit.
   maxTurns: 0
   # permissionMode controls how Claude handles tool permissions.
-  # "accept-all" is required for headless/autonomous operation.
-  permissionMode: "accept-all"
-  # systemPrompt is the system prompt text for the Claude agent.
+  # Valid values: "bypassPermissions", "acceptEdits", "dontAsk", "plan", "delegate", "default".
+  # "bypassPermissions" is required for headless/autonomous operation.
+  permissionMode: "bypassPermissions"
+  # systemPrompt overrides the default system prompt entirely.
   # Set via ConfigMap when non-empty.
   systemPrompt: ""
   # appendSystemPrompt is appended to the default system prompt.
@@ -29,6 +30,72 @@ claude:
   # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
   # Mounted as a file in the container.
   mcpConfig: ""
+  # strictMcpConfig when true only uses MCP servers from mcpConfig,
+  # ignoring user, project, and local MCP configurations.
+  # Recommended for production security.
+  strictMcpConfig: true
+
+  # -- Operational controls --
+  # maxBudgetUSD caps the maximum dollar spend per invocation; 0 means no limit.
+  maxBudgetUSD: 0
+  # effort controls the effort level: "low", "medium", "high"; empty means default.
+  effort: ""
+  # fallbackModel specifies a model to use when the primary is overloaded.
+  fallbackModel: ""
+
+  # -- Structured output --
+  # jsonSchema constrains the output to conform to a JSON Schema (JSON string).
+  jsonSchema: ""
+
+  # -- Settings --
+  # settingsFile is a path to a settings JSON file inside the container.
+  settingsFile: ""
+  # settingSources controls which setting sources are loaded (comma-separated: "user,project,local").
+  # Empty string means only explicit configuration is used.
+  settingSources: ""
+
+  # -- Tool control --
+  # tools controls the base set of built-in tools available.
+  # Empty list means all default tools. Use ["Bash","Edit","Read"] to restrict.
+  tools: []
+  # allowedTools restricts tool access with patterns (e.g. ["Bash(git:*)", "Edit"]).
+  allowedTools: []
+  # disallowedTools explicitly blocks specific tools (e.g. ["Bash(rm:*)"]).
+  disallowedTools: []
+
+  # -- Plugin support --
+  # pluginDirs are directories to load plugins from.
+  pluginDirs: []
+
+  # -- Named agents --
+  # agents defines named agent personas with descriptions and prompts.
+  # Example:
+  #   agents:
+  #     reviewer:
+  #       description: "Reviews code changes"
+  #       prompt: "You are a senior code reviewer..."
+  #     deployer:
+  #       description: "Handles deployments"
+  #       prompt: "You are a deployment specialist..."
+  agents: {}
+  # activeAgent selects which named agent to use by default.
+  activeAgent: ""
+
+  # -- Streaming --
+  # includePartialMessages emits partial message chunks during streaming.
+  # Enables progress tracking with message count, tool call count, and last activity.
+  includePartialMessages: false
+
+  # -- Process mode --
+  # persistentMode enables bidirectional stream-json mode where a single
+  # long-running Claude subprocess handles multiple prompts with conversation
+  # continuity. When false (default), a new subprocess is spawned per prompt.
+  persistentMode: false
+
+  # -- Session management --
+  # noSessionPersistence disables saving sessions to disk.
+  # Recommended for ephemeral container workloads.
+  noSessionPersistence: true
 
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:
@@ -44,6 +111,59 @@ workspace:
   size: 1Gi
   # existingClaim allows using a pre-existing PVC.
   existingClaim: ""
+
+# OpenTelemetry monitoring configuration.
+# These env vars are inherited by the Claude Code subprocess, enabling its
+# native telemetry (tokens, cost, sessions, tool events, API requests).
+# See https://code.claude.com/docs/en/monitoring-usage for details.
+#
+# Note: the /metrics endpoint (Prometheus format) is always served by klaus
+# regardless of the enabled flag. Setting enabled=true controls the OTel
+# env vars passed to the Claude subprocess.
+#
+# Prometheus scrape annotations (scrapeAnnotations) and the ServiceMonitor
+# are independently toggleable so you can scrape /metrics without injecting
+# OTel env vars into the Claude subprocess.
+telemetry:
+  enabled: false
+  # metricsExporter selects the metrics exporter: "otlp", "prometheus", "console".
+  metricsExporter: "otlp"
+  # logsExporter selects the logs/events exporter: "otlp", "console".
+  logsExporter: "otlp"
+  # otlp configures the OTLP exporter endpoint.
+  otlp:
+    protocol: "grpc"
+    endpoint: ""
+    # headers for authentication (e.g. "Authorization=Bearer token").
+    headers: ""
+  # exportIntervals control how often data is flushed (milliseconds).
+  metricExportIntervalMs: 60000
+  logsExportIntervalMs: 5000
+  # Privacy controls.
+  logUserPrompts: false
+  logToolDetails: false
+  # Cardinality controls.
+  includeSessionId: true
+  includeVersion: false
+  includeAccountUuid: true
+  # Custom resource attributes for team identification (W3C Baggage format).
+  # Example: "department=engineering,team.id=platform,cost_center=eng-123"
+  resourceAttributes: ""
+  # scrapeAnnotations adds prometheus.io/* annotations to the Service,
+  # independent of the OTel enabled flag above. Enable this when you want
+  # annotation-based Prometheus discovery of the /metrics endpoint.
+  scrapeAnnotations: false
+  # serviceMonitor configures a Prometheus Operator ServiceMonitor for
+  # scraping the /metrics endpoint exposed by klaus itself. This is also
+  # independent of the OTel enabled flag.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+    # namespaceSelector restricts which namespaces the ServiceMonitor
+    # matches. Leave empty to match only the release namespace (default).
+    # Set any=true for cross-namespace matching, or use matchNames.
+    namespaceSelector: {}
 
 resources:
   limits:

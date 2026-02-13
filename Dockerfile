@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary.
-FROM golang:1.23 AS builder
+FROM golang:1.25.7 AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -35,8 +35,8 @@ RUN npm install -g @anthropic-ai/claude-code && \
     npm cache clean --force
 
 # Create a non-root user for running the application.
-RUN groupadd -g 1000 klaus && \
-    useradd -u 1000 -g klaus -m -s /bin/bash klaus
+RUN groupadd -g 1001 klaus && \
+    useradd -u 1001 -g klaus -m -s /bin/bash klaus
 
 # Create workspace directory.
 RUN mkdir -p /workspace && chown klaus:klaus /workspace

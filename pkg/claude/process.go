@@ -10,20 +10,87 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/giantswarm/klaus/pkg/metrics"
 )
+
+// RunOptions allows overriding base Options on a per-invocation basis.
+// Zero values are ignored (the base Options value is used instead).
+type RunOptions struct {
+	// SessionID overrides Options.SessionID for this run.
+	SessionID string
+	// Resume overrides Options.Resume for this run.
+	Resume string
+	// ContinueSession overrides Options.ContinueSession for this run.
+	ContinueSession bool
+	// ForkSession overrides Options.ForkSession for this run.
+	ForkSession bool
+	// ActiveAgent overrides Options.ActiveAgent for this run.
+	ActiveAgent string
+	// JSONSchema overrides Options.JSONSchema for this run.
+	JSONSchema string
+	// MaxBudgetUSD overrides Options.MaxBudgetUSD for this run.
+	MaxBudgetUSD float64
+	// Effort overrides Options.Effort for this run.
+	Effort string
+}
+
+// ignoredFields returns the names of fields that have non-zero values.
+// This is used to log which per-invocation overrides cannot be applied
+// in persistent mode.
+func (ro *RunOptions) ignoredFields() []string {
+	if ro == nil {
+		return nil
+	}
+	var fields []string
+	if ro.SessionID != "" {
+		fields = append(fields, "session_id")
+	}
+	if ro.Resume != "" {
+		fields = append(fields, "resume")
+	}
+	if ro.ContinueSession {
+		fields = append(fields, "continue")
+	}
+	if ro.ForkSession {
+		fields = append(fields, "fork_session")
+	}
+	if ro.ActiveAgent != "" {
+		fields = append(fields, "agent")
+	}
+	if ro.JSONSchema != "" {
+		fields = append(fields, "json_schema")
+	}
+	if ro.MaxBudgetUSD > 0 {
+		fields = append(fields, "max_budget_usd")
+	}
+	if ro.Effort != "" {
+		fields = append(fields, "effort")
+	}
+	return fields
+}
 
 // Process manages a Claude CLI subprocess lifecycle and streams its output.
 type Process struct {
 	opts Options
 
-	mu        sync.RWMutex
-	cmd       *exec.Cmd
-	status    ProcessStatus
-	sessionID string
-	lastError string
-	totalCost float64
+	mu            sync.RWMutex
+	cmd           *exec.Cmd
+	status        ProcessStatus
+	sessionID     string
+	lastError     string
+	totalCost     float64
+	messageCount  int
+	toolCallCount int
+	lastMessage   string
+	lastToolName  string
 
-	done chan struct{}
+	// result stores the output of the last completed Submit run,
+	// allowing callers to retrieve results asynchronously.
+	result resultState
+
+	done      chan struct{}
+	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
 
 // NewProcess returns a Process ready to run. The Done channel is pre-closed
@@ -38,9 +105,47 @@ func NewProcess(opts Options) *Process {
 	}
 }
 
+// mergedOpts returns a copy of the base options with per-run overrides applied.
+func (p *Process) mergedOpts(ro *RunOptions) Options {
+	opts := p.opts
+	if ro == nil {
+		return opts
+	}
+	if ro.SessionID != "" {
+		opts.SessionID = ro.SessionID
+	}
+	if ro.Resume != "" {
+		opts.Resume = ro.Resume
+	}
+	if ro.ContinueSession {
+		opts.ContinueSession = true
+	}
+	if ro.ForkSession {
+		opts.ForkSession = true
+	}
+	if ro.ActiveAgent != "" {
+		opts.ActiveAgent = ro.ActiveAgent
+	}
+	if ro.JSONSchema != "" {
+		opts.JSONSchema = ro.JSONSchema
+	}
+	if ro.MaxBudgetUSD > 0 {
+		opts.MaxBudgetUSD = ro.MaxBudgetUSD
+	}
+	if ro.Effort != "" {
+		opts.Effort = ro.Effort
+	}
+	return opts
+}
+
 // Run spawns a claude subprocess for the given prompt and returns a channel
 // of stream-json messages. The channel is closed when the process exits.
 func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage, error) {
+	return p.RunWithOptions(ctx, prompt, nil)
+}
+
+// RunWithOptions spawns a claude subprocess with per-run option overrides.
+func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (<-chan StreamMessage, error) {
 	p.mu.Lock()
 	if p.status == ProcessStatusBusy {
 		p.mu.Unlock()
@@ -48,6 +153,10 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+	p.messageCount = 0
+	p.toolCallCount = 0
+	p.lastMessage = ""
+	p.lastToolName = ""
 
 	// Create a new done channel for this run while holding the lock,
 	// ensuring no race between concurrent callers.
@@ -55,38 +164,48 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 	p.done = done
 	p.mu.Unlock()
 
-	args := p.opts.args()
+	opts := p.mergedOpts(runOpts)
+	args := opts.args()
 	args = append(args, "--", prompt)
 
 	// Use exec.Command (not CommandContext) so that cancellation goes through
 	// Stop() which sends SIGTERM for graceful shutdown, rather than the
 	// immediate SIGKILL that CommandContext would send.
 	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
-	if p.opts.WorkDir != "" {
-		cmd.Dir = p.opts.WorkDir
+	if opts.WorkDir != "" {
+		cmd.Dir = opts.WorkDir
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to create stdout pipe: %v", err))
 		return nil, err
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to create stderr pipe: %v", err))
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
+		close(done)
 		p.setError(fmt.Sprintf("failed to start claude: %v", err))
 		return nil, fmt.Errorf("failed to start claude: %w", err)
 	}
 
+	// Create a context for the stdout-reading goroutine so it can be
+	// cancelled by Stop() without blocking on a full output channel.
+	runCtx, runCancel := context.WithCancel(context.Background())
+
 	p.mu.Lock()
 	p.cmd = cmd
 	p.status = ProcessStatusBusy
+	p.runCancel = runCancel
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusBusy))
 
 	out := make(chan StreamMessage, 100)
 
@@ -122,8 +241,10 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 			} else if p.status == ProcessStatusBusy {
 				p.status = ProcessStatusIdle
 			}
+			status := p.status
 			close(done)
 			p.mu.Unlock()
+			metrics.SetProcessStatus(string(status))
 		}()
 
 		scanner := bufio.NewScanner(stdout)
@@ -142,15 +263,41 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 			}
 
 			p.mu.Lock()
+			p.messageCount++
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
+			}
+			if msg.Type == MessageTypeAssistant {
+				if msg.Subtype == SubtypeText && msg.Text != "" {
+					p.lastMessage = Truncate(msg.Text, 200)
+				}
+				if msg.Subtype == SubtypeToolUse {
+					p.toolCallCount++
+					p.lastToolName = msg.ToolName
+				}
 			}
 			if msg.Type == MessageTypeResult {
 				p.totalCost = msg.TotalCost
 			}
 			p.mu.Unlock()
 
-			out <- msg
+			// Record Prometheus metrics. In single-shot mode each process
+			// starts fresh so TotalCost equals the per-run cost and can
+			// be passed directly. If single-shot ever supports session
+			// resumption (where TotalCost becomes cumulative), this must
+			// be changed to compute a delta like persistent mode does.
+			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
+			if msg.Type == MessageTypeResult {
+				metrics.RecordCost(msg.TotalCost)
+			}
+
+			// Use select to prevent blocking if the consumer stops reading
+			// (e.g., after context cancellation in the MCP handler).
+			select {
+			case out <- msg:
+			case <-runCtx.Done():
+				return
+			}
 		}
 
 		if scanErr := scanner.Err(); scanErr != nil {
@@ -164,13 +311,17 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 // RunSync runs a prompt and blocks until completion, returning the result text
 // and all messages. It respects context cancellation.
 func (p *Process) RunSync(ctx context.Context, prompt string) (string, []StreamMessage, error) {
-	ch, err := p.Run(ctx, prompt)
+	return p.RunSyncWithOptions(ctx, prompt, nil)
+}
+
+// RunSyncWithOptions runs a prompt with per-run overrides and blocks until completion.
+func (p *Process) RunSyncWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (string, []StreamMessage, error) {
+	ch, err := p.RunWithOptions(ctx, prompt, runOpts)
 	if err != nil {
 		return "", nil, err
 	}
 
 	var messages []StreamMessage
-	var resultText string
 
 loop:
 	for {
@@ -183,22 +334,10 @@ loop:
 				break loop
 			}
 			messages = append(messages, msg)
-			if msg.Type == MessageTypeResult {
-				resultText = msg.Result
-			}
 		}
 	}
 
-	if resultText == "" {
-		// Collect text from assistant messages as fallback.
-		for _, msg := range messages {
-			if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
-				resultText += msg.Text
-			}
-		}
-	}
-
-	return resultText, messages, nil
+	return CollectResultText(messages), messages, nil
 }
 
 // Stop sends SIGTERM and waits up to 10s before SIGKILL.
@@ -211,7 +350,13 @@ func (p *Process) Stop() error {
 		return nil
 	}
 	p.status = ProcessStatusStopped
+	// Cancel the stdout-reading goroutine so it doesn't block on a full
+	// output channel while we wait for the process to exit.
+	if p.runCancel != nil {
+		p.runCancel()
+	}
 	p.mu.Unlock()
+	metrics.SetProcessStatus(string(ProcessStatusStopped))
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -230,15 +375,61 @@ func (p *Process) Stop() error {
 	}
 }
 
+// Submit starts a prompt non-blocking. It calls RunWithOptions, spawns a
+// background goroutine to drain the message channel and store results, then
+// returns immediately. The ctx should be a server-scoped context so the drain
+// goroutine outlives the MCP request. Previous results are preserved if the
+// run fails to start (e.g. process is already busy).
+func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) error {
+	return submitAsync(ctx, prompt, opts, p.RunWithOptions, func(rs resultState) {
+		p.mu.Lock()
+		p.result = rs
+		// When the drain goroutine finishes collecting the run output,
+		// transition from idle to completed so callers can distinguish
+		// "finished with results" from "never ran" (idle).
+		if rs.completed && p.status == ProcessStatusIdle {
+			p.status = ProcessStatusCompleted
+		}
+		p.mu.Unlock()
+	})
+}
+
 func (p *Process) Status() StatusInfo {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return StatusInfo{
-		Status:       p.status,
-		SessionID:    p.sessionID,
-		ErrorMessage: p.lastError,
+	info := StatusInfo{
+		Status:        p.status,
+		SessionID:     p.sessionID,
+		ErrorMessage:  p.lastError,
+		TotalCost:     p.totalCost,
+		MessageCount:  p.messageCount,
+		ToolCallCount: p.toolCallCount,
+		LastMessage:   p.lastMessage,
+		LastToolName:  p.lastToolName,
+	}
+
+	if p.status == ProcessStatusCompleted {
+		info.Result = Truncate(p.result.text, maxStatusResultLen)
+	}
+
+	return info
+}
+
+// ResultDetail returns the full untruncated result and detailed metadata from
+// the last completed Submit run. Intended for debugging and troubleshooting.
+func (p *Process) ResultDetail() ResultDetailInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return ResultDetailInfo{
+		ResultText:   p.result.text,
+		Messages:     p.result.messages,
+		MessageCount: len(p.result.messages),
 		TotalCost:    p.totalCost,
+		SessionID:    p.sessionID,
+		Status:       p.status,
+		ErrorMessage: p.lastError,
 	}
 }
 
@@ -258,4 +449,5 @@ func (p *Process) setError(msg string) {
 	defer p.mu.Unlock()
 	p.status = ProcessStatusError
 	p.lastError = msg
+	metrics.SetProcessStatus(string(ProcessStatusError))
 }

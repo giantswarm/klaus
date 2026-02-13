@@ -1,7 +1,10 @@
 package claude
 
 import (
+	"context"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestParseStreamMessage_System(t *testing.T) {
@@ -107,6 +110,7 @@ func TestProcessStatus_Values(t *testing.T) {
 		ProcessStatusStarting,
 		ProcessStatusIdle,
 		ProcessStatusBusy,
+		ProcessStatusCompleted,
 		ProcessStatusStopped,
 		ProcessStatusError,
 	}
@@ -116,4 +120,175 @@ func TestProcessStatus_Values(t *testing.T) {
 			t.Error("expected non-empty status value")
 		}
 	}
+}
+
+func TestSubmitDrain(t *testing.T) {
+	t.Run("drains messages and calls storeFn", func(t *testing.T) {
+		ch := make(chan StreamMessage, 3)
+		ch <- StreamMessage{Type: MessageTypeSystem, SessionID: "sess-1"}
+		ch <- StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "working..."}
+		ch <- StreamMessage{Type: MessageTypeResult, Result: "done"}
+		close(ch)
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(context.Background(), ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete in time")
+		}
+
+		if gotText != "done" {
+			t.Errorf("expected result text %q, got %q", "done", gotText)
+		}
+		if len(gotMessages) != 3 {
+			t.Errorf("expected 3 messages, got %d", len(gotMessages))
+		}
+	})
+
+	t.Run("handles context cancellation", func(t *testing.T) {
+		// Use an unbuffered channel so the send below blocks until the
+		// drain goroutine reads the message, guaranteeing it is collected
+		// before context cancellation.
+		ch := make(chan StreamMessage)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(ctx, ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		// Send blocks until the drain goroutine receives the message.
+		ch <- StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "partial"}
+
+		// Now cancel -- the message is guaranteed to have been read.
+		cancel()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete after context cancellation")
+		}
+
+		// Should have collected partial messages.
+		if len(gotMessages) != 1 {
+			t.Errorf("expected 1 message, got %d", len(gotMessages))
+		}
+		// Fallback to assistant text since no result message.
+		if gotText != "partial" {
+			t.Errorf("expected result text %q, got %q", "partial", gotText)
+		}
+	})
+
+	t.Run("empty channel returns empty result", func(t *testing.T) {
+		ch := make(chan StreamMessage)
+		close(ch)
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(context.Background(), ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete in time")
+		}
+
+		if gotText != "" {
+			t.Errorf("expected empty result text, got %q", gotText)
+		}
+		if len(gotMessages) != 0 {
+			t.Errorf("expected 0 messages, got %d", len(gotMessages))
+		}
+	})
+}
+
+func TestSubmitAsync(t *testing.T) {
+	t.Run("preserves previous result on run failure", func(t *testing.T) {
+		// Simulate a previous result that should be preserved when the
+		// next Submit fails (e.g. process already busy).
+		previousResult := resultState{
+			text:     "previous result",
+			messages: []StreamMessage{{Type: MessageTypeResult, Result: "previous result"}},
+		}
+		current := previousResult
+
+		failingRunFn := func(_ context.Context, _ string, _ *RunOptions) (<-chan StreamMessage, error) {
+			return nil, fmt.Errorf("claude process is already busy")
+		}
+
+		err := submitAsync(context.Background(), "new prompt", nil, failingRunFn, func(rs resultState) {
+			current = rs
+		})
+		if err == nil {
+			t.Fatal("expected error from runFn")
+		}
+
+		// Previous result should be preserved -- setResult should NOT have been called.
+		if current.text != "previous result" {
+			t.Errorf("expected previous result to be preserved, got %q", current.text)
+		}
+		if len(current.messages) != 1 {
+			t.Errorf("expected previous messages to be preserved, got %d messages", len(current.messages))
+		}
+	})
+
+	t.Run("clears and stores result on success", func(t *testing.T) {
+		var current resultState
+		var setCount int
+		done := make(chan struct{})
+
+		successRunFn := func(_ context.Context, _ string, _ *RunOptions) (<-chan StreamMessage, error) {
+			ch := make(chan StreamMessage, 1)
+			ch <- StreamMessage{Type: MessageTypeResult, Result: "new result"}
+			close(ch)
+			return ch, nil
+		}
+
+		err := submitAsync(context.Background(), "do something", nil, successRunFn, func(rs resultState) {
+			setCount++
+			current = rs
+			// The second call (from submitDrain) signals completion.
+			if setCount == 2 {
+				close(done)
+			}
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitAsync did not complete in time")
+		}
+
+		// setResult should have been called twice: once to clear, once to store.
+		if setCount != 2 {
+			t.Errorf("expected setResult called 2 times, got %d", setCount)
+		}
+		if current.text != "new result" {
+			t.Errorf("expected result %q, got %q", "new result", current.text)
+		}
+	})
 }
