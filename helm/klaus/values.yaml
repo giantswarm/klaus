@@ -67,6 +67,70 @@ claude:
   # pluginDirs are directories to load plugins from.
   pluginDirs: []
 
+  # -- Extension directories --
+  # addDirs are additional directories to search for .claude/ subdirectories (skills, agents).
+  # These are passed to Claude Code via --add-dir / CLAUDE_ADD_DIRS.
+  addDirs: []
+
+  # -- Inline skills --
+  # skills defines Claude Code skills rendered as SKILL.md files and loaded via --add-dir.
+  # Supported frontmatter fields: description, disableModelInvocation, userInvocable,
+  # allowedTools, model, context, agent, argumentHint.
+  # Example:
+  #   skills:
+  #     api-conventions:
+  #       description: "API design patterns"
+  #       content: |
+  #         When writing API endpoints...
+  skills: {}
+
+  # -- Inline agent files --
+  # agentFiles defines markdown-format agent definitions loaded via --add-dir.
+  # Example:
+  #   agentFiles:
+  #     researcher:
+  #       content: |
+  #         ---
+  #         name: researcher
+  #         description: Research agent
+  #         tools: Read, Grep, Glob
+  #         ---
+  #         You are a research agent...
+  agentFiles: {}
+
+  # -- Hooks --
+  # hooks defines Claude Code lifecycle hooks, rendered to settings.json.
+  # Mutually exclusive with settingsFile.
+  # Example:
+  #   hooks:
+  #     PreToolUse:
+  #       - matcher: "Bash"
+  #         hooks:
+  #           - type: command
+  #             command: /etc/klaus/hooks/block-dangerous.sh
+  hooks: {}
+  # hookScripts defines hook script contents mounted at /etc/klaus/hooks/ with mode 0755.
+  # Example:
+  #   hookScripts:
+  #     block-dangerous.sh: |
+  #       #!/bin/bash
+  #       INPUT=$(cat)
+  #       exit 0
+  hookScripts: {}
+
+  # -- Plugins --
+  # plugins references Klaus plugins stored in OCI registries, delivered via
+  # Kubernetes OCI image volumes (requires Kubernetes 1.35+, KEP-4639).
+  # Each plugin is a versioned, distributable package of skills, hooks, agents,
+  # and MCP servers. See giantswarm/klaus-operator#6 for the OCI artifact format.
+  # Example:
+  #   plugins:
+  #     - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+  #       tag: v0.6.0
+  #     - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/security
+  #       digest: sha256:abc123...
+  plugins: []
+
   # -- Named agents --
   # agents defines named agent personas with descriptions and prompts.
   # Example:

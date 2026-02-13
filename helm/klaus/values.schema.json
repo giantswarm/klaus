@@ -106,9 +106,99 @@
           },
           "description": "Directories to load plugins from"
         },
+        "addDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional directories to search for .claude/ subdirectories (skills, agents)"
+        },
+        "skills": {
+          "type": "object",
+          "description": "Inline skills rendered as SKILL.md files",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "disableModelInvocation": {
+                "type": "boolean"
+              },
+              "userInvocable": {
+                "type": "boolean"
+              },
+              "allowedTools": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "context": {
+                "type": "array"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "argumentHint": {
+                "type": "string"
+              }
+            },
+            "required": ["content"]
+          }
+        },
+        "agentFiles": {
+          "type": "object",
+          "description": "Markdown-format agent definitions loaded via --add-dir",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": ["content"]
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "description": "Claude Code lifecycle hooks rendered to settings.json. Mutually exclusive with settingsFile."
+        },
+        "hookScripts": {
+          "type": "object",
+          "description": "Hook script contents mounted at /etc/klaus/hooks/ with mode 0755",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "plugins": {
+          "type": "array",
+          "description": "Klaus plugin references delivered via Kubernetes OCI image volumes",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "description": "OCI repository URL"
+              },
+              "tag": {
+                "type": "string",
+                "description": "Image tag (mutually exclusive with digest)"
+              },
+              "digest": {
+                "type": "string",
+                "description": "Image digest (mutually exclusive with tag)"
+              }
+            },
+            "required": ["repository"]
+          }
+        },
         "agents": {
           "type": "object",
-          "description": "Named agent personas with descriptions and prompts",
+          "description": "Named agent personas with descriptions, prompts, and optional sub-agent fields",
           "additionalProperties": {
             "type": "object",
             "properties": {
@@ -116,6 +206,42 @@
                 "type": "string"
               },
               "prompt": {
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "disallowedTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "model": {
+                "type": "string"
+              },
+              "permissionMode": {
+                "type": "string"
+              },
+              "maxTurns": {
+                "type": "integer"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mcpServers": {
+                "type": "object"
+              },
+              "hooks": {
+                "type": "object"
+              },
+              "memory": {
                 "type": "string"
               }
             }

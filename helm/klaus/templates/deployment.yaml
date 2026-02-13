@@ -96,7 +96,13 @@ spec:
                   key: json-schema
             {{- end }}
             # Settings
-            {{- if .Values.claude.settingsFile }}
+            {{- if and .Values.claude.hooks .Values.claude.settingsFile }}
+            {{- fail "claude.hooks and claude.settingsFile are mutually exclusive; use one or the other" }}
+            {{- end }}
+            {{- if .Values.claude.hooks }}
+            - name: CLAUDE_SETTINGS_FILE
+              value: /etc/klaus/settings.json
+            {{- else if .Values.claude.settingsFile }}
             - name: CLAUDE_SETTINGS_FILE
               value: {{ .Values.claude.settingsFile | quote }}
             {{- end }}
@@ -117,10 +123,17 @@ spec:
             - name: CLAUDE_DISALLOWED_TOOLS
               value: {{ join "," .Values.claude.disallowedTools | quote }}
             {{- end }}
-            # Plugin directories
-            {{- if .Values.claude.pluginDirs }}
+            # Plugin directories (aggregated from pluginDirs, inline plugins, OCI plugins)
+            {{- $pluginDirs := include "klaus.pluginDirs" . }}
+            {{- if $pluginDirs }}
             - name: CLAUDE_PLUGIN_DIRS
-              value: {{ join "," .Values.claude.pluginDirs | quote }}
+              value: {{ $pluginDirs | quote }}
+            {{- end }}
+            # Additional directories for skills and agents
+            {{- $addDirs := include "klaus.addDirs" . }}
+            {{- if $addDirs }}
+            - name: CLAUDE_ADD_DIRS
+              value: {{ $addDirs | quote }}
             {{- end }}
             # Named agents
             {{- if and .Values.claude.agents (ne (toJson .Values.claude.agents) "{}") }}
@@ -192,8 +205,44 @@ spec:
             {{- end }}
           volumeMounts:
             {{- if .Values.claude.mcpConfig }}
-            - name: mcp-config
-              mountPath: /etc/klaus
+            - name: config
+              mountPath: /etc/klaus/mcp-config.json
+              subPath: mcp-config.json
+              readOnly: true
+            {{- end }}
+            {{- /* Inline skills */}}
+            {{- range $name, $skill := .Values.claude.skills }}
+            - name: config
+              mountPath: /etc/klaus/extensions/.claude/skills/{{ $name }}/SKILL.md
+              subPath: skill-{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- /* Inline agent files */}}
+            {{- range $name, $agent := .Values.claude.agentFiles }}
+            - name: config
+              mountPath: /etc/klaus/extensions/.claude/agents/{{ $name }}.md
+              subPath: agentfile-{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- /* Hooks settings */}}
+            {{- if .Values.claude.hooks }}
+            - name: config
+              mountPath: /etc/klaus/settings.json
+              subPath: settings.json
+              readOnly: true
+            {{- end }}
+            {{- /* Hook scripts */}}
+            {{- range $name, $content := .Values.claude.hookScripts }}
+            - name: config-scripts
+              mountPath: /etc/klaus/hooks/{{ $name }}
+              subPath: hookscript-{{ $name }}
+              readOnly: true
+            {{- end }}
+            {{- /* Plugins (OCI image volumes) */}}
+            {{- range .Values.claude.plugins }}
+            {{- $pluginName := .repository | splitList "/" | last }}
+            - name: plugin-{{ $pluginName }}
+              mountPath: /var/lib/klaus/plugins/{{ $pluginName }}
               readOnly: true
             {{- end }}
             {{- if .Values.workspace.enabled }}
@@ -217,13 +266,21 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
-        {{- if .Values.claude.mcpConfig }}
-        - name: mcp-config
+        - name: config
           configMap:
             name: {{ include "klaus.fullname" . }}
-            items:
-              - key: mcp-config.json
-                path: mcp-config.json
+        {{- if include "klaus.needsScriptsVolume" . }}
+        - name: config-scripts
+          configMap:
+            name: {{ include "klaus.fullname" . }}
+            defaultMode: 0755
+        {{- end }}
+        {{- range .Values.claude.plugins }}
+        {{- $pluginName := .repository | splitList "/" | last }}
+        - name: plugin-{{ $pluginName }}
+          image:
+            reference: {{ if .digest }}{{ .repository }}@{{ .digest }}{{ else }}{{ .repository }}:{{ .tag }}{{ end }}
+            pullPolicy: IfNotPresent
         {{- end }}
         {{- if .Values.workspace.enabled }}
         - name: workspace

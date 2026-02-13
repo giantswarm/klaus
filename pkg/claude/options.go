@@ -8,9 +8,20 @@ import (
 )
 
 // AgentConfig defines a named agent persona for Claude Code.
+// The Description and Prompt fields are the minimum required.
+// Additional fields extend the sub-agent with tools, model overrides, and more.
 type AgentConfig struct {
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
+	Description     string         `json:"description"`
+	Prompt          string         `json:"prompt"`
+	Tools           []string       `json:"tools,omitempty"`
+	DisallowedTools []string       `json:"disallowedTools,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	PermissionMode  string         `json:"permissionMode,omitempty"`
+	MaxTurns        int            `json:"maxTurns,omitempty"`
+	Skills          []string       `json:"skills,omitempty"`
+	McpServers      map[string]any `json:"mcpServers,omitempty"`
+	Hooks           map[string]any `json:"hooks,omitempty"`
+	Memory          string         `json:"memory,omitempty"`
 }
 
 // Options configures how a Claude CLI subprocess is spawned.
@@ -77,6 +88,8 @@ type Options struct {
 
 	// PluginDirs are directories to load plugins from.
 	PluginDirs []string
+	// AddDirs are directories to search for .claude/ subdirectories (skills, agents).
+	AddDirs []string
 }
 
 // DefaultOptions returns sensible defaults for headless operation.
@@ -231,6 +244,11 @@ func (o Options) baseArgs() []string {
 	// Plugins.
 	for _, dir := range o.PluginDirs {
 		args = append(args, "--plugin-dir", dir)
+	}
+
+	// Additional directories.
+	for _, dir := range o.AddDirs {
+		args = append(args, "--add-dir", dir)
 	}
 
 	return args

@@ -87,6 +87,7 @@ Configuration is primarily via environment variables:
   CLAUDE_ALLOWED_TOOLS       -- Comma-separated allowed tool patterns
   CLAUDE_DISALLOWED_TOOLS    -- Comma-separated disallowed tool patterns
   CLAUDE_PLUGIN_DIRS         -- Comma-separated plugin directories
+  CLAUDE_ADD_DIRS            -- Comma-separated additional directories for skills/agents
   CLAUDE_AGENTS              -- JSON object defining named agents
   CLAUDE_ACTIVE_AGENT        -- Default named agent to use
   CLAUDE_INCLUDE_PARTIAL_MESSAGES -- Emit partial message chunks (true/false)
@@ -271,6 +272,11 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 	// Plugin directories.
 	if v := os.Getenv("CLAUDE_PLUGIN_DIRS"); v != "" {
 		opts.PluginDirs = strings.Split(v, ",")
+	}
+
+	// Additional directories.
+	if v := os.Getenv("CLAUDE_ADD_DIRS"); v != "" {
+		opts.AddDirs = strings.Split(v, ",")
 	}
 
 	// Named agents.

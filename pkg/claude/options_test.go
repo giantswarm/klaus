@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,7 @@ func TestArgs_Minimal(t *testing.T) {
 	assertNotContains(t, args, "--setting-sources")
 	assertNotContains(t, args, "--tools")
 	assertNotContains(t, args, "--plugin-dir")
+	assertNotContains(t, args, "--add-dir")
 	assertNotContains(t, args, "--include-partial-messages")
 }
 
@@ -72,6 +74,7 @@ func TestArgs_AllOptions(t *testing.T) {
 		SettingsFile:       "/etc/settings.json",
 		SettingSources:     "user,project",
 		PluginDirs:         []string{"/plugins/a", "/plugins/b"},
+		AddDirs:            []string{"/skills/a", "/skills/b"},
 		Agents: map[string]AgentConfig{
 			"reviewer": {Description: "Reviews code", Prompt: "You review"},
 		},
@@ -112,6 +115,17 @@ func TestArgs_AllOptions(t *testing.T) {
 	}
 	if pluginDirCount != 2 {
 		t.Errorf("expected 2 --plugin-dir flags, got %d", pluginDirCount)
+	}
+
+	// Add dirs should appear as separate --add-dir flags.
+	addDirCount := 0
+	for _, a := range args {
+		if a == "--add-dir" {
+			addDirCount++
+		}
+	}
+	if addDirCount != 2 {
+		t.Errorf("expected 2 --add-dir flags, got %d", addDirCount)
 	}
 
 	// acceptEdits should NOT add --dangerously-skip-permissions.
@@ -204,6 +218,89 @@ func TestValidateEffort(t *testing.T) {
 			t.Errorf("expected effort %q to be invalid, but got no error", level)
 		}
 	}
+}
+
+func TestArgs_AddDirs(t *testing.T) {
+	opts := Options{
+		AddDirs: []string{"/skills/platform", "/skills/custom"},
+	}
+	args := opts.args()
+
+	assertContainsSequence(t, args, "--add-dir", "/skills/platform")
+	assertContainsSequence(t, args, "--add-dir", "/skills/custom")
+
+	count := 0
+	for _, a := range args {
+		if a == "--add-dir" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("expected 2 --add-dir flags, got %d", count)
+	}
+}
+
+func TestArgs_ExtendedAgentConfig(t *testing.T) {
+	opts := Options{
+		Agents: map[string]AgentConfig{
+			"reviewer": {
+				Description: "Reviews code",
+				Prompt:      "You review",
+				Tools:       []string{"Read", "Grep"},
+				Model:       "haiku",
+				MaxTurns:    5,
+			},
+		},
+	}
+	args := opts.args()
+	assertContains(t, args, "--agents")
+
+	// Verify the JSON contains extended fields.
+	for i, a := range args {
+		if a == "--agents" && i+1 < len(args) {
+			jsonStr := args[i+1]
+			if !strings.Contains(jsonStr, `"tools":["Read","Grep"]`) {
+				t.Errorf("expected agents JSON to contain tools, got %s", jsonStr)
+			}
+			if !strings.Contains(jsonStr, `"model":"haiku"`) {
+				t.Errorf("expected agents JSON to contain model, got %s", jsonStr)
+			}
+			if !strings.Contains(jsonStr, `"maxTurns":5`) {
+				t.Errorf("expected agents JSON to contain maxTurns, got %s", jsonStr)
+			}
+			return
+		}
+	}
+	t.Error("--agents flag not found")
+}
+
+func TestArgs_AgentConfigBackwardCompatibility(t *testing.T) {
+	// Existing AgentConfig with only Description and Prompt should still work
+	// and omit empty optional fields from JSON.
+	opts := Options{
+		Agents: map[string]AgentConfig{
+			"simple": {Description: "Simple agent", Prompt: "You are simple."},
+		},
+	}
+	args := opts.args()
+	assertContains(t, args, "--agents")
+
+	for i, a := range args {
+		if a == "--agents" && i+1 < len(args) {
+			jsonStr := args[i+1]
+			if strings.Contains(jsonStr, `"tools"`) {
+				t.Errorf("expected agents JSON to omit empty tools, got %s", jsonStr)
+			}
+			if strings.Contains(jsonStr, `"model"`) {
+				t.Errorf("expected agents JSON to omit empty model, got %s", jsonStr)
+			}
+			if strings.Contains(jsonStr, `"maxTurns"`) {
+				t.Errorf("expected agents JSON to omit empty maxTurns, got %s", jsonStr)
+			}
+			return
+		}
+	}
+	t.Error("--agents flag not found")
 }
 
 func assertContains(t *testing.T, args []string, want string) {

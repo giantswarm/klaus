@@ -124,3 +124,169 @@ tests:
     asserts:
       - isNotEmpty:
           path: spec.template.metadata.annotations["checksum/config"]
+
+  - it: should set CLAUDE_ADD_DIRS when skills are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        skills:
+          api-conventions:
+            description: "API patterns"
+            content: "API content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions"
+
+  - it: should aggregate CLAUDE_ADD_DIRS from skills and addDirs
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        addDirs:
+          - /custom/dir
+        skills:
+          test:
+            description: "Test"
+            content: "Test content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions,/custom/dir"
+
+  - it: should mount inline skills as SKILL.md via subPath
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        skills:
+          api-conventions:
+            description: "API patterns"
+            content: "API content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/klaus/extensions/.claude/skills/api-conventions/SKILL.md
+            subPath: skill-api-conventions
+            readOnly: true
+
+  - it: should set CLAUDE_SETTINGS_FILE when hooks are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hooks:
+          PreToolUse:
+            - matcher: "Bash"
+              hooks:
+                - type: command
+                  command: /etc/klaus/hooks/validate.sh
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_SETTINGS_FILE
+            value: /etc/klaus/settings.json
+
+  - it: should fail when both hooks and settingsFile are set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hooks:
+          PreToolUse:
+            - matcher: "Bash"
+              hooks:
+                - type: command
+                  command: /etc/klaus/hooks/validate.sh
+        settingsFile: "/custom/settings.json"
+    asserts:
+      - failedTemplate:
+          errorMessage: "claude.hooks and claude.settingsFile are mutually exclusive; use one or the other"
+
+  - it: should mount plugin as image volume
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-gs-base
+            image:
+              reference: "gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base:v0.6.0"
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-gs-base
+            mountPath: /var/lib/klaus/plugins/gs-base
+            readOnly: true
+
+  - it: should mount plugin by digest
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/security
+            digest: "sha256:abc123def456"
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-security
+            image:
+              reference: "gsoci.azurecr.io/giantswarm/klaus-plugins/security@sha256:abc123def456"
+              pullPolicy: IfNotPresent
+
+  - it: should include plugins in CLAUDE_PLUGIN_DIRS
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_PLUGIN_DIRS
+            value: "/var/lib/klaus/plugins/gs-base"
+
+  - it: should create config-scripts volume when hookScripts defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hookScripts:
+          validate.sh: |
+            #!/bin/bash
+            exit 0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config-scripts
+            configMap:
+              name: RELEASE-NAME-klaus
+              defaultMode: 493
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config-scripts
+            mountPath: /etc/klaus/hooks/validate.sh
+            subPath: hookscript-validate.sh
+            readOnly: true

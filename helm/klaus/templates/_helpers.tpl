@@ -59,3 +59,39 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Aggregate CLAUDE_ADD_DIRS from inline skills/agents and user-specified addDirs.
+*/}}
+{{- define "klaus.addDirs" -}}
+{{- $ctx := dict "dirs" (list) -}}
+{{- if or .Values.claude.skills .Values.claude.agentFiles -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") "/etc/klaus/extensions") -}}
+{{- end -}}
+{{- range .Values.claude.addDirs -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") .) -}}
+{{- end -}}
+{{- join "," (get $ctx "dirs") -}}
+{{- end -}}
+
+{{/*
+Aggregate CLAUDE_PLUGIN_DIRS from pluginDirs and plugins.
+*/}}
+{{- define "klaus.pluginDirs" -}}
+{{- $ctx := dict "dirs" (list) -}}
+{{- range .Values.claude.pluginDirs -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") .) -}}
+{{- end -}}
+{{- range .Values.claude.plugins -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") (printf "/var/lib/klaus/plugins/%s" (.repository | splitList "/" | last))) -}}
+{{- end -}}
+{{- join "," (get $ctx "dirs") -}}
+{{- end -}}
+
+{{/*
+Check if a config-scripts volume (mode 0755) is needed for hook scripts.
+Returns non-empty string when true.
+*/}}
+{{- define "klaus.needsScriptsVolume" -}}
+{{- if .Values.claude.hookScripts -}}true{{- end -}}
+{{- end -}}
