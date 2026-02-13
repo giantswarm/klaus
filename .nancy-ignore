@@ -1,5 +1,1 @@
-# This file is for ignoring known vulnerabilities in dependencies
-# that are false positives or not applicable.
-#
-# Format: one CVE per line
-# Example: CVE-2021-12345
+CVE-2026-24051 until=2026-03-13 # go.opentelemetry.io/otel/sdk@v1.39.0
