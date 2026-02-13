@@ -134,6 +134,10 @@ spec:
             {{- if $addDirs }}
             - name: CLAUDE_ADD_DIRS
               value: {{ $addDirs | quote }}
+            {{- if .Values.claude.loadAdditionalDirsMemory }}
+            - name: CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+              value: "true"
+            {{- end }}
             {{- end }}
             # Named agents
             {{- if and .Values.claude.agents (ne (toJson .Values.claude.agents) "{}") }}

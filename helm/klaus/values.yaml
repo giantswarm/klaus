@@ -71,6 +71,11 @@ claude:
   # addDirs are additional directories to search for .claude/ subdirectories (skills, agents).
   # These are passed to Claude Code via --add-dir / CLAUDE_ADD_DIRS.
   addDirs: []
+  # loadAdditionalDirsMemory enables loading CLAUDE.md memory files from
+  # additional directories (addDirs, skills, agentFiles). Sets the
+  # CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD env var when add dirs are present.
+  # See https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+  loadAdditionalDirsMemory: true
 
   # -- Inline skills --
   # skills defines Claude Code skills rendered as SKILL.md files and loaded via --add-dir.

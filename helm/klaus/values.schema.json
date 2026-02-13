@@ -113,6 +113,11 @@
           },
           "description": "Additional directories to search for .claude/ subdirectories (skills, agents)"
         },
+        "loadAdditionalDirsMemory": {
+          "type": "boolean",
+          "description": "Enable loading CLAUDE.md memory files from additional directories",
+          "default": true
+        },
         "skills": {
           "type": "object",
           "description": "Inline skills rendered as SKILL.md files",

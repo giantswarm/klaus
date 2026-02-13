@@ -140,6 +140,33 @@ tests:
           content:
             name: CLAUDE_ADD_DIRS
             value: "/etc/klaus/extensions"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+            value: "true"
+
+  - it: should not set CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD when loadAdditionalDirsMemory is false
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        loadAdditionalDirsMemory: false
+        skills:
+          test:
+            description: "Test"
+            content: "Test content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+            value: "true"
 
   - it: should aggregate CLAUDE_ADD_DIRS from skills and addDirs
     documentIndex: 0
