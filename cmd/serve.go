@@ -87,9 +87,9 @@ Configuration is primarily via environment variables:
   CLAUDE_ALLOWED_TOOLS       -- Comma-separated allowed tool patterns
   CLAUDE_DISALLOWED_TOOLS    -- Comma-separated disallowed tool patterns
   CLAUDE_PLUGIN_DIRS         -- Comma-separated plugin directories
-  CLAUDE_ADD_DIRS            -- Comma-separated additional directories for skills/agents
-  CLAUDE_AGENTS              -- JSON object defining named agents
-  CLAUDE_ACTIVE_AGENT        -- Default named agent to use
+  CLAUDE_ADD_DIRS            -- Comma-separated additional directories for skills/subagents
+  CLAUDE_AGENTS              -- JSON object defining subagents (delegatable via Task tool)
+  CLAUDE_ACTIVE_AGENT        -- Select a named agent as the top-level agent for the session
   CLAUDE_INCLUDE_PARTIAL_MESSAGES -- Emit partial message chunks (true/false)
   CLAUDE_NO_SESSION_PERSISTENCE  -- Disable session persistence (true/false)
   CLAUDE_PERSISTENT_MODE         -- Use persistent subprocess mode (true/false)
@@ -279,7 +279,8 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		opts.AddDirs = strings.Split(v, ",")
 	}
 
-	// Named agents.
+	// Subagent definitions (--agents JSON, highest priority).
+	// These are delegatable via the Task tool by the main agent.
 	if v := os.Getenv("CLAUDE_AGENTS"); v != "" {
 		var agents map[string]claude.AgentConfig
 		if err := json.Unmarshal([]byte(v), &agents); err != nil {
@@ -288,6 +289,7 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 			opts.Agents = agents
 		}
 	}
+	// Agent selection: changes the top-level agent, not which subagents exist.
 	if v := os.Getenv("CLAUDE_ACTIVE_AGENT"); v != "" {
 		opts.ActiveAgent = v
 	}

@@ -170,7 +170,41 @@
         },
         "hooks": {
           "type": "object",
-          "description": "Claude Code lifecycle hooks rendered to settings.json. Mutually exclusive with settingsFile."
+          "description": "Claude Code lifecycle hooks rendered to settings.json. Mutually exclusive with settingsFile. Keys are event names (PreToolUse, PostToolUse, Stop, SubagentStart, SubagentStop, Notification).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "matcher": {
+                  "type": "string",
+                  "description": "Pattern to match (e.g. tool name for PreToolUse, agent name for SubagentStart)"
+                },
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["command"]
+                      },
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute. Receives JSON via stdin."
+                      },
+                      "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in milliseconds for the hook command"
+                      }
+                    },
+                    "required": ["type", "command"]
+                  }
+                }
+              },
+              "required": ["hooks"]
+            }
+          }
         },
         "hookScripts": {
           "type": "object",
@@ -203,58 +237,72 @@
         },
         "agents": {
           "type": "object",
-          "description": "Named agent personas with descriptions, prompts, and optional sub-agent fields",
+          "description": "Custom subagents delegatable via the Task tool. Each runs in its own context with its own prompt, tools, and model.",
           "additionalProperties": {
             "type": "object",
             "properties": {
               "description": {
-                "type": "string"
+                "type": "string",
+                "description": "When Claude should delegate to this subagent"
               },
               "prompt": {
-                "type": "string"
+                "type": "string",
+                "description": "System prompt for the subagent"
               },
               "tools": {
                 "type": "array",
                 "items": {
                   "type": "string"
-                }
+                },
+                "description": "Tools the subagent can use (inherits all if omitted)"
               },
               "disallowedTools": {
                 "type": "array",
                 "items": {
                   "type": "string"
-                }
+                },
+                "description": "Tools to deny from the subagent"
               },
               "model": {
-                "type": "string"
+                "type": "string",
+                "description": "Model override: sonnet, opus, haiku, or inherit"
               },
               "permissionMode": {
-                "type": "string"
+                "type": "string",
+                "description": "Permission mode override for the subagent",
+                "enum": ["default", "acceptEdits", "dontAsk", "delegate", "bypassPermissions", "plan"]
               },
               "maxTurns": {
-                "type": "integer"
+                "type": "integer",
+                "description": "Maximum agentic turns before the subagent stops"
               },
               "skills": {
                 "type": "array",
                 "items": {
                   "type": "string"
-                }
+                },
+                "description": "Skills to preload into the subagent context at startup"
               },
               "mcpServers": {
-                "type": "object"
+                "type": "object",
+                "description": "MCP servers available to this subagent"
               },
               "hooks": {
-                "type": "object"
+                "type": "object",
+                "description": "Lifecycle hooks scoped to this subagent"
               },
               "memory": {
-                "type": "string"
+                "type": "string",
+                "description": "Persistent memory scope: user, project, or local",
+                "enum": ["user", "project", "local"]
               }
-            }
+            },
+            "required": ["description", "prompt"]
           }
         },
         "activeAgent": {
           "type": "string",
-          "description": "Default named agent to use"
+          "description": "Select which agent runs as the top-level agent for the session (--agent flag). Must match a name in agents or agentFiles."
         },
         "includePartialMessages": {
           "type": "boolean",

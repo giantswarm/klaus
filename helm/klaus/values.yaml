@@ -89,15 +89,20 @@ claude:
   #         When writing API endpoints...
   skills: {}
 
-  # -- Inline agent files --
-  # agentFiles defines markdown-format agent definitions loaded via --add-dir.
+  # -- Inline subagent files (markdown format) --
+  # agentFiles defines markdown-format subagent definitions loaded via --add-dir.
+  # These are mounted as .claude/agents/<name>.md files. Claude Code discovers
+  # them and makes them available for delegation via the Task tool, and for
+  # selection as the main agent via activeAgent or the MCP agent parameter.
+  # Subagents defined here have lower priority than those in `agents` (JSON).
+  # See https://code.claude.com/docs/en/sub-agents
   # Example:
   #   agentFiles:
   #     researcher:
   #       content: |
   #         ---
   #         name: researcher
-  #         description: Research agent
+  #         description: Research agent that gathers information
   #         tools: Read, Grep, Glob
   #         ---
   #         You are a research agent...
@@ -136,18 +141,28 @@ claude:
   #       digest: sha256:abc123...
   plugins: []
 
-  # -- Named agents --
-  # agents defines named agent personas with descriptions and prompts.
+  # -- Subagents (JSON format, highest priority) --
+  # agents defines custom subagents via the --agents CLI flag (JSON).
+  # Subagents are specialized AI assistants that the main Claude Code agent
+  # can delegate work to via the built-in "Task" tool. Each runs in its own
+  # context window with its own prompt, tools, model, and permissions.
+  # These have the highest priority and override agent files with the same name.
+  # See https://code.claude.com/docs/en/sub-agents
   # Example:
   #   agents:
   #     reviewer:
-  #       description: "Reviews code changes"
+  #       description: "Reviews code changes. Use proactively after edits."
   #       prompt: "You are a senior code reviewer..."
+  #       tools: ["Read", "Grep", "Glob", "Bash"]
+  #       model: "sonnet"
   #     deployer:
   #       description: "Handles deployments"
   #       prompt: "You are a deployment specialist..."
   agents: {}
-  # activeAgent selects which named agent to use by default.
+  # activeAgent selects which agent runs as the top-level agent for the session
+  # (--agent flag). This changes the main agent persona, NOT which subagents
+  # are available. The selected agent can still delegate to other subagents.
+  # Must match a name defined in agents or agentFiles.
   activeAgent: ""
 
   # -- Streaming --
