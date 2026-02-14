@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -o klaus .
 
 # Stage 2: Runtime with Node.js and Claude CLI.
-FROM node:22-slim
+FROM node:24-slim
 
 # Install system dependencies needed by Claude Code.
 RUN apt-get update && \
