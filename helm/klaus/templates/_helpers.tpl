@@ -89,6 +89,14 @@ Aggregate CLAUDE_PLUGIN_DIRS from pluginDirs and plugins.
 {{- end -}}
 
 {{/*
+Check if structured MCP servers are defined (non-empty map).
+Returns non-empty string when true.
+*/}}
+{{- define "klaus.hasMcpServers" -}}
+{{- if and .Values.claude.mcpServers (ne (toJson .Values.claude.mcpServers) "{}") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Check if a config-scripts volume (mode 0755) is needed for hook scripts.
 Returns non-empty string when true.
 */}}

@@ -47,11 +47,48 @@
         },
         "mcpConfig": {
           "type": "string",
-          "description": "Inline MCP configuration JSON"
+          "description": "Inline MCP configuration JSON. Mutually exclusive with mcpServers."
+        },
+        "mcpServers": {
+          "type": "object",
+          "description": "Structured MCP server definitions rendered to .mcp.json. Each entry is a free-form object passed through as-is. Mutually exclusive with mcpConfig.",
+          "additionalProperties": {
+            "type": "object",
+            "description": "MCP server configuration (type, url, command, args, env, headers, etc.)"
+          }
+        },
+        "mcpServerSecrets": {
+          "type": "array",
+          "description": "Kubernetes Secret references injected as container env vars for ${VAR} expansion in MCP server config",
+          "items": {
+            "type": "object",
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "description": "Name of the Kubernetes Secret"
+              },
+              "env": {
+                "type": "object",
+                "description": "Mapping of env var name to Secret key",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["secretName", "env"]
+          }
+        },
+        "mcpTimeout": {
+          "type": "integer",
+          "description": "MCP server connection timeout in milliseconds (0 = default)"
+        },
+        "maxMcpOutputTokens": {
+          "type": "integer",
+          "description": "Maximum tokens in MCP server output (0 = default)"
         },
         "strictMcpConfig": {
           "type": "boolean",
-          "description": "Only use MCP servers from mcpConfig"
+          "description": "Only use MCP servers from mcpConfig/mcpServers"
         },
         "maxBudgetUSD": {
           "type": "number",

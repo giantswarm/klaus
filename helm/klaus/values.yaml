@@ -29,8 +29,44 @@ claude:
   appendSystemPrompt: ""
   # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
   # Mounted as a file in the container.
+  # Mutually exclusive with mcpServers.
   mcpConfig: ""
-  # strictMcpConfig when true only uses MCP servers from mcpConfig,
+  # mcpServers defines MCP servers as typed entries, rendered to .mcp.json format.
+  # Each entry is a free-form object passed through to JSON as-is (forward-compatible
+  # with future MCP config fields). Mutually exclusive with mcpConfig.
+  # Example:
+  #   mcpServers:
+  #     github:
+  #       type: http
+  #       url: https://api.githubcopilot.com/mcp/
+  #       headers:
+  #         Authorization: "Bearer ${GITHUB_TOKEN}"
+  #     database:
+  #       command: npx
+  #       args: ["-y", "@bytebase/dbhub"]
+  #       env:
+  #         DB_URL: "${DATABASE_URL}"
+  mcpServers: {}
+  # mcpServerSecrets injects Kubernetes Secret values as container env vars
+  # for ${VAR} expansion in MCP server configuration.
+  # Example:
+  #   mcpServerSecrets:
+  #     - secretName: mcp-github-token
+  #       env:
+  #         GITHUB_TOKEN: token
+  #     - secretName: mcp-database-url
+  #       env:
+  #         DATABASE_URL: connection-string
+  mcpServerSecrets: []
+  # mcpTimeout sets the MCP server connection timeout in milliseconds.
+  # Set as MCP_TIMEOUT env var (consumed by Claude Code subprocess).
+  # 0 means use the default.
+  mcpTimeout: 0
+  # maxMcpOutputTokens limits the maximum tokens in MCP server output.
+  # Set as MAX_MCP_OUTPUT_TOKENS env var (consumed by Claude Code subprocess).
+  # 0 means use the default.
+  maxMcpOutputTokens: 0
+  # strictMcpConfig when true only uses MCP servers from mcpConfig/mcpServers,
   # ignoring user, project, and local MCP configurations.
   # Recommended for production security.
   strictMcpConfig: true
