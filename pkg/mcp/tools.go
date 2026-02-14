@@ -51,7 +51,9 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 			mcp.Description("Optional: continue the most recent conversation in the working directory"),
 		),
 		mcp.WithString("agent",
-			mcp.Description("Optional named agent persona to use for this prompt (must be defined in server config)"),
+			mcp.Description("Optional: select a named agent as the top-level agent for this prompt. "+
+				"This changes who handles the prompt (agent selection), not which subagents are available for delegation. "+
+				"The agent must be defined in the server config via --agents JSON or as an agent file in --add-dir."),
 		),
 		mcp.WithString("json_schema",
 			mcp.Description("Optional JSON Schema to constrain the output format"),

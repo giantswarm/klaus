@@ -1,6 +1,8 @@
 package claude
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +51,7 @@ func TestArgs_Minimal(t *testing.T) {
 	assertNotContains(t, args, "--setting-sources")
 	assertNotContains(t, args, "--tools")
 	assertNotContains(t, args, "--plugin-dir")
+	assertNotContains(t, args, "--add-dir")
 	assertNotContains(t, args, "--include-partial-messages")
 }
 
@@ -72,6 +75,7 @@ func TestArgs_AllOptions(t *testing.T) {
 		SettingsFile:       "/etc/settings.json",
 		SettingSources:     "user,project",
 		PluginDirs:         []string{"/plugins/a", "/plugins/b"},
+		AddDirs:            []string{"/skills/a", "/skills/b"},
 		Agents: map[string]AgentConfig{
 			"reviewer": {Description: "Reviews code", Prompt: "You review"},
 		},
@@ -112,6 +116,17 @@ func TestArgs_AllOptions(t *testing.T) {
 	}
 	if pluginDirCount != 2 {
 		t.Errorf("expected 2 --plugin-dir flags, got %d", pluginDirCount)
+	}
+
+	// Add dirs should appear as separate --add-dir flags.
+	addDirCount := 0
+	for _, a := range args {
+		if a == "--add-dir" {
+			addDirCount++
+		}
+	}
+	if addDirCount != 2 {
+		t.Errorf("expected 2 --add-dir flags, got %d", addDirCount)
 	}
 
 	// acceptEdits should NOT add --dangerously-skip-permissions.
@@ -206,6 +221,87 @@ func TestValidateEffort(t *testing.T) {
 	}
 }
 
+func TestArgs_ExtendedAgentConfig(t *testing.T) {
+	opts := Options{
+		Agents: map[string]AgentConfig{
+			"reviewer": {
+				Description: "Reviews code",
+				Prompt:      "You review",
+				Tools:       []string{"Read", "Grep"},
+				Model:       "haiku",
+				MaxTurns:    5,
+			},
+		},
+	}
+	args := opts.args()
+
+	agentsJSON := findFlagValue(t, args, "--agents")
+	var parsed map[string]AgentConfig
+	if err := json.Unmarshal([]byte(agentsJSON), &parsed); err != nil {
+		t.Fatalf("failed to unmarshal agents JSON: %v", err)
+	}
+
+	reviewer, ok := parsed["reviewer"]
+	if !ok {
+		t.Fatal("expected agents to contain 'reviewer'")
+	}
+	if reviewer.Description != "Reviews code" {
+		t.Errorf("expected description %q, got %q", "Reviews code", reviewer.Description)
+	}
+	if len(reviewer.Tools) != 2 || reviewer.Tools[0] != "Read" || reviewer.Tools[1] != "Grep" {
+		t.Errorf("expected tools [Read, Grep], got %v", reviewer.Tools)
+	}
+	if reviewer.Model != "haiku" {
+		t.Errorf("expected model %q, got %q", "haiku", reviewer.Model)
+	}
+	if reviewer.MaxTurns != 5 {
+		t.Errorf("expected maxTurns 5, got %d", reviewer.MaxTurns)
+	}
+}
+
+func TestArgs_AgentConfigBackwardCompatibility(t *testing.T) {
+	// Existing AgentConfig with only Description and Prompt should still work
+	// and omit empty optional fields from JSON.
+	opts := Options{
+		Agents: map[string]AgentConfig{
+			"simple": {Description: "Simple agent", Prompt: "You are simple."},
+		},
+	}
+	args := opts.args()
+
+	agentsJSON := findFlagValue(t, args, "--agents")
+	var parsed map[string]AgentConfig
+	if err := json.Unmarshal([]byte(agentsJSON), &parsed); err != nil {
+		t.Fatalf("failed to unmarshal agents JSON: %v", err)
+	}
+
+	simple, ok := parsed["simple"]
+	if !ok {
+		t.Fatal("expected agents to contain 'simple'")
+	}
+	if simple.Description != "Simple agent" {
+		t.Errorf("expected description %q, got %q", "Simple agent", simple.Description)
+	}
+	// Optional fields must be zero-valued.
+	if len(simple.Tools) != 0 {
+		t.Errorf("expected empty tools, got %v", simple.Tools)
+	}
+	if simple.Model != "" {
+		t.Errorf("expected empty model, got %q", simple.Model)
+	}
+	if simple.MaxTurns != 0 {
+		t.Errorf("expected zero maxTurns, got %d", simple.MaxTurns)
+	}
+
+	// Verify omitempty works: the raw JSON should not contain optional keys.
+	if strings.Contains(agentsJSON, `"tools"`) {
+		t.Errorf("expected agents JSON to omit empty tools, got %s", agentsJSON)
+	}
+	if strings.Contains(agentsJSON, `"model"`) {
+		t.Errorf("expected agents JSON to omit empty model, got %s", agentsJSON)
+	}
+}
+
 func assertContains(t *testing.T, args []string, want string) {
 	t.Helper()
 	for _, a := range args {
@@ -234,4 +330,15 @@ func assertContainsSequence(t *testing.T, args []string, key, value string) {
 		}
 	}
 	t.Errorf("expected args to contain %q %q, got %v", key, value, args)
+}
+
+func findFlagValue(t *testing.T, args []string, flag string) string {
+	t.Helper()
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("flag %q not found in args %v", flag, args)
+	return ""
 }

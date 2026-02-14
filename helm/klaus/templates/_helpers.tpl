@@ -59,3 +59,57 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Aggregate CLAUDE_ADD_DIRS from inline skills/agents and user-specified addDirs.
+*/}}
+{{- define "klaus.addDirs" -}}
+{{- $ctx := dict "dirs" (list) -}}
+{{- if or .Values.claude.skills .Values.claude.agentFiles -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") "/etc/klaus/extensions") -}}
+{{- end -}}
+{{- range .Values.claude.addDirs -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") .) -}}
+{{- end -}}
+{{- join "," (get $ctx "dirs") -}}
+{{- end -}}
+
+{{/*
+Aggregate CLAUDE_PLUGIN_DIRS from pluginDirs and plugins.
+*/}}
+{{- define "klaus.pluginDirs" -}}
+{{- $ctx := dict "dirs" (list) -}}
+{{- range .Values.claude.pluginDirs -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") .) -}}
+{{- end -}}
+{{- range .Values.claude.plugins -}}
+{{- $d := set $ctx "dirs" (append (get $ctx "dirs") (printf "/var/lib/klaus/plugins/%s" (.repository | splitList "/" | last))) -}}
+{{- end -}}
+{{- join "," (get $ctx "dirs") -}}
+{{- end -}}
+
+{{/*
+Check if a config-scripts volume (mode 0755) is needed for hook scripts.
+Returns non-empty string when true.
+*/}}
+{{- define "klaus.needsScriptsVolume" -}}
+{{- if .Values.claude.hookScripts -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Validate plugins: each must have tag or digest, and short names must be unique.
+Call once from deployment.yaml; emits nothing on success, fails on error.
+*/}}
+{{- define "klaus.validatePlugins" -}}
+{{- $seen := dict -}}
+{{- range .Values.claude.plugins -}}
+{{- if and (not .tag) (not .digest) -}}
+{{- fail (printf "plugin %s requires either tag or digest" .repository) -}}
+{{- end -}}
+{{- $short := .repository | splitList "/" | last -}}
+{{- if hasKey $seen $short -}}
+{{- fail (printf "duplicate plugin short name %q (from %s and %s); use unique final path segments" $short (get $seen $short) .repository) -}}
+{{- end -}}
+{{- $_ := set $seen $short .repository -}}
+{{- end -}}
+{{- end -}}

@@ -6,6 +6,10 @@ An [MCP](https://modelcontextprotocol.io/) server that wraps [Claude Code](https
 
 Klaus runs the Claude Code CLI as a managed subprocess and exposes it over HTTP as a Streamable HTTP MCP endpoint. This allows orchestrating AI coding agents in Kubernetes with proper lifecycle management, health checks, and optional OAuth authentication.
 
+```
+MCP Client --> /mcp --> MCP Server --> Prompter --> Claude Code CLI (subprocess)
+```
+
 ### MCP Tools
 
 | Tool | Description |
@@ -15,38 +19,17 @@ Klaus runs the Claude Code CLI as a managed subprocess and exposes it over HTTP 
 | `stop` | Terminate the running agent |
 | `result` | Get full untruncated result and message history from the last run (debugging tool) |
 
-### Non-blocking workflow
+### Extension system
 
-By default, `prompt` returns immediately and the task runs in the background:
+Klaus supports the full Claude Code extension surface, configured via Helm values, klausctl config, or operator CRDs:
 
-```
-1. prompt(message: "Refactor the auth module")
-   -> {status: "started", session_id: "..."}
+- **[Skills](docs/how-to/configure-skills.md)** -- Domain knowledge loaded as `SKILL.md` files
+- **[Subagents](docs/how-to/configure-subagents.md)** -- Specialized agents for task delegation
+- **[Hooks](docs/how-to/configure-hooks.md)** -- Lifecycle hooks for validation and automation
+- **[MCP Servers](docs/how-to/configure-mcp-servers.md)** -- External tool integrations
+- **[Plugins](docs/how-to/use-plugins.md)** -- OCI-distributed extension bundles
 
-2. status()                          # poll periodically
-   -> {status: "busy", message_count: 12, tool_call_count: 5, last_tool_name: "Edit", ...}
-
-3. status()                          # when complete
-   -> {status: "completed", result: "I've refactored...", total_cost_usd: 0.45, session_id: "..."}
-
-4. result()                          # optional: full debug output
-   -> {result_text: "...", messages: [...], message_count: 42, ...}
-```
-
-For short queries, use `prompt(message: "...", blocking: true)` to get the result inline.
-
-**Status lifecycle:** `idle` (never ran) -> `busy` (task running) -> `completed` (result available). The result and `completed` status persist until the next `prompt` call clears them. There is no explicit "consumed" acknowledgement, so callers that poll should track whether they have already processed a given result.
-
-### HTTP Endpoints
-
-| Path | Purpose |
-|------|---------|
-| `/mcp` | MCP Streamable HTTP (optionally OAuth-protected) |
-| `/healthz` | Liveness probe |
-| `/readyz` | Readiness probe (Claude process state) |
-| `/status` | JSON status (version, agent state, cost) |
-
-## Quick Start
+## Quick start
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -54,54 +37,40 @@ klaus serve
 # MCP endpoint available at http://localhost:8080/mcp
 ```
 
-## Architecture
+Or with Docker:
 
+```bash
+docker run -d -p 8080:8080 -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY klaus:latest serve
 ```
-MCP Client --> /mcp --> MCP Server --> Prompter --> Claude Code CLI (subprocess)
+
+Or deploy to Kubernetes:
+
+```bash
+helm install klaus helm/klaus/ -n klaus \
+  --set anthropicApiKey.secretName=anthropic-api-key
 ```
 
-The container image is based on `node:22-slim` with the Claude Code CLI installed globally via npm. The Go binary manages the Claude subprocess in one of two modes:
+## Documentation
 
-- **Single-shot** (default): spawns a new subprocess per prompt. Supports per-invocation overrides (`session_id`, `resume`, `effort`, `agent`). Session persistence is optional via `--resume`.
-- **Persistent** (`CLAUDE_PERSISTENT_MODE=true`): maintains a long-running subprocess with bidirectional stream-json. Provides multi-turn conversation memory, cumulative cost tracking, and lower latency (no startup overhead per prompt). A watchdog auto-restarts the subprocess on crash.
+Full documentation is available in the [`docs/`](docs/index.md) directory, organized by the [Diataxis](https://diataxis.fr/) framework:
 
-## Configuration
-
-All Claude options are configured via environment variables. The `ANTHROPIC_API_KEY` is the only requirement.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key (required) | -- |
-| `PORT` | HTTP server port | `8080` |
-| `CLAUDE_MODEL` | Model name or alias (`sonnet`, `opus`, `haiku`) | CLI default |
-| `CLAUDE_SYSTEM_PROMPT` | Override the default system prompt | -- |
-| `CLAUDE_APPEND_SYSTEM_PROMPT` | Append to the default system prompt | -- |
-| `CLAUDE_MAX_TURNS` | Max agentic turns per prompt (0 = unlimited) | `0` |
-| `CLAUDE_MAX_BUDGET_USD` | Spending cap per invocation in USD | -- |
-| `CLAUDE_EFFORT` | Effort level: `low`, `medium`, `high` | CLI default |
-| `CLAUDE_PERMISSION_MODE` | `bypassPermissions`, `acceptEdits`, `plan`, `delegate`, `default` | `bypassPermissions` |
-| `CLAUDE_WORKSPACE` | Working directory for the agent | -- |
-| `CLAUDE_PERSISTENT_MODE` | Use persistent subprocess mode | `false` |
-| `CLAUDE_MCP_CONFIG` | Path to MCP servers config file | -- |
-| `CLAUDE_AGENTS` | JSON object defining named agent personas | -- |
-| `CLAUDE_ACTIVE_AGENT` | Default named agent to use | -- |
-
-See `klaus serve --help` and the [Helm values](helm/klaus/values.yaml) for the full list including OAuth, tools, plugins, and session options.
-
-## Deployment
-
-Deployed via Helm chart in [`helm/klaus/`](helm/klaus/).
-
-Key configuration in [`values.yaml`](helm/klaus/values.yaml):
-
-- **Claude**: `model`, `maxTurns`, `systemPrompt`, `persistentMode`, `maxBudgetUSD`
-- **API key**: via Kubernetes Secret (`anthropicApiKey.secretName`)
-- **Workspace**: optional PVC for the agent workspace
-- **OAuth**: optional OAuth 2.1 protection for the `/mcp` endpoint
+| Section | Purpose |
+|---------|---------|
+| [Tutorials](docs/tutorials/) | Step-by-step guides to get started |
+| [How-to Guides](docs/how-to/) | Task-oriented guides for specific goals |
+| [Reference](docs/reference/) | Technical specifications (env vars, MCP tools, Helm values) |
+| [Explanation](docs/explanation/) | Architecture, design, and background context |
 
 ## Development
 
 See [docs/development.md](docs/development.md) for local setup, building, and testing.
+
+## Related repositories
+
+| Repository | Description |
+|-----------|-------------|
+| [klaus-operator](https://github.com/giantswarm/klaus-operator) | Kubernetes operator for dynamic instance management |
+| [klausctl](https://github.com/giantswarm/klausctl) | CLI for managing local klaus containers |
 
 ## License
 

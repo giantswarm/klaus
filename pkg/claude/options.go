@@ -7,10 +7,38 @@ import (
 	"strings"
 )
 
-// AgentConfig defines a named agent persona for Claude Code.
+// AgentConfig defines a custom subagent for Claude Code.
+//
+// Subagents are specialized AI assistants that the main Claude Code agent can
+// delegate work to via the built-in "Task" tool. Each subagent runs in its own
+// context window with a custom system prompt (Prompt), specific tool access
+// (Tools/DisallowedTools), and independent permissions. When the main agent
+// encounters a task matching a subagent's Description, it delegates to that
+// subagent, which works independently and returns results.
+//
+// Subagent definitions are passed to the CLI via the --agents flag as a JSON
+// map (highest priority, session-scoped). They can also be defined as markdown
+// files in .claude/agents/ directories (loaded via --add-dir).
+//
+// This is distinct from agent selection (--agent / ActiveAgent), which changes
+// the top-level agent persona for the entire session. When running as the main
+// agent via --agent, that agent can spawn subagents defined here via Task.
+//
+// See https://code.claude.com/docs/en/sub-agents for full documentation.
+//
+// The Description and Prompt fields are the minimum required.
 type AgentConfig struct {
-	Description string `json:"description"`
-	Prompt      string `json:"prompt"`
+	Description     string         `json:"description"`
+	Prompt          string         `json:"prompt"`
+	Tools           []string       `json:"tools,omitempty"`
+	DisallowedTools []string       `json:"disallowedTools,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	PermissionMode  string         `json:"permissionMode,omitempty"`
+	MaxTurns        int            `json:"maxTurns,omitempty"`
+	Skills          []string       `json:"skills,omitempty"`
+	McpServers      map[string]any `json:"mcpServers,omitempty"`
+	Hooks           map[string]any `json:"hooks,omitempty"`
+	Memory          string         `json:"memory,omitempty"`
 }
 
 // Options configures how a Claude CLI subprocess is spawned.
@@ -60,9 +88,15 @@ type Options struct {
 	// NoSessionPersistence disables saving sessions to disk.
 	NoSessionPersistence bool
 
-	// Agents defines named agent personas with descriptions and prompts.
+	// Agents defines custom subagents that the main agent can delegate to via
+	// the "Task" tool. Passed to the CLI as --agents JSON. Each subagent runs
+	// in its own context with its own prompt, tools, and model.
+	// See https://code.claude.com/docs/en/sub-agents
 	Agents map[string]AgentConfig
-	// ActiveAgent selects which named agent to use for the session.
+	// ActiveAgent selects which agent runs as the top-level agent for the
+	// session (--agent flag). This changes who handles the prompt, not which
+	// subagents are available. The selected agent can still spawn subagents
+	// defined in Agents or discovered via AddDirs.
 	ActiveAgent string
 
 	// JSONSchema constrains the output to conform to a JSON Schema.
@@ -77,6 +111,11 @@ type Options struct {
 
 	// PluginDirs are directories to load plugins from.
 	PluginDirs []string
+	// AddDirs are directories to search for .claude/ subdirectories containing
+	// skills (.claude/skills/) and subagent definitions (.claude/agents/).
+	// Subagents found via AddDirs have lower priority than those in Agents (--agents).
+	// See https://code.claude.com/docs/en/sub-agents#choose-the-subagent-scope
+	AddDirs []string
 }
 
 // DefaultOptions returns sensible defaults for headless operation.
@@ -231,6 +270,11 @@ func (o Options) baseArgs() []string {
 	// Plugins.
 	for _, dir := range o.PluginDirs {
 		args = append(args, "--plugin-dir", dir)
+	}
+
+	// Additional directories.
+	for _, dir := range o.AddDirs {
+		args = append(args, "--add-dir", dir)
 	}
 
 	return args

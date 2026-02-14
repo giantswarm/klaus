@@ -21,3 +21,49 @@ data:
   {{- if and .Values.claude.agents (ne (toJson .Values.claude.agents) "{}") }}
   agents: {{ .Values.claude.agents | toJson | quote }}
   {{- end }}
+  {{- /* Inline skills - rendered as SKILL.md with frontmatter */}}
+  {{- range $name, $skill := .Values.claude.skills }}
+  skill-{{ $name }}: |
+    ---
+    {{- with $skill.description }}
+    description: {{ . | quote }}
+    {{- end }}
+    {{- if $skill.disableModelInvocation }}
+    disableModelInvocation: true
+    {{- end }}
+    {{- if $skill.userInvocable }}
+    userInvocable: true
+    {{- end }}
+    {{- with $skill.allowedTools }}
+    allowedTools: {{ . | quote }}
+    {{- end }}
+    {{- with $skill.model }}
+    model: {{ . | quote }}
+    {{- end }}
+    {{- with $skill.context }}
+    context:
+{{ toYaml . | indent 6 }}
+    {{- end }}
+    {{- with $skill.agent }}
+    agent: {{ . | quote }}
+    {{- end }}
+    {{- with $skill.argumentHint }}
+    argumentHint: {{ . | quote }}
+    {{- end }}
+    ---
+{{ $skill.content | indent 4 }}
+  {{- end }}
+  {{- /* Inline agent files - raw markdown */}}
+  {{- range $name, $agent := .Values.claude.agentFiles }}
+  agentfile-{{ $name }}: |
+{{ $agent.content | indent 4 }}
+  {{- end }}
+  {{- /* Hooks - rendered as settings.json */}}
+  {{- if .Values.claude.hooks }}
+  settings.json: {{ dict "hooks" .Values.claude.hooks | toJson | quote }}
+  {{- end }}
+  {{- /* Hook scripts */}}
+  {{- range $name, $content := .Values.claude.hookScripts }}
+  hookscript-{{ $name }}: |
+{{ $content | indent 4 }}
+  {{- end }}
