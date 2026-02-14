@@ -345,3 +345,170 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: 'duplicate plugin short name "gs-base" (from gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base and other.registry.io/custom/gs-base); use unique final path segments'
+
+  # -- Structured MCP server configuration tests --
+
+  - it: should mount mcp-config.json when mcpServers are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MCP_CONFIG
+            value: /etc/klaus/mcp-config.json
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/klaus/mcp-config.json
+            subPath: mcp-config.json
+            readOnly: true
+
+  - it: should not mount mcp-config.json when mcpServers is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServers: {}
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MCP_CONFIG
+          any: true
+
+  - it: should fail when both mcpConfig and mcpServers are set
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpConfig: '{"mcpServers":{}}'
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+    asserts:
+      - failedTemplate:
+          errorMessage: "claude.mcpConfig and claude.mcpServers are mutually exclusive; use one or the other"
+
+  - it: should render mcpServers to mcp-config.json in configmap
+    documentIndex: 0
+    template: templates/configmap.yaml
+    set:
+      claude:
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+            headers:
+              Authorization: "Bearer ${GITHUB_TOKEN}"
+    asserts:
+      - isNotEmpty:
+          path: data["mcp-config.json"]
+
+  - it: should inject mcpServerSecrets as secretKeyRef env vars
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServerSecrets:
+          - secretName: mcp-github-token
+            env:
+              GITHUB_TOKEN: token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: mcp-github-token
+                key: token
+
+  - it: should inject multiple mcpServerSecrets
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServerSecrets:
+          - secretName: mcp-github-token
+            env:
+              GITHUB_TOKEN: token
+          - secretName: mcp-database-url
+            env:
+              DATABASE_URL: connection-string
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: mcp-github-token
+                key: token
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: mcp-database-url
+                key: connection-string
+
+  - it: should set MCP_TIMEOUT when mcpTimeout is non-zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpTimeout: 60000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MCP_TIMEOUT
+            value: "60000"
+
+  - it: should not set MCP_TIMEOUT when mcpTimeout is zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpTimeout: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MCP_TIMEOUT
+          any: true
+
+  - it: should set MAX_MCP_OUTPUT_TOKENS when maxMcpOutputTokens is non-zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        maxMcpOutputTokens: 8000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MCP_OUTPUT_TOKENS
+            value: "8000"
+
+  - it: should not set MAX_MCP_OUTPUT_TOKENS when maxMcpOutputTokens is zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        maxMcpOutputTokens: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MCP_OUTPUT_TOKENS
+          any: true

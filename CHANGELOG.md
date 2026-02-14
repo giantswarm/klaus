@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Structured MCP server configuration** (`claude.mcpServers`): Define MCP servers as typed Helm values entries rendered to `.mcp.json` format, replacing the need to hand-craft raw JSON in `claude.mcpConfig`. Each server entry is a free-form object passed through as-is for forward compatibility.
+- **MCP server secret injection** (`claude.mcpServerSecrets`): Inject Kubernetes Secret values as container env vars for `${VAR}` expansion in MCP server configuration, enabling secure credential management for MCP integrations.
+- **MCP tuning controls** (`claude.mcpTimeout`, `claude.maxMcpOutputTokens`): Set `MCP_TIMEOUT` and `MAX_MCP_OUTPUT_TOKENS` env vars consumed by the Claude Code subprocess for controlling MCP server connection timeout and output token limits.
+- Helm `fail` directive when both `claude.mcpConfig` (raw JSON) and `claude.mcpServers` (structured) are set, preventing ambiguous configuration.
+
 ### Changed
 
 - **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.

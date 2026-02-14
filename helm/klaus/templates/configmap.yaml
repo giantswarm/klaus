@@ -12,8 +12,13 @@ data:
   {{- if .Values.claude.appendSystemPrompt }}
   append-system-prompt: {{ .Values.claude.appendSystemPrompt | quote }}
   {{- end }}
+  {{- if and .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
+  {{- fail "claude.mcpConfig and claude.mcpServers are mutually exclusive; use one or the other" }}
+  {{- end }}
   {{- if .Values.claude.mcpConfig }}
   mcp-config.json: {{ .Values.claude.mcpConfig | quote }}
+  {{- else if (include "klaus.hasMcpServers" .) }}
+  mcp-config.json: {{ dict "mcpServers" .Values.claude.mcpServers | toJson | quote }}
   {{- end }}
   {{- if .Values.claude.jsonSchema }}
   json-schema: {{ .Values.claude.jsonSchema | quote }}

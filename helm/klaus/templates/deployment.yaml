@@ -57,12 +57,32 @@ spec:
                   name: {{ include "klaus.fullname" . }}
                   key: append-system-prompt
             {{- end }}
-            {{- if .Values.claude.mcpConfig }}
+            {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: CLAUDE_MCP_CONFIG
               value: /etc/klaus/mcp-config.json
             {{- end }}
             - name: CLAUDE_STRICT_MCP_CONFIG
               value: {{ .Values.claude.strictMcpConfig | quote }}
+            # MCP tuning controls (consumed by Claude Code subprocess)
+            {{- if .Values.claude.mcpTimeout }}
+            - name: MCP_TIMEOUT
+              value: {{ .Values.claude.mcpTimeout | quote }}
+            {{- end }}
+            {{- if .Values.claude.maxMcpOutputTokens }}
+            - name: MAX_MCP_OUTPUT_TOKENS
+              value: {{ .Values.claude.maxMcpOutputTokens | quote }}
+            {{- end }}
+            # MCP server secrets (secretKeyRef env vars for ${VAR} expansion)
+            {{- range .Values.claude.mcpServerSecrets }}
+            {{- $secretName := .secretName }}
+            {{- range $envVar, $secretKey := .env }}
+            - name: {{ $envVar }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $secretKey }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.workspace.enabled }}
             - name: CLAUDE_WORKSPACE
               value: /workspace
@@ -208,7 +228,7 @@ spec:
             {{- end }}
             {{- end }}
           volumeMounts:
-            {{- if .Values.claude.mcpConfig }}
+            {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: config
               mountPath: /etc/klaus/mcp-config.json
               subPath: mcp-config.json
