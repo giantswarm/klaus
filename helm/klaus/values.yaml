@@ -303,8 +303,7 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  # Claude CLI needs to write to npm cache, git state, and workspace.
-  readOnlyRootFilesystem: false
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
