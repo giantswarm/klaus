@@ -273,6 +273,12 @@ spec:
             - name: workspace
               mountPath: /workspace
             {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            - name: claude-home
+              mountPath: /home/klaus
+            - name: npm-cache
+              mountPath: /home/klaus/.npm
           livenessProbe:
             httpGet:
               path: /healthz
@@ -322,6 +328,12 @@ spec:
             claimName: {{ include "klaus.fullname" . }}-workspace
           {{- end }}
         {{- end }}
+        - name: tmp
+          emptyDir: {}
+        - name: claude-home
+          emptyDir: {}
+        - name: npm-cache
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
