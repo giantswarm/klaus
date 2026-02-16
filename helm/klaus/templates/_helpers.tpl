@@ -116,6 +116,19 @@ Returns non-empty string when true.
 {{- end -}}
 
 {{/*
+Validate workspace git settings.
+Call once from deployment.yaml; emits nothing on success, fails on error.
+*/}}
+{{- define "klaus.validateWorkspaceGit" -}}
+{{- if and .Values.workspace.gitRepo (not .Values.workspace.enabled) -}}
+{{- fail "workspace.gitRepo requires workspace.enabled to be true" -}}
+{{- end -}}
+{{- if and .Values.workspace.gitSecretName (not .Values.workspace.gitRepo) -}}
+{{- fail "workspace.gitSecretName requires workspace.gitRepo to be set" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate plugins: each must have tag or digest, and short names must be unique.
 Call once from deployment.yaml; emits nothing on success, fails on error.
 */}}

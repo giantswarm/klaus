@@ -240,10 +240,14 @@ workspace:
   existingClaim: ""
   # gitRepo is a git repository URL to clone into the workspace.
   gitRepo: ""
-  # gitRef is the branch/tag/commit to checkout. Defaults to the repo's default branch.
+  # gitRef is the branch, tag, or commit SHA to checkout. Defaults to the repo's default branch.
   gitRef: ""
+  # gitImage is the container image used by the git-clone init container.
+  gitImage: "alpine/git:v2.47.2"
   # gitSecretName references a K8s Secret with git credentials.
-  # The Secret should contain an SSH key (key: ssh-privatekey) or token (key: token).
+  # The Secret should contain either:
+  #   - an SSH private key (key: ssh-privatekey) for SSH repo URLs, or
+  #   - a personal access token (key: token) for HTTPS repo URLs.
   gitSecretName: ""
 
 # OpenTelemetry monitoring configuration.

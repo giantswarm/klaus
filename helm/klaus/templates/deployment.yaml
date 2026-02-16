@@ -20,22 +20,46 @@ spec:
       serviceAccountName: {{ include "klaus.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if and .Values.workspace.gitRepo (not .Values.workspace.enabled) }}
-      {{- fail "workspace.gitRepo requires workspace.enabled to be true" }}
-      {{- end }}
+      {{- include "klaus.validateWorkspaceGit" . }}
       {{- if .Values.workspace.gitRepo }}
       initContainers:
         - name: git-clone
-          image: alpine/git:latest
+          image: {{ .Values.workspace.gitImage | quote }}
           command: ["sh", "-c"]
           args:
             - |
+              set -e
+              export HOME=/tmp
+              {{- if .Values.workspace.gitSecretName }}
+              # Configure SSH credentials if available.
+              if [ -f /etc/git-secret/ssh-privatekey ]; then
+                mkdir -p /tmp/.ssh
+                cp /etc/git-secret/ssh-privatekey /tmp/.ssh/id_rsa
+                chmod 600 /tmp/.ssh/id_rsa
+                export GIT_SSH_COMMAND="ssh -i /tmp/.ssh/id_rsa -o StrictHostKeyChecking=accept-new"
+              fi
+              # Configure HTTPS token credentials if available.
+              if [ -f /etc/git-secret/token ]; then
+                HOST=$(echo "{{ .Values.workspace.gitRepo }}" | sed -e 's|.*://||' -e 's|/.*||')
+                echo "https://x-access-token:$(cat /etc/git-secret/token)@${HOST}" > /tmp/.git-credentials
+                git config --global credential.helper 'store --file=/tmp/.git-credentials'
+              fi
+              {{- end }}
               if [ ! -d /workspace/.git ]; then
-                git clone {{ if .Values.workspace.gitRef }}--branch {{ .Values.workspace.gitRef }} {{ end }}{{ .Values.workspace.gitRepo }} /workspace
+                git clone "{{ .Values.workspace.gitRepo }}" /workspace
+                {{- if .Values.workspace.gitRef }}
+                cd /workspace && git checkout "{{ .Values.workspace.gitRef }}"
+                {{- end }}
               else
-                cd /workspace && git fetch origin && \
-                git checkout {{ .Values.workspace.gitRef | default "HEAD" }} && \
-                git pull origin {{ .Values.workspace.gitRef | default "HEAD" }} || true
+                cd /workspace
+                git fetch origin
+                {{- if .Values.workspace.gitRef }}
+                git checkout "{{ .Values.workspace.gitRef }}"
+                {{- end }}
+                # Pull only when on a branch (skip for detached HEAD from SHA/tag).
+                if git symbolic-ref -q HEAD >/dev/null 2>&1; then
+                  git pull --ff-only
+                fi
               fi
           volumeMounts:
             - name: workspace
@@ -46,8 +70,8 @@ spec:
               readOnly: true
             {{- end }}
           securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
+            runAsUser: {{ .Values.podSecurityContext.runAsUser }}
+            runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -357,7 +381,7 @@ spec:
             claimName: {{ include "klaus.fullname" . }}-workspace
           {{- end }}
         {{- end }}
-        {{- if .Values.workspace.gitSecretName }}
+        {{- if and .Values.workspace.gitSecretName .Values.workspace.gitRepo }}
         - name: git-credentials
           secret:
             secretName: {{ .Values.workspace.gitSecretName }}
