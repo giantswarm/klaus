@@ -10,6 +10,13 @@ registry:
 
 port: 8080
 
+# Toolchain image overrides the default Klaus image.
+# When set, this image is used for the container instead of image.name.
+# This should be a composite image that includes both the language toolchain
+# and the Klaus agent (built by klausctl toolchain build + push, or pre-built by CI/CD).
+# Example: gsoci.azurecr.io/giantswarm/klaus-go:1.25
+toolchainImage: ""
+
 # Claude Code agent configuration.
 claude:
   # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
@@ -231,6 +238,13 @@ workspace:
   size: 1Gi
   # existingClaim allows using a pre-existing PVC.
   existingClaim: ""
+  # gitRepo is a git repository URL to clone into the workspace.
+  gitRepo: ""
+  # gitRef is the branch/tag/commit to checkout. Defaults to the repo's default branch.
+  gitRef: ""
+  # gitSecretName references a K8s Secret with git credentials.
+  # The Secret should contain an SSH key (key: ssh-privatekey) or token (key: token).
+  gitSecretName: ""
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its

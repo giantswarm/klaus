@@ -20,9 +20,38 @@ spec:
       serviceAccountName: {{ include "klaus.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.workspace.gitRepo (not .Values.workspace.enabled) }}
+      {{- fail "workspace.gitRepo requires workspace.enabled to be true" }}
+      {{- end }}
+      {{- if .Values.workspace.gitRepo }}
+      initContainers:
+        - name: git-clone
+          image: alpine/git:latest
+          command: ["sh", "-c"]
+          args:
+            - |
+              if [ ! -d /workspace/.git ]; then
+                git clone {{ if .Values.workspace.gitRef }}--branch {{ .Values.workspace.gitRef }} {{ end }}{{ .Values.workspace.gitRepo }} /workspace
+              else
+                cd /workspace && git fetch origin && \
+                git checkout {{ .Values.workspace.gitRef | default "HEAD" }} && \
+                git pull origin {{ .Values.workspace.gitRef | default "HEAD" }} || true
+              fi
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            {{- if .Values.workspace.gitSecretName }}
+            - name: git-credentials
+              mountPath: /etc/git-secret
+              readOnly: true
+            {{- end }}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.registry.domain }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ include "klaus.containerImage" . | quote }}
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -327,6 +356,12 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "klaus.fullname" . }}-workspace
           {{- end }}
+        {{- end }}
+        {{- if .Values.workspace.gitSecretName }}
+        - name: git-credentials
+          secret:
+            secretName: {{ .Values.workspace.gitSecretName }}
+            defaultMode: 0400
         {{- end }}
         - name: tmp
           emptyDir: {}

@@ -61,6 +61,17 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Resolve the container image: toolchainImage takes precedence over the default image.
+*/}}
+{{- define "klaus.containerImage" -}}
+{{- if .Values.toolchainImage -}}
+{{ .Values.toolchainImage }}
+{{- else -}}
+{{ .Values.registry.domain }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Aggregate CLAUDE_ADD_DIRS from inline skills/agents and user-specified addDirs.
 */}}
 {{- define "klaus.addDirs" -}}
