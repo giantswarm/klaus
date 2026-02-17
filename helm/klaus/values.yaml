@@ -261,7 +261,7 @@ workspace:
   # This image must be available in your cluster's container registry.
   # For air-gapped environments, mirror this image to your internal registry
   # and set this value to the internal image reference.
-  gitImage: "alpine/git:v2.47.2"
+  gitImage: "alpine/git:v2.52.0"
   # gitSecretName references a K8s Secret with git credentials.
   # The Secret should contain either:
   #   - an SSH private key (key: ssh-privatekey) for SSH repo URLs, or

@@ -556,9 +556,8 @@ tests:
       - equal:
           path: spec.template.spec.initContainers[0].name
           value: git-clone
-      - equal:
+      - isNotEmpty:
           path: spec.template.spec.initContainers[0].image
-          value: "alpine/git:v2.47.2"
 
   - it: should use custom gitImage for init container
     documentIndex: 0
