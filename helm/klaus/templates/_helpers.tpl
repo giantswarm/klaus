@@ -61,6 +61,17 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Resolve the container image: toolchainImage takes precedence over the default image.
+*/}}
+{{- define "klaus.containerImage" -}}
+{{- if .Values.toolchainImage -}}
+{{ .Values.toolchainImage }}
+{{- else -}}
+{{ .Values.registry.domain }}/{{ .Values.image.name }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Aggregate CLAUDE_ADD_DIRS from inline skills/agents and user-specified addDirs.
 */}}
 {{- define "klaus.addDirs" -}}
@@ -102,6 +113,19 @@ Returns non-empty string when true.
 */}}
 {{- define "klaus.needsScriptsVolume" -}}
 {{- if .Values.claude.hookScripts -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Validate workspace git settings.
+Call once from deployment.yaml; emits nothing on success, fails on error.
+*/}}
+{{- define "klaus.validateWorkspaceGit" -}}
+{{- if and .Values.workspace.gitRepo (not .Values.workspace.enabled) -}}
+{{- fail "workspace.gitRepo requires workspace.enabled to be true" -}}
+{{- end -}}
+{{- if and .Values.workspace.gitSecretName (not .Values.workspace.gitRepo) -}}
+{{- fail "workspace.gitSecretName requires workspace.gitRepo to be set" -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

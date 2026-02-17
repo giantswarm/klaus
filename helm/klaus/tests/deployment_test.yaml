@@ -512,3 +512,223 @@ tests:
           content:
             name: MAX_MCP_OUTPUT_TOKENS
           any: true
+
+  # -- Toolchain image tests --
+
+  - it: should use default image when toolchainImage is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "gsoci.azurecr.io/giantswarm/klaus:0.1.0"
+
+  - it: should use toolchainImage when set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      toolchainImage: "gsoci.azurecr.io/giantswarm/klaus-go:1.25"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "gsoci.azurecr.io/giantswarm/klaus-go:1.25"
+
+  # -- Workspace git clone tests --
+
+  - it: should not have init containers when gitRepo is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers
+
+  - it: should add git-clone init container when gitRepo is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: git-clone
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: "alpine/git:v2.47.2"
+
+  - it: should use custom gitImage for init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitImage: "registry.internal/git:2.47"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: "registry.internal/git:2.47"
+
+  - it: should wrap git-clone command with timeout when gitTimeout is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitTimeout: 600
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["timeout", "600", "sh", "-c"]
+
+  - it: should not wrap git-clone with timeout when gitTimeout is 0
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitTimeout: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["sh", "-c"]
+
+  - it: should mount workspace volume in init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /workspace
+
+  - it: should mount git-credentials volume when gitSecretName is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitSecretName: "my-git-creds"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-credentials
+            mountPath: /etc/git-secret
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-credentials
+            secret:
+              secretName: my-git-creds
+              defaultMode: 256
+
+  - it: should not mount git-credentials volume when gitSecretName is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - notContains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-credentials
+          any: true
+
+  - it: should set init container security context from podSecurityContext
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 2000
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsGroup
+          value: 2000
+
+  - it: should set init container resources when gitResources is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitResources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.requests.memory
+          value: 128Mi
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.limits.cpu
+          value: 500m
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.limits.memory
+          value: 512Mi
+
+  - it: should not set init container resources when gitResources is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers[0].resources
+
+  - it: should fail when gitRepo is set without workspace.enabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: false
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - failedTemplate:
+          errorMessage: "workspace.gitRepo requires workspace.enabled to be true"
+
+  - it: should fail when gitSecretName is set without gitRepo
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitSecretName: "my-git-creds"
+    asserts:
+      - failedTemplate:
+          errorMessage: "workspace.gitSecretName requires workspace.gitRepo to be set"
