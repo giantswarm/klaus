@@ -242,13 +242,35 @@ workspace:
   gitRepo: ""
   # gitRef is the branch, tag, or commit SHA to checkout. Defaults to the repo's default branch.
   gitRef: ""
+  # gitDepth limits clone history depth (e.g. 1 for a shallow clone).
+  # 0 (default) clones the full history. Shallow clones are faster and use
+  # less disk for large repositories where only the working tree matters.
+  gitDepth: 0
+  # gitTimeout is the maximum time in seconds for the git clone/fetch operation.
+  # Prevents pod startup from hanging indefinitely on network issues or very
+  # large repositories. 0 means no timeout (not recommended for production).
+  gitTimeout: 300
   # gitImage is the container image used by the git-clone init container.
+  # This image must be available in your cluster's container registry.
+  # For air-gapped environments, mirror this image to your internal registry
+  # and set this value to the internal image reference.
   gitImage: "alpine/git:v2.47.2"
   # gitSecretName references a K8s Secret with git credentials.
   # The Secret should contain either:
   #   - an SSH private key (key: ssh-privatekey) for SSH repo URLs, or
   #   - a personal access token (key: token) for HTTPS repo URLs.
   gitSecretName: ""
+  # gitResources sets resource requests/limits for the git-clone init container.
+  # Useful for large repositories that require significant memory during clone.
+  # Example:
+  #   gitResources:
+  #     requests:
+  #       cpu: 100m
+  #       memory: 128Mi
+  #     limits:
+  #       cpu: 500m
+  #       memory: 512Mi
+  gitResources: {}
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its

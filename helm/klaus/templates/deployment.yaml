@@ -25,7 +25,11 @@ spec:
       initContainers:
         - name: git-clone
           image: {{ .Values.workspace.gitImage | quote }}
+          {{- if .Values.workspace.gitTimeout }}
+          command: ["timeout", {{ .Values.workspace.gitTimeout | quote }}, "sh", "-c"]
+          {{- else }}
           command: ["sh", "-c"]
+          {{- end }}
           args:
             - |
               set -e
@@ -46,13 +50,13 @@ spec:
               fi
               {{- end }}
               if [ ! -d /workspace/.git ]; then
-                git clone "{{ .Values.workspace.gitRepo }}" /workspace
+                git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}"{{ .Values.workspace.gitRepo }}" /workspace
                 {{- if .Values.workspace.gitRef }}
                 cd /workspace && git checkout "{{ .Values.workspace.gitRef }}"
                 {{- end }}
               else
                 cd /workspace
-                git fetch origin
+                git fetch {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}origin
                 {{- if .Values.workspace.gitRef }}
                 git checkout "{{ .Values.workspace.gitRef }}"
                 {{- end }}
@@ -72,6 +76,10 @@ spec:
           securityContext:
             runAsUser: {{ .Values.podSecurityContext.runAsUser }}
             runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+          {{- with .Values.workspace.gitResources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
