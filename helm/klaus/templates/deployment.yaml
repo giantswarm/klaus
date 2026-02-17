@@ -39,17 +39,20 @@ spec:
             - |
               set -e
               {{- if .Values.workspace.gitSecretName }}
-              # Configure HTTPS token credentials.
+              # Build authenticated URL using shell expansion (avoids sed delimiter issues with token content).
+              REPO='{{ .Values.workspace.gitRepo }}'
               TOKEN=$(cat /etc/git-secret/token)
-              AUTH_URL=$(echo '{{ .Values.workspace.gitRepo }}' | sed "s|://|://x-access-token:${TOKEN}@|")
+              AUTH_URL="${REPO%%://*}://x-access-token:${TOKEN}@${REPO#*://}"
+              # Ensure credentials are stripped from the persisted remote even on unexpected exit.
+              trap 'cd /workspace 2>/dev/null && git remote set-url origin "$REPO" 2>/dev/null' EXIT
               {{- end }}
               if [ ! -d /workspace/.git ]; then
+                {{- /* Double quotes required: AUTH_URL needs shell variable expansion; plain repo URL does not. */}}
                 git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}"{{ if .Values.workspace.gitSecretName }}${AUTH_URL}{{ else }}{{ .Values.workspace.gitRepo }}{{ end }}" /workspace
                 {{- if .Values.workspace.gitRef }}
                 cd /workspace && git checkout '{{ .Values.workspace.gitRef }}'
                 {{- end }}
                 {{- if .Values.workspace.gitSecretName }}
-                # Strip credentials from persisted remote URL.
                 cd /workspace && git remote set-url origin '{{ .Values.workspace.gitRepo }}'
                 {{- end }}
               else
@@ -66,7 +69,6 @@ spec:
                   git pull --ff-only
                 fi
                 {{- if .Values.workspace.gitSecretName }}
-                # Strip credentials from persisted remote URL.
                 git remote set-url origin '{{ .Values.workspace.gitRepo }}'
                 {{- end }}
               fi

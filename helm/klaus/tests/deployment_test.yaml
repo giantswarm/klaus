@@ -671,6 +671,63 @@ tests:
           path: spec.template.spec.initContainers[0].securityContext.runAsGroup
           value: 2000
 
+  - it: should harden init container security context
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
+          value:
+            - ALL
+
+  - it: should mount git-tmp emptyDir at /tmp for init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-tmp
+            emptyDir: {}
+
+  - it: should set GIT_CONFIG_NOSYSTEM and HOME env vars on init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: HOME
+            value: /tmp
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GIT_CONFIG_NOSYSTEM
+            value: "1"
+
   - it: should set init container resources when gitResources is set
     documentIndex: 0
     template: templates/deployment.yaml
