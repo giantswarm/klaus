@@ -4,7 +4,7 @@
 ARG VARIANT=alpine
 
 # Stage 1: Build the Go binary.
-FROM golang:1.25.7 AS builder
+FROM golang:1.26.0 AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
