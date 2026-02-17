@@ -1,7 +1,11 @@
+# DO NOT EDIT. Generated from Dockerfile.
+# This file exists because the CircleCI architect orb does not support --build-arg.
+# Regenerate with: make generate-dockerfile-debian
+
 # VARIANT controls the base distribution: "alpine" (default, ~50 MB) or "slim" (Debian, ~200 MB).
 # Both variants produce the same minimal contents: Node.js, Claude Code CLI, ca-certificates, klaus binary.
 # Declared before the first FROM so it is available to all FROM instructions.
-ARG VARIANT=alpine
+ARG VARIANT=slim
 
 # Stage 1: Build the Go binary.
 FROM golang:1.25.7 AS builder

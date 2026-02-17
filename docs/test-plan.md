@@ -250,7 +250,7 @@ docker run -d --name klaus-test -p 9090:9090 \
   klaus:test serve
 
 # Create the marker file inside the container
-docker exec klaus-test bash -c 'echo "marker-12345" > /workspace/marker.txt'
+docker exec klaus-test sh -c 'echo "marker-12345" > /workspace/marker.txt'
 ```
 
 | Check | Expected |
@@ -562,7 +562,7 @@ cat > /tmp/klaus-test/settings.json << 'EOF'
 EOF
 
 cat > /tmp/klaus-test/hooks/log-tool-use.sh << 'SCRIPT'
-#!/bin/bash
+#!/bin/sh
 INPUT=$(cat)
 echo "$(date -Iseconds) RAW_INPUT: $INPUT" >> /tmp/hook-log.txt
 exit 0
@@ -596,7 +596,7 @@ curl -s -X POST http://localhost:9090/mcp \
   -d '{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{
     "name":"prompt",
     "arguments":{
-      "message":"Run echo hello in bash.",
+      "message":"Run echo hello in the shell.",
       "blocking":true
     }
   }}'
@@ -622,7 +622,7 @@ docker exec klaus-test cat /tmp/hook-log.txt
 | Check | Expected |
 |-------|----------|
 | `docker exec klaus-test ls -la /etc/klaus/hooks/log-tool-use.sh` | File has execute permission (0755 via `defaultMode`) |
-| Hook script uses `#!/bin/bash` | Proper shebang for execution |
+| Hook script uses `#!/bin/sh` | Proper shebang for execution (Alpine has no bash) |
 
 ### Hooks / Settings Mutual Exclusivity
 

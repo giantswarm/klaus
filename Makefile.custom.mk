@@ -12,6 +12,24 @@ release-dry-run-fast: ## Fast release dry-run for CI (linux/amd64 only, ~6min fa
 release-local: ## Create a release locally
 	goreleaser release --clean
 
+##@ Docker
+
+.PHONY: docker-build docker-build-alpine docker-build-debian generate-dockerfile-debian
+
+docker-build: docker-build-alpine docker-build-debian ## Build both Alpine and Debian Docker images
+
+docker-build-alpine: ## Build Alpine Docker image (default)
+	@echo "Building Alpine image..."
+	@docker build -t klaus:alpine .
+
+docker-build-debian: ## Build Debian Docker image
+	@echo "Building Debian image..."
+	@docker build -f Dockerfile.debian -t klaus:debian .
+
+generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (only VARIANT default differs)
+	@printf '# DO NOT EDIT. Generated from Dockerfile.\n# This file exists because the CircleCI architect orb does not support --build-arg.\n# Regenerate with: make generate-dockerfile-debian\n\n' > Dockerfile.debian
+	@sed 's/^ARG VARIANT=alpine$$/ARG VARIANT=slim/' Dockerfile >> Dockerfile.debian
+
 ##@ Development
 
 .PHONY: lint-yaml
