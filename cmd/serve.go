@@ -323,6 +323,12 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		process = claude.NewProcess(opts)
 	}
 
+	// Owner-based access control: restricts /mcp to the configured identity.
+	ownerSubject := os.Getenv("KLAUS_OWNER_SUBJECT")
+	if ownerSubject != "" {
+		log.Printf("Owner-based access control enabled (subject: %s)", ownerSubject)
+	}
+
 	// Determine listen port: flag > env > default.
 	port := portFlag
 	if port == "" {
@@ -346,13 +352,19 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		mode = server.ModePersistent
 	}
 
-	if enableOAuth {
-		return runWithOAuth(serverCtx, process, port, mode, oauthConfig, quit)
+	cfg := server.Config{
+		Port:         port,
+		Mode:         mode,
+		OwnerSubject: ownerSubject,
 	}
-	return runWithoutOAuth(serverCtx, process, port, mode, quit)
+
+	if enableOAuth {
+		return runWithOAuth(serverCtx, process, cfg, oauthConfig, quit)
+	}
+	return runWithoutOAuth(serverCtx, process, cfg, quit)
 }
 
-func runWithOAuth(serverCtx context.Context, process claude.Prompter, port string, mode string, config server.OAuthConfig, quit chan os.Signal) error {
+func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server.Config, config server.OAuthConfig, quit chan os.Signal) error {
 	if err := config.Validate(); err != nil {
 		return err
 	}
@@ -368,22 +380,22 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, port strin
 		log.Println("WARNING: OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config, cfg.OwnerSubject)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}
 
-	addr := ":" + port
+	addr := ":" + cfg.Port
 	return runServerLifecycle(
-		func() error { return oauthSrv.Start(addr, mode, config) },
+		func() error { return oauthSrv.Start(addr, cfg.Mode, config) },
 		oauthSrv.Shutdown,
 		process,
 		quit,
 	)
 }
 
-func runWithoutOAuth(serverCtx context.Context, process claude.Prompter, port string, mode string, quit chan os.Signal) error {
-	srv := server.NewWithMode(serverCtx, process, port, mode)
+func runWithoutOAuth(serverCtx context.Context, process claude.Prompter, cfg server.Config, quit chan os.Signal) error {
+	srv := server.NewServer(serverCtx, process, cfg)
 	return runServerLifecycle(srv.Start, srv.Shutdown, process, quit)
 }
 

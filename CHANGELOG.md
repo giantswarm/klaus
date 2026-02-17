@@ -7,8 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
+  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
+  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
+  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
+  - CI validates both images build successfully and checks Dockerfile sync on every PR.
+
 ### Added
 
+- **Owner-based access control** (`KLAUS_OWNER_SUBJECT`): Restricts the `/mcp` endpoint to the configured owner identity by matching the JWT `sub` or `email` claim from the bearer token. Works in all deployment modes: OAuth (Dex/Google), muster token forwarding, and local (no-op when unset). Operational endpoints (`/healthz`, `/readyz`, `/status`, `/metrics`) bypass owner validation. The owner is exposed in the `/status` endpoint response for observability. Helm chart supports `owner.subject` in values.
 - **Toolchain image support** (`toolchainImage`): Override the default Klaus container image with a composite toolchain image that includes both the language toolchain and the Klaus agent. Built by `klausctl toolchain build` or pre-built by CI/CD. When empty (default), the chart uses the standard Klaus image -- fully backward compatible.
 - **Workspace git clone support** (`workspace.gitRepo`, `workspace.gitRef`, `workspace.gitSecretName`, `workspace.gitImage`): Populate the workspace PVC with a git repository via an init container. On first run, the repo is cloned; on subsequent runs, the existing checkout is updated. Supports branch/tag/commit SHA selection, SSH key and HTTPS token credential injection via Kubernetes Secrets, and a configurable git image (pinned to `alpine/git:v2.47.2` by default). Includes shallow clone support (`workspace.gitDepth`), a configurable timeout (`workspace.gitTimeout`, default 300s) to prevent hung pod startup, and optional resource requests/limits for the init container (`workspace.gitResources`).
 - **Structured MCP server configuration** (`claude.mcpServers`): Define MCP servers as typed Helm values entries rendered to `.mcp.json` format, replacing the need to hand-craft raw JSON in `claude.mcpConfig`. Each server entry is a free-form object passed through as-is for forward compatibility.

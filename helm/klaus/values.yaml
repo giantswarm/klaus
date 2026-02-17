@@ -224,6 +224,13 @@ claude:
   # Recommended for ephemeral container workloads.
   noSessionPersistence: true
 
+# Owner-based access control.
+# When set, only the user whose JWT sub or email claim matches this value
+# can access the /mcp endpoint. Other authenticated users receive HTTP 403.
+# Leave empty to allow any authenticated user (backward-compatible).
+owner:
+  subject: ""
+
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:
   # secretName is the name of the Kubernetes Secret containing the API key.
