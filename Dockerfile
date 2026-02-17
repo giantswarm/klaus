@@ -1,3 +1,8 @@
+# VARIANT controls the base distribution: "alpine" (default, ~50 MB) or "slim" (Debian, ~200 MB).
+# Both variants produce the same minimal contents: Node.js, Claude Code CLI, ca-certificates, klaus binary.
+# Declared before the first FROM so it is available to all FROM instructions.
+ARG VARIANT=alpine
+
 # Stage 1: Build the Go binary.
 FROM golang:1.25.7 AS builder
 
@@ -19,9 +24,6 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -o klaus .
 
 # Stage 2: Minimal runtime with Node.js and Claude CLI.
-# VARIANT controls the base distribution: "alpine" (default, ~50 MB) or "slim" (Debian, ~200 MB).
-# Both variants produce the same minimal contents: Node.js, Claude Code CLI, ca-certificates, klaus binary.
-ARG VARIANT=alpine
 FROM node:24-${VARIANT}
 ARG VARIANT
 
