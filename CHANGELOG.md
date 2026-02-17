@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB base vs ~200 MB) and attack surface. Removed `git`, `openssh-client`, and `curl` -- these are not needed at runtime. Git auth uses HTTPS + token only, workspace cloning is handled by init containers, and the `klaus` binary is statically linked. Agents that need git or other tools get them via composite toolchain images built by klausctl. Only `ca-certificates` is retained for TLS. A Debian variant is published as `giantswarm/klaus-debian` (separate image name, same semver tags) for glibc use cases -- compatible with the semver-based automatic upgrade strategy. CI validates both images build successfully on every PR.
+- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
+  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
+  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
+  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
+  - CI validates both images build successfully and checks Dockerfile sync on every PR.
 
 ### Added
 

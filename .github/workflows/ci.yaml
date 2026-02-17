@@ -18,6 +18,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Verify Dockerfile.debian is in sync
+        run: |
+          make generate-dockerfile-debian
+          git diff --exit-code Dockerfile.debian
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:

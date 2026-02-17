@@ -1,10 +1,9 @@
-# Debian variant of the Klaus container image.
-#
-# This file exists because the architect orb (CircleCI) does not support
-# --build-arg. It is identical to Dockerfile except VARIANT defaults to "slim".
-#
-# Keep in sync with Dockerfile.
+# DO NOT EDIT. Generated from Dockerfile.
+# This file exists because the CircleCI architect orb does not support --build-arg.
+# Regenerate with: make generate-dockerfile-debian
 
+# VARIANT controls the base distribution: "alpine" (default, ~50 MB) or "slim" (Debian, ~200 MB).
+# Both variants produce the same minimal contents: Node.js, Claude Code CLI, ca-certificates, klaus binary.
 # Declared before the first FROM so it is available to all FROM instructions.
 ARG VARIANT=slim
 
@@ -28,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -X 'main.date=${DATE}'" \
     -o klaus .
 
-# Stage 2: Minimal runtime with Node.js and Claude CLI (Debian).
+# Stage 2: Minimal runtime with Node.js and Claude CLI.
 FROM node:24-${VARIANT}
 ARG VARIANT
 
