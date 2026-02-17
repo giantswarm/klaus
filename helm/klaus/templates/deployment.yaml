@@ -30,44 +30,53 @@ spec:
           {{- else }}
           command: ["sh", "-c"]
           {{- end }}
+          env:
+            - name: HOME
+              value: /tmp
+            - name: GIT_CONFIG_NOSYSTEM
+              value: "1"
           args:
             - |
               set -e
-              export HOME=/tmp
               {{- if .Values.workspace.gitSecretName }}
-              # Configure SSH credentials if available.
-              if [ -f /etc/git-secret/ssh-privatekey ]; then
-                mkdir -p /tmp/.ssh
-                cp /etc/git-secret/ssh-privatekey /tmp/.ssh/id_rsa
-                chmod 600 /tmp/.ssh/id_rsa
-                export GIT_SSH_COMMAND="ssh -i /tmp/.ssh/id_rsa -o StrictHostKeyChecking=accept-new"
-              fi
-              # Configure HTTPS token credentials if available.
-              if [ -f /etc/git-secret/token ]; then
-                HOST=$(echo "{{ .Values.workspace.gitRepo }}" | sed -e 's|.*://||' -e 's|/.*||')
-                echo "https://x-access-token:$(cat /etc/git-secret/token)@${HOST}" > /tmp/.git-credentials
-                git config --global credential.helper 'store --file=/tmp/.git-credentials'
-              fi
+              # Build authenticated URL using shell expansion (avoids sed delimiter issues with token content).
+              REPO='{{ .Values.workspace.gitRepo }}'
+              TOKEN=$(cat /etc/git-secret/token)
+              AUTH_URL="${REPO%%://*}://x-access-token:${TOKEN}@${REPO#*://}"
+              # Ensure credentials are stripped from the persisted remote even on unexpected exit.
+              trap 'cd /workspace 2>/dev/null && git remote set-url origin "$REPO" 2>/dev/null' EXIT
               {{- end }}
               if [ ! -d /workspace/.git ]; then
-                git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}"{{ .Values.workspace.gitRepo }}" /workspace
+                {{- /* Double quotes required: AUTH_URL needs shell variable expansion; plain repo URL does not. */}}
+                git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}"{{ if .Values.workspace.gitSecretName }}${AUTH_URL}{{ else }}{{ .Values.workspace.gitRepo }}{{ end }}" /workspace
                 {{- if .Values.workspace.gitRef }}
-                cd /workspace && git checkout "{{ .Values.workspace.gitRef }}"
+                cd /workspace && git checkout '{{ .Values.workspace.gitRef }}'
+                {{- end }}
+                {{- if .Values.workspace.gitSecretName }}
+                cd /workspace && git remote set-url origin '{{ .Values.workspace.gitRepo }}'
                 {{- end }}
               else
                 cd /workspace
+                {{- if .Values.workspace.gitSecretName }}
+                git remote set-url origin "${AUTH_URL}"
+                {{- end }}
                 git fetch {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}origin
                 {{- if .Values.workspace.gitRef }}
-                git checkout "{{ .Values.workspace.gitRef }}"
+                git checkout '{{ .Values.workspace.gitRef }}'
                 {{- end }}
                 # Pull only when on a branch (skip for detached HEAD from SHA/tag).
                 if git symbolic-ref -q HEAD >/dev/null 2>&1; then
                   git pull --ff-only
                 fi
+                {{- if .Values.workspace.gitSecretName }}
+                git remote set-url origin '{{ .Values.workspace.gitRepo }}'
+                {{- end }}
               fi
           volumeMounts:
             - name: workspace
               mountPath: /workspace
+            - name: git-tmp
+              mountPath: /tmp
             {{- if .Values.workspace.gitSecretName }}
             - name: git-credentials
               mountPath: /etc/git-secret
@@ -76,6 +85,11 @@ spec:
           securityContext:
             runAsUser: {{ .Values.podSecurityContext.runAsUser }}
             runAsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           {{- with .Values.workspace.gitResources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -398,6 +412,10 @@ spec:
           secret:
             secretName: {{ .Values.workspace.gitSecretName }}
             defaultMode: 0400
+        {{- end }}
+        {{- if .Values.workspace.gitRepo }}
+        - name: git-tmp
+          emptyDir: {}
         {{- end }}
         - name: tmp
           emptyDir: {}
