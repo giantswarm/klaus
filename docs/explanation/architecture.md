@@ -8,7 +8,7 @@ Klaus is a Go binary that manages the Claude Code CLI as a subprocess and expose
 MCP Client --> /mcp --> MCP Server --> Prompter --> Claude Code CLI (subprocess)
 ```
 
-The container image is based on `node:22-slim` with the Claude Code CLI installed globally via npm. The Go binary handles lifecycle management, health checks, metrics, and authentication.
+The container image defaults to `node:24-alpine` with the Claude Code CLI installed globally via npm. A Debian variant (`node:24-slim`) is published as `giantswarm/klaus-debian` for glibc use cases -- both images use identical semver tags, only the image name differs. Both variants produce the same minimal contents: Node.js, Claude Code CLI, `ca-certificates`, and the `klaus` binary. Anything else (git, build tools, language runtimes) belongs in composite toolchain images built by klausctl. The Go binary handles lifecycle management, health checks, metrics, and authentication.
 
 ## Core components
 

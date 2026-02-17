@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB base vs ~200 MB) and attack surface. Removed `git`, `openssh-client`, and `curl` -- these are not needed at runtime. Git auth uses HTTPS + token only, workspace cloning is handled by init containers, and the `klaus` binary is statically linked. Agents that need git or other tools get them via composite toolchain images built by klausctl. Only `ca-certificates` is retained for TLS. A Debian variant is published as `giantswarm/klaus-debian` (separate image name, same semver tags) for glibc use cases -- compatible with the semver-based automatic upgrade strategy. CI validates both images build successfully on every PR.
+
 ### Added
 
 - **Owner-based access control** (`KLAUS_OWNER_SUBJECT`): Restricts the `/mcp` endpoint to the configured owner identity by matching the JWT `sub` or `email` claim from the bearer token. Works in all deployment modes: OAuth (Dex/Google), muster token forwarding, and local (no-op when unset). Operational endpoints (`/healthz`, `/readyz`, `/status`, `/metrics`) bypass owner validation. The owner is exposed in the `/status` endpoint response for observability. Helm chart supports `owner.subject` in values.

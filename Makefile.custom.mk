@@ -12,6 +12,20 @@ release-dry-run-fast: ## Fast release dry-run for CI (linux/amd64 only, ~6min fa
 release-local: ## Create a release locally
 	goreleaser release --clean
 
+##@ Docker
+
+.PHONY: docker-build docker-build-alpine docker-build-debian
+
+docker-build: docker-build-alpine docker-build-debian ## Build both Alpine and Debian Docker images
+
+docker-build-alpine: ## Build Alpine Docker image (default)
+	@echo "Building Alpine image..."
+	@docker build --build-arg VARIANT=alpine -t klaus:alpine .
+
+docker-build-debian: ## Build Debian Docker image
+	@echo "Building Debian image..."
+	@docker build -f Dockerfile.debian -t klaus:debian .
+
 ##@ Development
 
 .PHONY: lint-yaml

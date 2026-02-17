@@ -24,6 +24,20 @@ workflows:
             ignore:
             - main
 
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-debian
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        requires:
+        - go-build-klaus
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore:
+            - main
+
     - architect/push-to-app-catalog:
         executor: app-build-suite
         context: architect
@@ -33,6 +47,7 @@ workflows:
         chart: klaus
         requires:
         - push-to-registries
+        - push-to-registries-debian
         persist_chart_archive: true
         filters:
           tags:
