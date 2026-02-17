@@ -92,6 +92,10 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.port | quote }}
+            {{- if .Values.owner.subject }}
+            - name: KLAUS_OWNER_SUBJECT
+              value: {{ .Values.owner.subject | quote }}
+            {{- end }}
             {{- if .Values.claude.model }}
             - name: CLAUDE_MODEL
               value: {{ .Values.claude.model | quote }}

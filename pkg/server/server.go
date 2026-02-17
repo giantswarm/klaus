@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
@@ -24,10 +25,22 @@ const (
 	ModePersistent = "persistent"
 )
 
-// NewWithMode creates a Server that serves MCP and operational endpoints.
+// Config holds non-OAuth server-level configuration.
+type Config struct {
+	// Port is the HTTP listen port (e.g. "8080").
+	Port string
+	// Mode is the operating mode (ModeSingleShot or ModePersistent).
+	Mode string
+	// OwnerSubject restricts MCP access to the configured owner identity
+	// by matching the JWT sub or email claim. When empty, no owner
+	// validation is performed (backward-compatible).
+	OwnerSubject string
+}
+
+// NewServer creates a Server that serves MCP and operational endpoints.
 // The serverCtx controls the lifetime of background goroutines; it should
 // be cancelled during server shutdown to ensure drain goroutines are cleaned up.
-func NewWithMode(serverCtx context.Context, process claudepkg.Prompter, port string, mode string) *Server {
+func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config) *Server {
 	mcpSrv := mcppkg.NewServer(serverCtx, process)
 
 	mux := http.NewServeMux()
@@ -37,13 +50,14 @@ func NewWithMode(serverCtx context.Context, process claudepkg.Prompter, port str
 	}
 
 	// MCP endpoint -- delegates to the StreamableHTTPServer handler.
-	mux.Handle("/mcp", mcpSrv)
+	// Owner middleware is applied when OwnerSubject is configured.
+	mux.Handle("/mcp", OwnerMiddleware(cfg.OwnerSubject, slog.Default())(mcpSrv))
 
-	// Operational endpoints.
-	registerOperationalRoutes(mux, process, mode)
+	// Operational endpoints (bypass owner validation).
+	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject)
 
 	s.httpServer = &http.Server{
-		Addr:              ":" + port,
+		Addr:              ":" + cfg.Port,
 		Handler:           mux,
 		ReadHeaderTimeout: DefaultReadHeaderTimeout,
 		WriteTimeout:      DefaultWriteTimeout,

@@ -197,12 +197,14 @@ type OAuthServer struct {
 	oauthServer  *oauth.Server
 	oauthHandler *oauth.Handler
 	httpServer   *http.Server
+	ownerSubject string
 }
 
 // NewOAuthServer creates an OAuth-protected MCP server. The serverCtx
 // controls the lifetime of background goroutines; it should be cancelled
-// during server shutdown.
-func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, config OAuthConfig) (*OAuthServer, error) {
+// during server shutdown. ownerSubject restricts MCP access to the configured
+// owner identity; when empty, no owner validation is performed.
+func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, config OAuthConfig, ownerSubject string) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
@@ -215,6 +217,7 @@ func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, confi
 		process:      process,
 		oauthServer:  oauthSrv,
 		oauthHandler: oauthHandler,
+		ownerSubject: ownerSubject,
 	}, nil
 }
 
@@ -232,8 +235,8 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 	// MCP endpoint (protected by OAuth).
 	s.setupMCPRoutes(mux, config)
 
-	// Health and status endpoints (unprotected).
-	registerOperationalRoutes(mux, s.process, mode)
+	// Health and status endpoints (unprotected, bypass owner validation).
+	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -301,7 +304,10 @@ func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
 	}
 	httpServer := mcpserver.NewStreamableHTTPServer(mcpSrv, opts...)
 
-	mux.Handle("/mcp", s.oauthHandler.ValidateToken(httpServer))
+	// Owner middleware runs first (decode-only claim check), then OAuth token
+	// validation verifies the token cryptographically. This order is safe:
+	// a forged JWT with matching claims will still be rejected by ValidateToken.
+	mux.Handle("/mcp", OwnerMiddleware(s.ownerSubject, slog.Default())(s.oauthHandler.ValidateToken(httpServer)))
 }
 
 func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {

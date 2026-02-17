@@ -160,7 +160,7 @@ func TestHandleRoot_UnknownPath(t *testing.T) {
 func TestHandleStatus(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 
-	handler := handleStatus(process, ModeSingleShot)
+	handler := handleStatus(process, ModeSingleShot, "")
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
 	w := httptest.NewRecorder()
 
@@ -187,12 +187,15 @@ func TestHandleStatus(t *testing.T) {
 	if status.Agent.Status != claude.ProcessStatusIdle {
 		t.Errorf("expected agent status %q, got %q", claude.ProcessStatusIdle, status.Agent.Status)
 	}
+	if status.Owner != "" {
+		t.Errorf("expected empty owner when not configured, got %q", status.Owner)
+	}
 }
 
 func TestHandleStatus_PersistentMode(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 
-	handler := handleStatus(process, ModePersistent)
+	handler := handleStatus(process, ModePersistent, "")
 	req := httptest.NewRequest(http.MethodGet, "/status", nil)
 	w := httptest.NewRecorder()
 
@@ -208,11 +211,30 @@ func TestHandleStatus_PersistentMode(t *testing.T) {
 	}
 }
 
+func TestHandleStatus_WithOwner(t *testing.T) {
+	process := claude.NewProcess(claude.DefaultOptions())
+
+	handler := handleStatus(process, ModeSingleShot, "owner@example.com")
+	req := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req)
+
+	var status statusResponse
+	if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if status.Owner != "owner@example.com" {
+		t.Errorf("expected owner %q, got %q", "owner@example.com", status.Owner)
+	}
+}
+
 func TestRegisterOperationalRoutes(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeSingleShot)
+	registerOperationalRoutes(mux, process, ModeSingleShot, "")
 
 	paths := []string{"/healthz", "/readyz", "/status", "/", "/metrics"}
 	for _, path := range paths {
@@ -231,7 +253,7 @@ func TestHandleMetrics(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeSingleShot)
+	registerOperationalRoutes(mux, process, ModeSingleShot, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -254,7 +276,7 @@ func TestRegisterOperationalRoutes_UnknownPath(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeSingleShot)
+	registerOperationalRoutes(mux, process, ModeSingleShot, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()
