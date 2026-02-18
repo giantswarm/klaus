@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OCI Artifacts documentation** (`docs/explanation/oci-artifacts.md`): Explains the OCI artifact format for plugins, personalities, and toolchains, the shared `klaus-oci` types library, and how each component (klausctl, Helm chart, klaus-operator) produces and consumes artifacts.
+
 ### Changed
 
 - **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.

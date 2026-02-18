@@ -76,5 +76,6 @@ claude:
 
 ## See also
 
+- [OCI Artifacts explanation](../explanation/oci-artifacts.md) -- format, shared types, and ecosystem roles
 - [Extension System explanation](../explanation/extension-system.md)
 - [Claude Code Plugins docs](https://code.claude.com/docs/en/plugins)

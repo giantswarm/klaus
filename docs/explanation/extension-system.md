@@ -57,7 +57,7 @@ Klaus itself does not interpret extension content. It passes configuration throu
 [Plugins](https://code.claude.com/docs/en/plugins) are the composition unit that bundles skills, agents, hooks, and MCP servers into a single distributable package.
 
 - **Mechanism:** Directories loaded via `--plugin-dir` / `CLAUDE_PLUGIN_DIRS`
-- **Delivery:** OCI image volumes on Kubernetes (KEP-4639), ORAS client for local mode
+- **Delivery:** OCI image volumes on Kubernetes (KEP-4639), ORAS client for local mode. See [OCI Artifacts](oci-artifacts.md) for format details.
 - **Helm:** `claude.plugins` for OCI references, `claude.pluginDirs` for additional directories
 
 ### Memory

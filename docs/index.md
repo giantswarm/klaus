@@ -38,4 +38,5 @@ Background and design context.
 
 - [Architecture](explanation/architecture.md) -- How klaus works under the hood
 - [Extension System](explanation/extension-system.md) -- Skills, agents, hooks, plugins, and MCP servers
+- [OCI Artifacts](explanation/oci-artifacts.md) -- Plugin, personality, and toolchain packaging and delivery
 - [Execution Modes](explanation/execution-modes.md) -- Single-shot, persistent, and deployment modes
