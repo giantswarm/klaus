@@ -69,3 +69,4 @@ All three modes produce the same inputs for the klaus binary: environment variab
 
 - [Execution Modes](execution-modes.md) for details on single-shot vs persistent mode
 - [Extension System](extension-system.md) for how skills, agents, hooks, and plugins are loaded
+- [OCI Artifacts](oci-artifacts.md) for the OCI artifact format and delivery across klausctl, Helm, and operator

@@ -60,7 +60,7 @@ oras push gsoci.azurecr.io/giantswarm/klaus-plugins/my-plugin:v1.0.0 \
 |------|-------------------|
 | **Helm chart** | Kubernetes OCI image volumes (KEP-4639) |
 | **Operator** | Operator renders image volumes on managed pods |
-| **Local (klausctl)** | ORAS client pulls to `~/.klaus/plugins/` |
+| **Local (klausctl)** | ORAS client pulls to `~/.config/klausctl/plugins/` |
 
 Klaus itself is delivery-agnostic -- it reads plugin directories from `CLAUDE_PLUGIN_DIRS` regardless of how they were populated.
 
@@ -76,5 +76,6 @@ claude:
 
 ## See also
 
+- [OCI Artifacts explanation](../explanation/oci-artifacts.md) -- format, shared types, and ecosystem roles
 - [Extension System explanation](../explanation/extension-system.md)
 - [Claude Code Plugins docs](https://code.claude.com/docs/en/plugins)

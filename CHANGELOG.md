@@ -7,16 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
-  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
-  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
-  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
-  - CI validates both images build successfully and checks Dockerfile sync on every PR.
-
 ### Added
 
+- **OCI Artifacts documentation** (`docs/explanation/oci-artifacts.md`): Explains the OCI artifact format for plugins, personalities, and toolchains, the shared `klaus-oci` types library, and how each component (klausctl, Helm chart, klaus-operator) produces and consumes artifacts.
 - **Owner-based access control** (`KLAUS_OWNER_SUBJECT`): Restricts the `/mcp` endpoint to the configured owner identity by matching the JWT `sub` or `email` claim from the bearer token. Works in all deployment modes: OAuth (Dex/Google), muster token forwarding, and local (no-op when unset). Operational endpoints (`/healthz`, `/readyz`, `/status`, `/metrics`) bypass owner validation. The owner is exposed in the `/status` endpoint response for observability. Helm chart supports `owner.subject` in values.
 - **Toolchain image support** (`toolchainImage`): Override the default Klaus container image with a composite toolchain image that includes both the language toolchain and the Klaus agent. Built by `klausctl toolchain build` or pre-built by CI/CD. When empty (default), the chart uses the standard Klaus image -- fully backward compatible.
 - **Workspace git clone support** (`workspace.gitRepo`, `workspace.gitRef`, `workspace.gitSecretName`, `workspace.gitImage`): Populate the workspace PVC with a git repository via an init container. On first run, the repo is cloned; on subsequent runs, the existing checkout is updated. Supports branch/tag/commit SHA selection, HTTPS token credential injection via Kubernetes Secrets (using `x-access-token` URL injection with shell parameter expansion and an EXIT trap for credential cleanup), and a configurable git image (pinned to `alpine/git:v2.52.0` by default). Includes shallow clone support (`workspace.gitDepth`), a configurable timeout (`workspace.gitTimeout`, default 300s) to prevent hung pod startup, and optional resource requests/limits for the init container (`workspace.gitResources`). The init container runs with `ReadOnlyRootFilesystem: true`, a dedicated writable `/tmp` emptyDir for git scratch space, `GIT_CONFIG_NOSYSTEM=1`, and drops all capabilities.
@@ -24,15 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP server secret injection** (`claude.mcpServerSecrets`): Inject Kubernetes Secret values as container env vars for `${VAR}` expansion in MCP server configuration, enabling secure credential management for MCP integrations.
 - **MCP tuning controls** (`claude.mcpTimeout`, `claude.maxMcpOutputTokens`): Set `MCP_TIMEOUT` and `MAX_MCP_OUTPUT_TOKENS` env vars consumed by the Claude Code subprocess for controlling MCP server connection timeout and output token limits.
 - Helm `fail` directive when both `claude.mcpConfig` (raw JSON) and `claude.mcpServers` (structured) are set, preventing ambiguous configuration.
-
-### Changed
-
-- **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
-- **`status` MCP tool now includes result on completion**: When a non-blocking run completes, the status transitions to `completed` with a `result` field containing the agent's final output text. The `completed` status distinguishes "task finished with results" from `idle` ("never ran / no results").
-- **Non-blocking drain goroutines now use a server-scoped context**: Previously, drain goroutines used `context.Background()` and could be orphaned during server shutdown. They now use a server-scoped context that is cancelled during graceful shutdown, ensuring clean goroutine cleanup.
-
-### Added
-
 - **Prometheus `/metrics` endpoint**: Server-side Prometheus metrics exposed via `promhttp.Handler` at `/metrics`, always available regardless of OTel configuration. Metrics include `klaus_prompts_total`, `klaus_prompt_duration_seconds`, `klaus_process_status`, `klaus_session_cost_usd_total`, `klaus_messages_total`, `klaus_tool_calls_total`, and `klaus_process_restarts_total`.
 - **OpenTelemetry pass-through configuration**: New `telemetry` section in Helm values for passing `OTEL_*` environment variables to the Claude Code subprocess, enabling its native telemetry for tokens, cost, sessions, and tool events. Gated behind `telemetry.enabled`.
 - **ServiceMonitor template**: Optional Prometheus Operator `ServiceMonitor` resource (`telemetry.serviceMonitor.enabled`) with configurable interval, timeout, and namespace selector for cross-namespace monitoring.
@@ -62,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced status endpoint with message count, tool call count, last message, last tool name, and operating mode for progress monitoring.
 - Helm chart values for all new Claude Code configuration options including `persistentMode`.
 - Comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
+
+### Changed
+
+- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
+  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
+  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
+  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
+  - CI validates both images build successfully and checks Dockerfile sync on every PR.
+- **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
+- **`status` MCP tool now includes result on completion**: When a non-blocking run completes, the status transitions to `completed` with a `result` field containing the agent's final output text. The `completed` status distinguishes "task finished with results" from `idle` ("never ran / no results").
+- **Non-blocking drain goroutines now use a server-scoped context**: Previously, drain goroutines used `context.Background()` and could be orphaned during server shutdown. They now use a server-scoped context that is cancelled during graceful shutdown, ensuring clean goroutine cleanup.
 
 ### Fixed
 
