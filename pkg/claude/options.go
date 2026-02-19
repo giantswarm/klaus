@@ -3,6 +3,8 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -127,6 +129,31 @@ func DefaultOptions() Options {
 	}
 }
 
+// mcpServerNames parses the MCP config file and returns sorted server names.
+// These are used to auto-generate --allowedTools patterns so that MCP tools
+// are not blocked by Claude's permission system.
+func (o Options) mcpServerNames() []string {
+	if o.MCPConfigPath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(o.MCPConfigPath)
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		McpServers map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(cfg.McpServers))
+	for name := range cfg.McpServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // ValidPermissionModes lists all valid permission mode values for Claude Code.
 var ValidPermissionModes = []string{
 	"default",
@@ -214,6 +241,10 @@ func (o Options) baseArgs() []string {
 
 	if len(o.AllowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(o.AllowedTools, ","))
+	}
+
+	for _, name := range o.mcpServerNames() {
+		args = append(args, "--allowedTools", fmt.Sprintf("mcp__%s__*", name))
 	}
 
 	if len(o.DisallowedTools) > 0 {
