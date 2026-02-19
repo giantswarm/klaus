@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Auto-allow MCP server tools**: When an MCP config file is provided, `--allowedTools mcp__<server>__*` patterns are now auto-generated for each server, preventing Claude's permission system from blocking MCP tool calls even with `--permission-mode bypassPermissions`.
-- **Container missing `SHELL` environment variable**: Set `ENV SHELL=/bin/sh` in the Dockerfile so the Claude CLI Bash tool can find a valid shell. Without this, prompts requiring shell execution fail with "No suitable shell found".
+- **Container missing bash for Claude CLI shell detection**: Claude CLI requires `bash` or `zsh` in the shell path (not just any POSIX shell). Alpine now installs `bash` via `apk add` and both variants set `ENV SHELL=/bin/bash`.
 - **Persistent mode stream-json input format updated for claude-code v2.1+**: The `stdinMessage` format now uses `{"type":"user","message":{"role":"user","content":"..."}}` instead of the deprecated `{"type":"user","text":"..."}` format, fixing immediate subprocess crashes on every prompt in persistent mode.
 - **Persistent mode subprocess lifetime is now decoupled from request contexts**: `PersistentProcess` reader/watchdog now use an internal lifecycle context so cancelling a single MCP request does not terminate persistent stream handling.
 - **`/readyz` now reflects Claude process health**: readiness returns `503` when the process is `starting`, `stopped`, or `error`, and `200` otherwise.
