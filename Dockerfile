@@ -29,7 +29,7 @@ ARG VARIANT
 
 # Install ca-certificates (required for TLS).
 RUN if [ "$VARIANT" = "alpine" ]; then \
-        apk add --no-cache ca-certificates; \
+        apk add --no-cache bash ca-certificates; \
     else \
         apt-get update && \
         apt-get install -y --no-install-recommends ca-certificates && \
@@ -59,7 +59,7 @@ USER klaus
 WORKDIR /workspace
 
 ENV PORT=8080
-ENV SHELL=/bin/sh
+ENV SHELL=/bin/bash
 EXPOSE 8080
 
 ENTRYPOINT ["klaus"]
