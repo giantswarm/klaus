@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -299,6 +300,92 @@ func TestArgs_AgentConfigBackwardCompatibility(t *testing.T) {
 	}
 	if strings.Contains(agentsJSON, `"model"`) {
 		t.Errorf("expected agents JSON to omit empty model, got %s", agentsJSON)
+	}
+}
+
+func TestBaseArgs_MCPAllowedToolsPatterns(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "mcp-config-*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	mcpConfig := `{"mcpServers":{"muster":{"command":"muster"},"github":{"command":"gh"}}}`
+	if _, err := tmpFile.WriteString(mcpConfig); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	opts := Options{MCPConfigPath: tmpFile.Name()}
+	args := opts.baseArgs()
+
+	assertContainsSequence(t, args, "--allowedTools", "mcp__github__*")
+	assertContainsSequence(t, args, "--allowedTools", "mcp__muster__*")
+}
+
+func TestBaseArgs_MCPAllowedToolsNoConfig(t *testing.T) {
+	opts := Options{}
+	args := opts.baseArgs()
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "mcp__") {
+			t.Errorf("expected no MCP tool patterns without MCPConfigPath, got %q", a)
+		}
+	}
+}
+
+func TestBaseArgs_MCPAllowedToolsMissingFile(t *testing.T) {
+	opts := Options{MCPConfigPath: "/nonexistent/mcp.json"}
+	args := opts.baseArgs()
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "mcp__") {
+			t.Errorf("expected no MCP tool patterns for missing file, got %q", a)
+		}
+	}
+}
+
+func TestBaseArgs_MCPAllowedToolsInvalidJSON(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "mcp-config-*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString("not valid json"); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	opts := Options{MCPConfigPath: tmpFile.Name()}
+	args := opts.baseArgs()
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "mcp__") {
+			t.Errorf("expected no MCP tool patterns for invalid JSON, got %q", a)
+		}
+	}
+}
+
+func TestBaseArgs_MCPAllowedToolsEmptyServers(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "mcp-config-*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(`{"mcpServers":{}}`); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	opts := Options{MCPConfigPath: tmpFile.Name()}
+	args := opts.baseArgs()
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "mcp__") {
+			t.Errorf("expected no MCP tool patterns for empty servers, got %q", a)
+		}
 	}
 }
 

@@ -63,6 +63,7 @@ USER klaus
 WORKDIR /workspace
 
 ENV PORT=8080
+ENV SHELL=/bin/sh
 EXPOSE 8080
 
 ENTRYPOINT ["klaus"]
