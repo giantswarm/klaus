@@ -18,7 +18,7 @@ data:
   {{- if .Values.claude.mcpConfig }}
   mcp-config.json: {{ .Values.claude.mcpConfig | quote }}
   {{- else if (include "klaus.hasMcpServers" .) }}
-  mcp-config.json: {{ dict "mcpServers" .Values.claude.mcpServers | toJson | quote }}
+  mcp-config.json: {{ include "klaus.mcpServersJSON" . | quote }}
   {{- end }}
   {{- if .Values.claude.jsonSchema }}
   json-schema: {{ .Values.claude.jsonSchema | quote }}
