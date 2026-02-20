@@ -27,7 +27,7 @@ docker-build-debian: ## Build Debian Docker image
 	@docker build -f Dockerfile.debian -t klaus:debian .
 
 generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (only VARIANT default differs)
-	@printf '# DO NOT EDIT. Generated from Dockerfile.\n# This file exists because the CircleCI architect orb does not support --build-arg.\n# Regenerate with: make generate-dockerfile-debian\n\n' > Dockerfile.debian
+	@printf '# DO NOT EDIT. Generated from Dockerfile.\n# This file exists so the CI job can build the Debian variant without --build-arg.\n# Regenerate with: make generate-dockerfile-debian\n\n' > Dockerfile.debian
 	@sed 's/^ARG VARIANT=alpine$$/ARG VARIANT=slim/' Dockerfile >> Dockerfile.debian
 
 ##@ Development
