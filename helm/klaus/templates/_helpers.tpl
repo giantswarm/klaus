@@ -108,6 +108,29 @@ Returns non-empty string when true.
 {{- end -}}
 
 {{/*
+Render mcpServers JSON with inferred "type" field. Claude Code requires an
+explicit "type" ("http" or "stdio") for each server entry. Without it, HTTP
+servers are misidentified as stdio, causing the subprocess to hang.
+Entries with a "url" field default to "http"; entries with a "command" field
+default to "stdio". Explicit "type" values are preserved.
+*/}}
+{{- define "klaus.mcpServersJSON" -}}
+{{- $enriched := dict -}}
+{{- range $name, $server := .Values.claude.mcpServers -}}
+  {{- $entry := deepCopy $server -}}
+  {{- if not (hasKey $entry "type") -}}
+    {{- if hasKey $entry "url" -}}
+      {{- $_ := set $entry "type" "http" -}}
+    {{- else if hasKey $entry "command" -}}
+      {{- $_ := set $entry "type" "stdio" -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $_ := set $enriched $name $entry -}}
+{{- end -}}
+{{- dict "mcpServers" $enriched | toJson -}}
+{{- end -}}
+
+{{/*
 Check if a config-scripts volume (mode 0755) is needed for hook scripts.
 Returns non-empty string when true.
 */}}
