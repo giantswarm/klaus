@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  architect: giantswarm/architect@6.13.0
+  architect: giantswarm/architect@6.14.0
 
 workflows:
   build:
@@ -17,6 +17,11 @@ workflows:
         context: architect
         name: push-to-registries
         platforms: "linux/amd64"
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
@@ -30,6 +35,11 @@ workflows:
         image: giantswarm/klaus-debian
         dockerfile: ./Dockerfile.debian
         platforms: "linux/amd64"
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:

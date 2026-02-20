@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Switch CI builds from `push-to-registries` to `push-to-registries-multiarch`
+  (`architect-orb@6.14.0`) for multi-architecture support and OCI annotations.
+- Add OCI manifest annotations (`io.giantswarm.klaus.type=toolchain`, `.name`,
+  `.version`) and Docker labels on both Alpine and Debian images.
+
 ### Added
 
 - **OCI Artifacts documentation** (`docs/explanation/oci-artifacts.md`): Explains the OCI artifact format for plugins, personalities, and toolchains, the shared `klaus-oci` types library, and how each component (klausctl, Helm chart, klaus-operator) produces and consumes artifacts.

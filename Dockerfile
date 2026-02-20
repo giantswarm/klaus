@@ -3,8 +3,8 @@
 # Declared before the first FROM so it is available to all FROM instructions.
 ARG VARIANT=alpine
 
-# Stage 1: Build the Go binary.
-FROM golang:1.26.0 AS builder
+# Stage 1: Build the Go binary (runs on the build host, cross-compiles for target).
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -14,8 +14,8 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG DATE=unknown
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags "-w -extldflags '-static' \
     -X 'main.version=${VERSION}' \
@@ -55,6 +55,8 @@ RUN mkdir -p /workspace && chown klaus:klaus /workspace
 # Copy the Go binary from the builder stage.
 COPY --from=builder /app/klaus /usr/local/bin/klaus
 
+LABEL io.giantswarm.klaus.type=toolchain \
+      io.giantswarm.klaus.name=klaus
 USER klaus
 WORKDIR /workspace
 
