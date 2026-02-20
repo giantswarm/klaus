@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  architect: giantswarm/architect@6.13.0
+  architect: giantswarm/architect@6.14.0
 
 workflows:
   build:
@@ -12,9 +12,14 @@ workflows:
           tags:
             only: /^v.*/
 
-    - architect/push-to-registries:
+    - architect/push-to-registries-multiarch:
         context: architect
         name: push-to-registries
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
@@ -24,11 +29,16 @@ workflows:
             ignore:
             - main
 
-    - architect/push-to-registries:
+    - architect/push-to-registries-multiarch:
         context: architect
         name: push-to-registries-debian
         image: giantswarm/klaus-debian
         dockerfile: ./Dockerfile.debian
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
