@@ -47,6 +47,42 @@ workflows:
             ignore:
             - main
 
+    # Branch builds: publish to klaus-toolchains namespace
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains
+        image: giantswarm/klaus-toolchains/base
+        platforms: "linux/amd64"
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            ignore:
+            - main
+
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains-debian
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platforms: "linux/amd64"
+        resource_class: medium
+        annotations: |
+          manifest:io.giantswarm.klaus.type=toolchain
+          manifest:io.giantswarm.klaus.name=klaus
+          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            ignore:
+            - main
+
     # Tag builds: full multi-arch (amd64 + arm64)
     - architect/push-to-registries-multiarch:
         context: architect
@@ -63,6 +99,32 @@ workflows:
         context: architect
         name: push-to-registries-debian-release
         image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        requires:
+        - go-build-klaus
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # Tag builds: publish to klaus-toolchains namespace
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains-release
+        image: giantswarm/klaus-toolchains/base
+        requires:
+        - go-build-klaus
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains-debian-release
+        image: giantswarm/klaus-toolchains/base-debian
         dockerfile: ./Dockerfile.debian
         requires:
         - go-build-klaus
@@ -114,6 +176,8 @@ workflows:
         - execute chart tests
         - push-to-registries
         - push-to-registries-debian
+        - push-to-toolchains
+        - push-to-toolchains-debian
         filters:
           branches:
             ignore:
@@ -131,6 +195,8 @@ workflows:
         - execute chart tests
         - push-to-registries-release
         - push-to-registries-debian-release
+        - push-to-toolchains-release
+        - push-to-toolchains-debian-release
         filters:
           tags:
             only: /^v.*/
