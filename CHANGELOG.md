@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Switch CI builds from `push-to-registries` to `push-to-registries-multiarch`
-  (`architect-orb@6.14.0`) for multi-architecture support and OCI annotations.
-- Add OCI manifest annotations (`io.giantswarm.klaus.type=toolchain`, `.name`,
-  `.version`) and Docker labels on both Alpine and Debian images.
+  (`architect-orb@6.14.0`) for multi-architecture support.
+- Remove OCI manifest annotations from CI builds (no longer needed).
+- Add Docker labels on both Alpine and Debian images.
 
 ### Added
 

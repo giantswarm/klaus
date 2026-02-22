@@ -18,10 +18,6 @@ workflows:
         name: push-to-registries
         platforms: "linux/amd64"
         resource_class: medium
-        annotations: |
-          manifest:io.giantswarm.klaus.type=toolchain
-          manifest:io.giantswarm.klaus.name=klaus
-          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
@@ -36,10 +32,6 @@ workflows:
         dockerfile: ./Dockerfile.debian
         platforms: "linux/amd64"
         resource_class: medium
-        annotations: |
-          manifest:io.giantswarm.klaus.type=toolchain
-          manifest:io.giantswarm.klaus.name=klaus
-          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
@@ -54,10 +46,6 @@ workflows:
         image: giantswarm/klaus-toolchains/base
         platforms: "linux/amd64"
         resource_class: medium
-        annotations: |
-          manifest:io.giantswarm.klaus.type=toolchain
-          manifest:io.giantswarm.klaus.name=klaus
-          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
@@ -72,10 +60,6 @@ workflows:
         dockerfile: ./Dockerfile.debian
         platforms: "linux/amd64"
         resource_class: medium
-        annotations: |
-          manifest:io.giantswarm.klaus.type=toolchain
-          manifest:io.giantswarm.klaus.name=klaus
-          manifest:io.giantswarm.klaus.version=${DOCKER_IMAGE_TAG}
         requires:
         - go-build-klaus
         filters:
