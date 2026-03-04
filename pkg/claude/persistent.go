@@ -32,6 +32,7 @@ type PersistentProcess struct {
 	totalCost     float64
 	messageCount  int
 	toolCallCount int
+	toolCalls     map[string]int
 	lastMessage   string
 	lastToolName  string
 
@@ -273,6 +274,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			if msg.Subtype == SubtypeToolUse {
 				p.toolCallCount++
 				p.lastToolName = msg.ToolName
+				p.toolCalls[msg.ToolName]++
 			}
 		}
 		// Compute the cost delta before overwriting the running total so we
@@ -383,6 +385,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.lastError = ""
 	p.messageCount = 0
 	p.toolCallCount = 0
+	p.toolCalls = make(map[string]int)
 	p.lastMessage = ""
 	p.lastToolName = ""
 
@@ -526,6 +529,7 @@ func (p *PersistentProcess) Status() StatusInfo {
 		TotalCost:     p.totalCost,
 		MessageCount:  p.messageCount,
 		ToolCallCount: p.toolCallCount,
+		ToolCalls:     copyToolCalls(p.toolCalls),
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
 	}
@@ -547,6 +551,7 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 		ResultText:   p.result.text,
 		Messages:     p.result.messages,
 		MessageCount: len(p.result.messages),
+		ToolCalls:    copyToolCalls(p.toolCalls),
 		TotalCost:    p.totalCost,
 		SessionID:    p.sessionID,
 		Status:       p.status,

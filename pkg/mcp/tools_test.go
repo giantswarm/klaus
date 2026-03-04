@@ -437,6 +437,7 @@ func TestStatusTool(t *testing.T) {
 			SessionID:     "sess-xyz",
 			MessageCount:  5,
 			ToolCallCount: 2,
+			ToolCalls:     map[string]int{"Bash": 1, "Read": 1},
 			LastMessage:   "Working on it...",
 			LastToolName:  "Bash",
 		},
@@ -470,6 +471,12 @@ func TestStatusTool(t *testing.T) {
 	}
 	if info.ToolCallCount != 2 {
 		t.Errorf("expected tool_call_count 2, got %d", info.ToolCallCount)
+	}
+	if info.ToolCalls["Bash"] != 1 {
+		t.Errorf("expected tool_calls[Bash]=1, got %d", info.ToolCalls["Bash"])
+	}
+	if info.ToolCalls["Read"] != 1 {
+		t.Errorf("expected tool_calls[Read]=1, got %d", info.ToolCalls["Read"])
 	}
 }
 
@@ -511,6 +518,7 @@ func TestResultTool(t *testing.T) {
 		resultDetail: claudepkg.ResultDetailInfo{
 			ResultText:   "Full result text here",
 			MessageCount: 5,
+			ToolCalls:    map[string]int{"Bash": 3, "Read": 2},
 			TotalCost:    0.15,
 			SessionID:    "sess-123",
 			Status:       claudepkg.ProcessStatusIdle,
@@ -539,6 +547,12 @@ func TestResultTool(t *testing.T) {
 	}
 	if detail.MessageCount != 5 {
 		t.Errorf("expected message_count 5, got %d", detail.MessageCount)
+	}
+	if detail.ToolCalls["Bash"] != 3 {
+		t.Errorf("expected tool_calls[Bash]=3, got %d", detail.ToolCalls["Bash"])
+	}
+	if detail.ToolCalls["Read"] != 2 {
+		t.Errorf("expected tool_calls[Read]=2, got %d", detail.ToolCalls["Read"])
 	}
 	if detail.TotalCost != 0.15 {
 		t.Errorf("expected total_cost_usd 0.15, got %f", detail.TotalCost)

@@ -82,6 +82,7 @@ type Process struct {
 	totalCost     float64
 	messageCount  int
 	toolCallCount int
+	toolCalls     map[string]int
 	lastMessage   string
 	lastToolName  string
 
@@ -155,6 +156,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.lastError = ""
 	p.messageCount = 0
 	p.toolCallCount = 0
+	p.toolCalls = make(map[string]int)
 	p.lastMessage = ""
 	p.lastToolName = ""
 
@@ -274,6 +276,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 				if msg.Subtype == SubtypeToolUse {
 					p.toolCallCount++
 					p.lastToolName = msg.ToolName
+					p.toolCalls[msg.ToolName]++
 				}
 			}
 			if msg.Type == MessageTypeResult {
@@ -405,6 +408,7 @@ func (p *Process) Status() StatusInfo {
 		TotalCost:     p.totalCost,
 		MessageCount:  p.messageCount,
 		ToolCallCount: p.toolCallCount,
+		ToolCalls:     copyToolCalls(p.toolCalls),
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
 	}
@@ -426,6 +430,7 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 		ResultText:   p.result.text,
 		Messages:     p.result.messages,
 		MessageCount: len(p.result.messages),
+		ToolCalls:    copyToolCalls(p.toolCalls),
 		TotalCost:    p.totalCost,
 		SessionID:    p.sessionID,
 		Status:       p.status,
