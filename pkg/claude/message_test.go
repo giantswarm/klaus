@@ -223,6 +223,33 @@ func TestSubmitDrain(t *testing.T) {
 	})
 }
 
+func TestCopyToolCalls(t *testing.T) {
+	t.Run("nil returns nil", func(t *testing.T) {
+		if got := copyToolCalls(nil); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("empty map returns empty non-nil map", func(t *testing.T) {
+		cp := copyToolCalls(map[string]int{})
+		if cp == nil {
+			t.Error("expected non-nil copy of empty map")
+		}
+		if len(cp) != 0 {
+			t.Errorf("expected empty map, got %v", cp)
+		}
+	})
+
+	t.Run("returns independent copy", func(t *testing.T) {
+		original := map[string]int{"Bash": 3, "Read": 1}
+		cp := copyToolCalls(original)
+		cp["Bash"] = 999
+		if original["Bash"] != 3 {
+			t.Errorf("expected original unchanged, got Bash=%d", original["Bash"])
+		}
+	})
+}
+
 func TestSubmitAsync(t *testing.T) {
 	t.Run("preserves previous result on run failure", func(t *testing.T) {
 		// Simulate a previous result that should be preserved when the

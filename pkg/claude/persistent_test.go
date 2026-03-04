@@ -24,6 +24,9 @@ func TestNewPersistentProcess_InitialState(t *testing.T) {
 	if status.ToolCallCount != 0 {
 		t.Errorf("expected 0 tool call count, got %d", status.ToolCallCount)
 	}
+	if status.ToolCalls != nil {
+		t.Errorf("expected nil tool calls, got %v", status.ToolCalls)
+	}
 	if status.LastMessage != "" {
 		t.Errorf("expected empty last message, got %q", status.LastMessage)
 	}
@@ -59,6 +62,68 @@ func TestPersistentProcess_MarshalStatus(t *testing.T) {
 
 	if info.Status != ProcessStatusIdle {
 		t.Errorf("expected status %q, got %q", ProcessStatusIdle, info.Status)
+	}
+}
+
+func TestPersistentProcess_StatusToolCalls(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.toolCallCount = 4
+	process.toolCalls = map[string]int{
+		"Bash": 2,
+		"Read": 1,
+		"Glob": 1,
+	}
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.ToolCallCount != 4 {
+		t.Errorf("expected tool_call_count 4, got %d", status.ToolCallCount)
+	}
+	if len(status.ToolCalls) != 3 {
+		t.Fatalf("expected 3 tool entries, got %d", len(status.ToolCalls))
+	}
+	if status.ToolCalls["Bash"] != 2 {
+		t.Errorf("expected Bash count 2, got %d", status.ToolCalls["Bash"])
+	}
+	if status.ToolCalls["Read"] != 1 {
+		t.Errorf("expected Read count 1, got %d", status.ToolCalls["Read"])
+	}
+	if status.ToolCalls["Glob"] != 1 {
+		t.Errorf("expected Glob count 1, got %d", status.ToolCalls["Glob"])
+	}
+
+	// Verify the returned map is a copy.
+	status.ToolCalls["Bash"] = 999
+	status2 := process.Status()
+	if status2.ToolCalls["Bash"] != 2 {
+		t.Errorf("expected internal map to be unchanged, got Bash=%d", status2.ToolCalls["Bash"])
+	}
+}
+
+func TestPersistentProcess_ResultDetailToolCalls(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusCompleted
+	process.result = resultState{text: "done", completed: true}
+	process.toolCalls = map[string]int{
+		"Bash": 5,
+		"Task": 1,
+	}
+	process.mu.Unlock()
+
+	detail := process.ResultDetail()
+	if len(detail.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool entries, got %d", len(detail.ToolCalls))
+	}
+	if detail.ToolCalls["Bash"] != 5 {
+		t.Errorf("expected Bash count 5, got %d", detail.ToolCalls["Bash"])
+	}
+	if detail.ToolCalls["Task"] != 1 {
+		t.Errorf("expected Task count 1, got %d", detail.ToolCalls["Task"])
 	}
 }
 

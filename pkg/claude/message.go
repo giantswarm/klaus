@@ -92,14 +92,15 @@ var AllProcessStatuses = []ProcessStatus{
 const maxStatusResultLen = 4000
 
 type StatusInfo struct {
-	Status        ProcessStatus `json:"status"`
-	SessionID     string        `json:"session_id,omitempty"`
-	ErrorMessage  string        `json:"error,omitempty"`
-	TotalCost     float64       `json:"total_cost_usd,omitempty"`
-	MessageCount  int           `json:"message_count,omitempty"`
-	ToolCallCount int           `json:"tool_call_count,omitempty"`
-	LastMessage   string        `json:"last_message,omitempty"`
-	LastToolName  string        `json:"last_tool_name,omitempty"`
+	Status        ProcessStatus  `json:"status"`
+	SessionID     string         `json:"session_id,omitempty"`
+	ErrorMessage  string         `json:"error,omitempty"`
+	TotalCost     float64        `json:"total_cost_usd,omitempty"`
+	MessageCount  int            `json:"message_count,omitempty"`
+	ToolCallCount int            `json:"tool_call_count,omitempty"`
+	ToolCalls     map[string]int `json:"tool_calls,omitempty"`
+	LastMessage   string         `json:"last_message,omitempty"`
+	LastToolName  string         `json:"last_tool_name,omitempty"`
 	// Result contains the agent's final output text from the last completed
 	// non-blocking Submit run, truncated to maxStatusResultLen runes. It is
 	// populated when the status is "completed". Use the result debug tool
@@ -119,10 +120,24 @@ type ResultDetailInfo struct {
 	ResultText   string          `json:"result_text"`
 	Messages     []StreamMessage `json:"messages,omitempty"`
 	MessageCount int             `json:"message_count"`
+	ToolCalls    map[string]int  `json:"tool_calls,omitempty"`
 	TotalCost    float64         `json:"total_cost_usd,omitempty"`
 	SessionID    string          `json:"session_id,omitempty"`
 	Status       ProcessStatus   `json:"status"`
 	ErrorMessage string          `json:"error,omitempty"`
+}
+
+// copyToolCalls returns a shallow copy of the map to avoid exposing internal
+// state to callers. Returns nil for nil input.
+func copyToolCalls(m map[string]int) map[string]int {
+	if m == nil {
+		return nil
+	}
+	cp := make(map[string]int, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
 }
 
 // resultState holds the output of the last completed Submit run.

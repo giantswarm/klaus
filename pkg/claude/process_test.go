@@ -24,6 +24,9 @@ func TestNewProcess_InitialState(t *testing.T) {
 	if status.ToolCallCount != 0 {
 		t.Errorf("expected 0 tool call count, got %d", status.ToolCallCount)
 	}
+	if status.ToolCalls != nil {
+		t.Errorf("expected nil tool calls, got %v", status.ToolCalls)
+	}
 	if status.LastMessage != "" {
 		t.Errorf("expected empty last message, got %q", status.LastMessage)
 	}
@@ -154,6 +157,113 @@ func TestProcess_StatusTruncatesLongResult(t *testing.T) {
 	detail := process.ResultDetail()
 	if detail.ResultText != string(long) {
 		t.Error("expected ResultDetail to return full untruncated text")
+	}
+}
+
+func TestProcess_StatusToolCalls(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	// Simulate tool calls being recorded during a run.
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.toolCallCount = 5
+	process.toolCalls = map[string]int{
+		"Bash": 3,
+		"Read": 2,
+	}
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.ToolCallCount != 5 {
+		t.Errorf("expected tool_call_count 5, got %d", status.ToolCallCount)
+	}
+	if len(status.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool entries, got %d", len(status.ToolCalls))
+	}
+	if status.ToolCalls["Bash"] != 3 {
+		t.Errorf("expected Bash count 3, got %d", status.ToolCalls["Bash"])
+	}
+	if status.ToolCalls["Read"] != 2 {
+		t.Errorf("expected Read count 2, got %d", status.ToolCalls["Read"])
+	}
+
+	// Verify the returned map is a copy (not a reference to internal state).
+	status.ToolCalls["Bash"] = 999
+	status2 := process.Status()
+	if status2.ToolCalls["Bash"] != 3 {
+		t.Errorf("expected internal map to be unchanged, got Bash=%d", status2.ToolCalls["Bash"])
+	}
+}
+
+func TestProcess_ResultDetailToolCalls(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusCompleted
+	process.result = resultState{text: "done", completed: true}
+	process.toolCalls = map[string]int{
+		"Glob":      2,
+		"TodoWrite": 1,
+	}
+	process.mu.Unlock()
+
+	detail := process.ResultDetail()
+	if len(detail.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool entries, got %d", len(detail.ToolCalls))
+	}
+	if detail.ToolCalls["Glob"] != 2 {
+		t.Errorf("expected Glob count 2, got %d", detail.ToolCalls["Glob"])
+	}
+	if detail.ToolCalls["TodoWrite"] != 1 {
+		t.Errorf("expected TodoWrite count 1, got %d", detail.ToolCalls["TodoWrite"])
+	}
+}
+
+func TestProcess_ToolCallsInJSON(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.toolCallCount = 3
+	process.toolCalls = map[string]int{
+		"Bash": 2,
+		"Read": 1,
+	}
+	process.mu.Unlock()
+
+	data, err := process.MarshalStatus()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var info StatusInfo
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatalf("failed to unmarshal status: %v", err)
+	}
+
+	if info.ToolCalls["Bash"] != 2 {
+		t.Errorf("expected Bash=2 in JSON, got %d", info.ToolCalls["Bash"])
+	}
+	if info.ToolCalls["Read"] != 1 {
+		t.Errorf("expected Read=1 in JSON, got %d", info.ToolCalls["Read"])
+	}
+}
+
+func TestProcess_ToolCallsOmittedWhenNil(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	data, err := process.MarshalStatus()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// tool_calls should be omitted from JSON when nil.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if _, exists := raw["tool_calls"]; exists {
+		t.Error("expected tool_calls to be omitted from JSON when nil")
 	}
 }
 
