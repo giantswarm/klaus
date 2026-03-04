@@ -88,7 +88,8 @@ jobs:
           RELEASE_VERSION: ${{ steps.version.outputs.next_version }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::DOWNSTREAM_DISPATCH_TOKEN is not set, skipping downstream notification"
+            echo "::warning::DOWNSTREAM_DISPATCH_TOKEN not set" \
+              "- skipping downstream notification"
             exit 0
           fi
 
@@ -98,7 +99,7 @@ jobs:
           )
           FAILED=0
           for repo in "${DOWNSTREAM_REPOS[@]}"; do
-            echo "Sending repository_dispatch to $repo (version: $RELEASE_VERSION)"
+            echo "Dispatching to $repo ($RELEASE_VERSION)"
             if gh api \
               --method POST \
               "/repos/${repo}/dispatches" \
