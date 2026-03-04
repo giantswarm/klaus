@@ -80,3 +80,34 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify downstream repos
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.next_version }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::DOWNSTREAM_DISPATCH_TOKEN is not set, skipping downstream notification"
+            exit 0
+          fi
+
+          DOWNSTREAM_REPOS=(
+            "giantswarm/klaus-toolchains"
+            "giantswarm/klaus-toolchains-internal"
+          )
+          FAILED=0
+          for repo in "${DOWNSTREAM_REPOS[@]}"; do
+            echo "Sending repository_dispatch to $repo (version: $RELEASE_VERSION)"
+            if gh api \
+              --method POST \
+              "/repos/${repo}/dispatches" \
+              -f "event_type=klaus-release" \
+              -f "client_payload[version]=${RELEASE_VERSION}"; then
+              echo "  -> Notified $repo"
+            else
+              echo "::warning::Failed to notify $repo" >&2
+              FAILED=1
+            fi
+          done
+          exit $FAILED
