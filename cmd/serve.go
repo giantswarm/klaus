@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,18 @@ import (
 
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/server"
+)
+
+const (
+	// defaultSOULPath is the well-known location where klausctl mounts the
+	// personality SOUL.md file (read-only). If present, its content is appended
+	// to the system prompt so that personality identity definitions take effect.
+	defaultSOULPath = "/etc/klaus/SOUL.md"
+
+	// maxSOULFileSize is the maximum allowed size for a SOUL.md file (64 KiB).
+	// Personality files are short markdown documents; anything larger is likely
+	// a misconfiguration and could cause issues with CLI argument limits.
+	maxSOULFileSize = 64 * 1024
 )
 
 // newServeCmd creates the Cobra command for starting the klaus server.
@@ -304,6 +317,19 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		opts.NoSessionPersistence = parseBool(v)
 	}
 
+	// Load personality SOUL.md if mounted by klausctl.
+	// Content is appended after any CLAUDE_APPEND_SYSTEM_PROMPT value,
+	// separated by a blank line, so both the env var and file contribute.
+	if soul, err := loadSOULFile(defaultSOULPath); err != nil {
+		log.Printf("WARNING: failed to load personality from %s: %v", defaultSOULPath, err)
+	} else if soul != "" {
+		if opts.AppendSystemPrompt != "" {
+			opts.AppendSystemPrompt += "\n\n"
+		}
+		opts.AppendSystemPrompt += soul
+		log.Printf("Loaded personality from %s (%d bytes)", defaultSOULPath, len(soul))
+	}
+
 	// Validate configuration.
 	if err := claude.ValidatePermissionMode(opts.PermissionMode); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
@@ -455,4 +481,29 @@ func parseBool(s string) bool {
 	default:
 		return false
 	}
+}
+
+// loadSOULFile reads a SOUL.md personality file and returns its content
+// with leading/trailing whitespace trimmed. Returns an empty string and
+// nil error when the file does not exist. Returns an error if the file
+// exceeds maxSOULFileSize.
+func loadSOULFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer f.Close()
+
+	limited := io.LimitReader(f, maxSOULFileSize+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > maxSOULFileSize {
+		return "", fmt.Errorf("SOUL.md exceeds maximum size of %d bytes", maxSOULFileSize)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
