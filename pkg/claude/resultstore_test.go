@@ -15,7 +15,7 @@ func TestResultStore_SaveAndLoad(t *testing.T) {
 		ResultText:   "Task completed successfully",
 		MessageCount: 5,
 		ToolCalls:    map[string]int{"Bash": 3, "Read": 2},
-		TotalCost:    0.15,
+		TotalCost:    Float64Ptr(0.15),
 		SessionID:    "sess-123",
 		Status:       ProcessStatusCompleted,
 		StopReason:   StopReasonCompleted,
@@ -40,8 +40,8 @@ func TestResultStore_SaveAndLoad(t *testing.T) {
 	if loaded.MessageCount != pr.MessageCount {
 		t.Errorf("expected MessageCount %d, got %d", pr.MessageCount, loaded.MessageCount)
 	}
-	if loaded.TotalCost != pr.TotalCost {
-		t.Errorf("expected TotalCost %f, got %f", pr.TotalCost, loaded.TotalCost)
+	if loaded.TotalCost == nil || *loaded.TotalCost != *pr.TotalCost {
+		t.Errorf("expected TotalCost %v, got %v", pr.TotalCost, loaded.TotalCost)
 	}
 	if loaded.SessionID != pr.SessionID {
 		t.Errorf("expected SessionID %q, got %q", pr.SessionID, loaded.SessionID)
@@ -150,7 +150,7 @@ func TestResultStore_SaveWithMessages(t *testing.T) {
 		Messages:     messages,
 		MessageCount: len(messages),
 		SessionID:    "sess-abc",
-		TotalCost:    0.10,
+		TotalCost:    Float64Ptr(0.10),
 		Status:       ProcessStatusCompleted,
 		StopReason:   StopReasonCompleted,
 		Timestamp:    time.Now(),
@@ -200,7 +200,7 @@ func TestPersistedResult_ToResultDetailInfo(t *testing.T) {
 		ResultText:   "Full result",
 		MessageCount: 3,
 		ToolCalls:    map[string]int{"Bash": 2},
-		TotalCost:    0.25,
+		TotalCost:    Float64Ptr(0.25),
 		SessionID:    "sess-456",
 		Status:       ProcessStatusCompleted,
 		ErrorMessage: "",
@@ -217,8 +217,8 @@ func TestPersistedResult_ToResultDetailInfo(t *testing.T) {
 	if detail.SessionID != "sess-456" {
 		t.Errorf("expected SessionID %q, got %q", "sess-456", detail.SessionID)
 	}
-	if detail.TotalCost != 0.25 {
-		t.Errorf("expected TotalCost 0.25, got %f", detail.TotalCost)
+	if detail.TotalCost == nil || *detail.TotalCost != 0.25 {
+		t.Errorf("expected TotalCost 0.25, got %v", detail.TotalCost)
 	}
 }
 
@@ -288,7 +288,7 @@ func TestCollectToolCalls_Empty(t *testing.T) {
 func TestPersistResult_NilStore(t *testing.T) {
 	// Should not panic with nil store.
 	rs := resultState{text: "result", completed: true}
-	persistResult(nil, rs, ProcessStatusCompleted, "sess", 0.1, "")
+	persistResult(nil, rs, ProcessStatusCompleted, "sess", Float64Ptr(0.1), "", nil)
 }
 
 func TestPersistResult_IncompleteResult(t *testing.T) {
@@ -297,7 +297,7 @@ func TestPersistResult_IncompleteResult(t *testing.T) {
 
 	// Incomplete result should not be persisted.
 	rs := resultState{text: "partial", completed: false}
-	persistResult(store, rs, ProcessStatusBusy, "sess", 0, "")
+	persistResult(store, rs, ProcessStatusBusy, "sess", nil, "", nil)
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -317,7 +317,7 @@ func TestPersistResult_CompletedResult(t *testing.T) {
 		messages:  []StreamMessage{{Type: MessageTypeResult, Result: "final result"}},
 		completed: true,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", 0.50, "")
+	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", Float64Ptr(0.50), "", nil)
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -332,8 +332,8 @@ func TestPersistResult_CompletedResult(t *testing.T) {
 	if loaded.SessionID != "sess-abc" {
 		t.Errorf("expected session_id %q, got %q", "sess-abc", loaded.SessionID)
 	}
-	if loaded.TotalCost != 0.50 {
-		t.Errorf("expected total_cost 0.50, got %f", loaded.TotalCost)
+	if loaded.TotalCost == nil || *loaded.TotalCost != 0.50 {
+		t.Errorf("expected total_cost 0.50, got %v", loaded.TotalCost)
 	}
 	if loaded.StopReason != StopReasonCompleted {
 		t.Errorf("expected stop_reason %q, got %q", StopReasonCompleted, loaded.StopReason)
@@ -350,7 +350,7 @@ func TestProcess_StatusFallbackToDisk(t *testing.T) {
 	pr := PersistedResult{
 		ResultText: "persisted result text",
 		SessionID:  "sess-persisted",
-		TotalCost:  1.23,
+		TotalCost:  Float64Ptr(1.23),
 		Status:     ProcessStatusCompleted,
 		StopReason: StopReasonCompleted,
 		Timestamp:  time.Now(),
@@ -371,8 +371,8 @@ func TestProcess_StatusFallbackToDisk(t *testing.T) {
 	if status.SessionID != "sess-persisted" {
 		t.Errorf("expected fallback session_id %q, got %q", "sess-persisted", status.SessionID)
 	}
-	if status.TotalCost != 1.23 {
-		t.Errorf("expected fallback total_cost 1.23, got %f", status.TotalCost)
+	if status.TotalCost == nil || *status.TotalCost != 1.23 {
+		t.Errorf("expected fallback total_cost 1.23, got %v", status.TotalCost)
 	}
 }
 
@@ -386,7 +386,7 @@ func TestProcess_ResultDetailFallbackToDisk(t *testing.T) {
 		ResultText:   "full persisted result",
 		MessageCount: 10,
 		SessionID:    "sess-detail",
-		TotalCost:    2.50,
+		TotalCost:    Float64Ptr(2.50),
 		Status:       ProcessStatusCompleted,
 		Timestamp:    time.Now(),
 	}
@@ -404,8 +404,8 @@ func TestProcess_ResultDetailFallbackToDisk(t *testing.T) {
 	if detail.SessionID != "sess-detail" {
 		t.Errorf("expected fallback session_id %q, got %q", "sess-detail", detail.SessionID)
 	}
-	if detail.TotalCost != 2.50 {
-		t.Errorf("expected fallback total_cost 2.50, got %f", detail.TotalCost)
+	if detail.TotalCost == nil || *detail.TotalCost != 2.50 {
+		t.Errorf("expected fallback total_cost 2.50, got %v", detail.TotalCost)
 	}
 }
 
@@ -447,6 +447,101 @@ func TestProcess_InMemoryResultTakesPrecedence(t *testing.T) {
 	detail := p.ResultDetail()
 	if detail.ResultText != "fresh in-memory result" {
 		t.Errorf("expected in-memory result_text %q, got %q", "fresh in-memory result", detail.ResultText)
+	}
+}
+
+func TestPersistResult_WithTokenUsage(t *testing.T) {
+	dir := t.TempDir()
+	store := NewResultStore(dir)
+
+	rs := resultState{
+		text:      "result with tokens",
+		messages:  []StreamMessage{{Type: MessageTypeResult, Result: "result with tokens"}},
+		completed: true,
+	}
+	tu := &TokenUsage{
+		InputTokens:              10000,
+		OutputTokens:             2000,
+		CacheCreationInputTokens: 5000,
+		CacheReadInputTokens:     3000,
+	}
+	persistResult(store, rs, ProcessStatusCompleted, "sess-tu", Float64Ptr(0.42), "", tu)
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if loaded.TokenUsage == nil {
+		t.Fatal("expected non-nil TokenUsage")
+	}
+	if loaded.TokenUsage.InputTokens != 10000 {
+		t.Errorf("expected InputTokens 10000, got %d", loaded.TokenUsage.InputTokens)
+	}
+	if loaded.TokenUsage.OutputTokens != 2000 {
+		t.Errorf("expected OutputTokens 2000, got %d", loaded.TokenUsage.OutputTokens)
+	}
+	if loaded.TokenUsage.CacheCreationInputTokens != 5000 {
+		t.Errorf("expected CacheCreationInputTokens 5000, got %d", loaded.TokenUsage.CacheCreationInputTokens)
+	}
+	if loaded.TokenUsage.CacheReadInputTokens != 3000 {
+		t.Errorf("expected CacheReadInputTokens 3000, got %d", loaded.TokenUsage.CacheReadInputTokens)
+	}
+}
+
+func TestPersistResult_NilCost(t *testing.T) {
+	dir := t.TempDir()
+	store := NewResultStore(dir)
+
+	rs := resultState{
+		text:      "result without cost",
+		completed: true,
+	}
+	persistResult(store, rs, ProcessStatusCompleted, "sess", nil, "", nil)
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.TotalCost != nil {
+		t.Errorf("expected nil TotalCost when not observed, got %v", loaded.TotalCost)
+	}
+}
+
+func TestPersistedResult_ToResultDetailInfo_WithTokenUsage(t *testing.T) {
+	pr := PersistedResult{
+		ResultText:   "Full result",
+		MessageCount: 3,
+		TotalCost:    Float64Ptr(0.25),
+		TokenUsage: &TokenUsage{
+			InputTokens:  500,
+			OutputTokens: 100,
+		},
+		SessionID: "sess-456",
+		Status:    ProcessStatusCompleted,
+	}
+
+	detail := pr.ToResultDetailInfo()
+	if detail.TokenUsage == nil {
+		t.Fatal("expected non-nil TokenUsage in ResultDetailInfo")
+	}
+	if detail.TokenUsage.InputTokens != 500 {
+		t.Errorf("expected InputTokens 500, got %d", detail.TokenUsage.InputTokens)
+	}
+}
+
+func TestPersistedResult_ToResultDetailInfo_NilCost(t *testing.T) {
+	pr := PersistedResult{
+		ResultText: "Result",
+		TotalCost:  nil,
+		Status:     ProcessStatusCompleted,
+	}
+
+	detail := pr.ToResultDetailInfo()
+	if detail.TotalCost != nil {
+		t.Errorf("expected nil TotalCost, got %v", detail.TotalCost)
 	}
 }
 

@@ -30,9 +30,11 @@ type PersistentProcess struct {
 	sessionID     string
 	lastError     string
 	totalCost     float64
+	costSeen      bool
 	messageCount  int
 	toolCallCount int
 	toolCalls     map[string]int
+	tokenUsage    TokenUsage
 	lastMessage   string
 	lastToolName  string
 	subagents     *subagentTracker
@@ -289,12 +291,26 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		} else {
 			p.subagents.handleMessage(msg)
 		}
+		// Aggregate token usage from assistant messages.
+		if msg.Usage != nil {
+			p.tokenUsage.InputTokens += msg.Usage.InputTokens
+			p.tokenUsage.OutputTokens += msg.Usage.OutputTokens
+			p.tokenUsage.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+			p.tokenUsage.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+		}
 		// Compute the cost delta before overwriting the running total so we
 		// only add the incremental cost to the Prometheus counter.
+		// Also accumulate per-message cost_usd when total_cost_usd is
+		// missing to avoid reporting $0.00 (#62).
 		var costDelta float64
-		if msg.Type == MessageTypeResult {
+		if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
 			costDelta = msg.TotalCost - p.totalCost
 			p.totalCost = msg.TotalCost
+			p.costSeen = true
+		} else if msg.Cost > 0 {
+			costDelta = msg.Cost
+			p.totalCost += msg.Cost
+			p.costSeen = true
 		}
 
 		// Dispatch to the active response channel if one exists.
@@ -398,6 +414,9 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.messageCount = 0
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
+	p.tokenUsage = TokenUsage{}
+	p.totalCost = 0
+	p.costSeen = false
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
@@ -529,11 +548,21 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		status := p.status
 		sessionID := p.sessionID
 		totalCost := p.totalCost
+		costSeen := p.costSeen
 		lastError := p.lastError
+		tu := p.tokenUsage
 		store := p.resultStore
 		p.mu.Unlock()
 
-		persistResult(store, rs, status, sessionID, totalCost, lastError)
+		var costPtr *float64
+		if costSeen {
+			costPtr = Float64Ptr(totalCost)
+		}
+		var tuPtr *TokenUsage
+		if tu != (TokenUsage{}) {
+			tuPtr = &tu
+		}
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
 	})
 }
 
@@ -544,13 +573,21 @@ func (p *PersistentProcess) Status() StatusInfo {
 		Status:        p.status,
 		SessionID:     p.sessionID,
 		ErrorMessage:  p.lastError,
-		TotalCost:     p.totalCost,
 		MessageCount:  p.messageCount,
 		ToolCallCount: p.toolCallCount,
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
+	}
+
+	if p.costSeen {
+		info.TotalCost = Float64Ptr(p.totalCost)
+	}
+
+	tu := p.tokenUsage
+	if tu != (TokenUsage{}) {
+		info.TokenUsage = &tu
 	}
 
 	if p.status == ProcessStatusCompleted {
@@ -568,11 +605,15 @@ func (p *PersistentProcess) Status() StatusInfo {
 			if info.SessionID == "" {
 				info.SessionID = pr.SessionID
 			}
-			if info.TotalCost == 0 {
+			if info.TotalCost == nil && pr.TotalCost != nil {
 				info.TotalCost = pr.TotalCost
 			}
 			if info.ErrorMessage == "" {
 				info.ErrorMessage = pr.ErrorMessage
+			}
+			if info.TokenUsage == nil && pr.TokenUsage != nil {
+				tu := *pr.TokenUsage
+				info.TokenUsage = &tu
 			}
 		}
 	}
@@ -591,10 +632,16 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 		MessageCount:  len(p.result.messages),
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
-		TotalCost:     p.totalCost,
 		SessionID:     p.sessionID,
 		Status:        p.status,
 		ErrorMessage:  p.lastError,
+	}
+	if p.costSeen {
+		detail.TotalCost = Float64Ptr(p.totalCost)
+	}
+	tu := p.tokenUsage
+	if tu != (TokenUsage{}) {
+		detail.TokenUsage = &tu
 	}
 	store := p.resultStore
 	p.mu.RUnlock()

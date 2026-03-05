@@ -222,29 +222,45 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 
 		resultText := claudepkg.CollectResultText(messages)
 
-		// Build a structured response including cost info.
+		// Build a structured response including cost and token usage info.
 		response := struct {
-			Result       string  `json:"result"`
-			MessageCount int     `json:"message_count"`
-			TotalCost    float64 `json:"total_cost_usd,omitempty"`
-			SessionID    string  `json:"session_id,omitempty"`
+			Result       string                `json:"result"`
+			MessageCount int                   `json:"message_count"`
+			TotalCost    *float64              `json:"total_cost_usd"`
+			TokenUsage   *claudepkg.TokenUsage `json:"token_usage,omitempty"`
+			SessionID    string                `json:"session_id,omitempty"`
 		}{
 			Result:       resultText,
 			MessageCount: len(messages),
 		}
 
-		// Extract cost and session ID from messages.
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Type == claudepkg.MessageTypeResult {
-				response.TotalCost = messages[i].TotalCost
-				break
+		// Extract cost, token usage, and session ID from messages.
+		var totalCost float64
+		var costSeen bool
+		var tokenUsage claudepkg.TokenUsage
+		for _, msg := range messages {
+			if msg.Type == claudepkg.MessageTypeSystem && msg.SessionID != "" && response.SessionID == "" {
+				response.SessionID = msg.SessionID
+			}
+			if msg.Usage != nil {
+				tokenUsage.InputTokens += msg.Usage.InputTokens
+				tokenUsage.OutputTokens += msg.Usage.OutputTokens
+				tokenUsage.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+				tokenUsage.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+			}
+			if msg.Type == claudepkg.MessageTypeResult && msg.TotalCost > 0 {
+				totalCost = msg.TotalCost
+				costSeen = true
+			} else if msg.Cost > 0 {
+				totalCost += msg.Cost
+				costSeen = true
 			}
 		}
-		for _, msg := range messages {
-			if msg.Type == claudepkg.MessageTypeSystem && msg.SessionID != "" {
-				response.SessionID = msg.SessionID
-				break
-			}
+		if costSeen {
+			response.TotalCost = claudepkg.Float64Ptr(totalCost)
+		}
+		if tokenUsage != (claudepkg.TokenUsage{}) {
+			response.TokenUsage = &tokenUsage
 		}
 
 		metrics.PromptsTotal.WithLabelValues("completed", "blocking").Inc()
