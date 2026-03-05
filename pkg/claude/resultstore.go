@@ -31,29 +31,31 @@ const (
 // PersistedResult is the on-disk representation of a session result.
 // It extends ResultDetailInfo with metadata for post-mortem retrieval.
 type PersistedResult struct {
-	ResultText   string          `json:"result_text"`
-	Messages     []StreamMessage `json:"messages,omitempty"`
-	MessageCount int             `json:"message_count"`
-	ToolCalls    map[string]int  `json:"tool_calls,omitempty"`
-	TotalCost    float64         `json:"total_cost_usd,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	Status       ProcessStatus   `json:"status"`
-	ErrorMessage string          `json:"error,omitempty"`
-	StopReason   StopReason      `json:"stop_reason,omitempty"`
-	Timestamp    time.Time       `json:"timestamp"`
+	ResultText    string          `json:"result_text"`
+	Messages      []StreamMessage `json:"messages,omitempty"`
+	MessageCount  int             `json:"message_count"`
+	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
+	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
+	TotalCost     float64         `json:"total_cost_usd,omitempty"`
+	SessionID     string          `json:"session_id,omitempty"`
+	Status        ProcessStatus   `json:"status"`
+	ErrorMessage  string          `json:"error,omitempty"`
+	StopReason    StopReason      `json:"stop_reason,omitempty"`
+	Timestamp     time.Time       `json:"timestamp"`
 }
 
 // ToResultDetailInfo converts a PersistedResult back to a ResultDetailInfo.
 func (pr *PersistedResult) ToResultDetailInfo() ResultDetailInfo {
 	return ResultDetailInfo{
-		ResultText:   pr.ResultText,
-		Messages:     pr.Messages,
-		MessageCount: pr.MessageCount,
-		ToolCalls:    pr.ToolCalls,
-		TotalCost:    pr.TotalCost,
-		SessionID:    pr.SessionID,
-		Status:       pr.Status,
-		ErrorMessage: pr.ErrorMessage,
+		ResultText:    pr.ResultText,
+		Messages:      pr.Messages,
+		MessageCount:  pr.MessageCount,
+		ToolCalls:     pr.ToolCalls,
+		SubagentCalls: copySubagentCalls(pr.SubagentCalls),
+		TotalCost:     pr.TotalCost,
+		SessionID:     pr.SessionID,
+		Status:        pr.Status,
+		ErrorMessage:  pr.ErrorMessage,
 	}
 }
 
@@ -155,16 +157,17 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 	reason := stopReasonFromStatus(status)
 
 	pr := PersistedResult{
-		ResultText:   rs.text,
-		Messages:     rs.messages,
-		MessageCount: len(rs.messages),
-		ToolCalls:    collectToolCalls(rs.messages),
-		TotalCost:    totalCost,
-		SessionID:    sessionID,
-		Status:       status,
-		ErrorMessage: lastError,
-		StopReason:   reason,
-		Timestamp:    time.Now(),
+		ResultText:    rs.text,
+		Messages:      rs.messages,
+		MessageCount:  len(rs.messages),
+		ToolCalls:     collectToolCalls(rs.messages),
+		SubagentCalls: collectSubagentCalls(rs.messages),
+		TotalCost:     totalCost,
+		SessionID:     sessionID,
+		Status:        status,
+		ErrorMessage:  lastError,
+		StopReason:    reason,
+		Timestamp:     time.Now(),
 	}
 
 	if err := store.Save(pr); err != nil {
