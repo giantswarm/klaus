@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -102,6 +103,176 @@ func TestParseStreamMessage_RawPreserved(t *testing.T) {
 	data[0] = 'X'
 	if msg.Raw[0] == 'X' {
 		t.Error("Raw should be a copy, not a reference to the input")
+	}
+}
+
+func TestParseStreamMessage_Timestamp(t *testing.T) {
+	data := []byte(`{"type":"system","session_id":"abc-123"}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Timestamp == "" {
+		t.Fatal("expected Timestamp to be set")
+	}
+
+	// Verify it's valid RFC3339.
+	parsed, err := time.Parse(time.RFC3339, msg.Timestamp)
+	if err != nil {
+		t.Fatalf("expected valid RFC3339 timestamp, got %q: %v", msg.Timestamp, err)
+	}
+
+	// Timestamp should be recent (within last 5 seconds).
+	if time.Since(parsed) > 5*time.Second {
+		t.Errorf("expected recent timestamp, got %v", parsed)
+	}
+}
+
+func TestParseStreamMessage_UsageField(t *testing.T) {
+	data := []byte(`{
+		"type":"assistant",
+		"subtype":"text",
+		"text":"Hello",
+		"usage": {
+			"input_tokens": 150,
+			"output_tokens": 50,
+			"cache_creation_input_tokens": 1000,
+			"cache_read_input_tokens": 500
+		}
+	}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Usage == nil {
+		t.Fatal("expected Usage to be parsed")
+	}
+	if msg.Usage.InputTokens != 150 {
+		t.Errorf("expected InputTokens 150, got %d", msg.Usage.InputTokens)
+	}
+	if msg.Usage.OutputTokens != 50 {
+		t.Errorf("expected OutputTokens 50, got %d", msg.Usage.OutputTokens)
+	}
+	if msg.Usage.CacheCreationInputTokens != 1000 {
+		t.Errorf("expected CacheCreationInputTokens 1000, got %d", msg.Usage.CacheCreationInputTokens)
+	}
+	if msg.Usage.CacheReadInputTokens != 500 {
+		t.Errorf("expected CacheReadInputTokens 500, got %d", msg.Usage.CacheReadInputTokens)
+	}
+}
+
+func TestParseStreamMessage_NoUsage(t *testing.T) {
+	data := []byte(`{"type":"assistant","subtype":"text","text":"Hello"}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Usage != nil {
+		t.Errorf("expected nil Usage when not present, got %v", msg.Usage)
+	}
+}
+
+func TestParseStreamMessage_CostOnAssistant(t *testing.T) {
+	// Some Claude CLI versions include cost_usd on assistant messages.
+	data := []byte(`{"type":"assistant","subtype":"text","text":"Hello","cost_usd":0.003}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Cost != 0.003 {
+		t.Errorf("expected cost_usd 0.003, got %f", msg.Cost)
+	}
+}
+
+func TestFloat64Ptr(t *testing.T) {
+	p := Float64Ptr(1.23)
+	if p == nil {
+		t.Fatal("expected non-nil pointer")
+	}
+	if *p != 1.23 {
+		t.Errorf("expected 1.23, got %f", *p)
+	}
+}
+
+func TestStatusInfo_TotalCostNullWhenUnknown(t *testing.T) {
+	// When no cost has been observed, TotalCost should be nil (serializes as null).
+	info := StatusInfo{Status: ProcessStatusBusy}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	costVal := string(raw["total_cost_usd"])
+	if costVal != "null" {
+		t.Errorf("expected total_cost_usd to be null when not set, got %s", costVal)
+	}
+}
+
+func TestStatusInfo_TotalCostZeroWhenExplicit(t *testing.T) {
+	// When cost is known to be 0, TotalCost should serialize as 0, not null.
+	zero := 0.0
+	info := StatusInfo{Status: ProcessStatusCompleted, TotalCost: &zero}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	costVal := string(raw["total_cost_usd"])
+	if costVal != "0" {
+		t.Errorf("expected total_cost_usd to be 0, got %s", costVal)
+	}
+}
+
+func TestTokenUsage_OmittedWhenEmpty(t *testing.T) {
+	info := StatusInfo{Status: ProcessStatusIdle}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if _, exists := raw["token_usage"]; exists {
+		t.Error("expected token_usage to be omitted when nil")
+	}
+}
+
+func TestTokenUsage_PresentWhenPopulated(t *testing.T) {
+	info := StatusInfo{
+		Status: ProcessStatusBusy,
+		TokenUsage: &TokenUsage{
+			InputTokens:  100,
+			OutputTokens: 50,
+		},
+	}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if _, exists := raw["token_usage"]; !exists {
+		t.Error("expected token_usage to be present when populated")
 	}
 }
 

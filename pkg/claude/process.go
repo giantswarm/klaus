@@ -80,9 +80,11 @@ type Process struct {
 	sessionID     string
 	lastError     string
 	totalCost     float64
+	costSeen      bool // true once any cost data has been observed
 	messageCount  int
 	toolCallCount int
 	toolCalls     map[string]int
+	tokenUsage    TokenUsage
 	lastMessage   string
 	lastToolName  string
 	subagents     *subagentTracker
@@ -164,6 +166,9 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.messageCount = 0
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
+	p.tokenUsage = TokenUsage{}
+	p.totalCost = 0
+	p.costSeen = false
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
@@ -292,19 +297,40 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			} else {
 				p.subagents.handleMessage(msg)
 			}
-			if msg.Type == MessageTypeResult {
+			// Aggregate token usage from assistant messages.
+			if msg.Usage != nil {
+				p.tokenUsage.InputTokens += msg.Usage.InputTokens
+				p.tokenUsage.OutputTokens += msg.Usage.OutputTokens
+				p.tokenUsage.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+				p.tokenUsage.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+			}
+			// Track cost from result messages (total_cost_usd) and also
+			// accumulate per-message cost_usd from any message type to
+			// avoid reporting $0.00 when total_cost_usd is missing (#62).
+			// Note: StreamMessage.TotalCost remains float64 (not *float64)
+			// because it represents the raw wire protocol value from the
+			// Claude CLI; the > 0 guard is appropriate since the CLI does
+			// not emit total_cost_usd: 0.0 for zero-cost operations.
+			var costToRecord float64
+			if msg.Type == MessageTypeResult && msg.TotalCost > 0 {
 				p.totalCost = msg.TotalCost
+				p.costSeen = true
+				costToRecord = msg.TotalCost
+			} else if msg.Cost > 0 {
+				p.totalCost += msg.Cost
+				p.costSeen = true
+			}
+			// When the result message lacks total_cost_usd, use the
+			// accumulated per-message cost for Prometheus.
+			if msg.Type == MessageTypeResult && costToRecord == 0 {
+				costToRecord = p.totalCost
 			}
 			p.mu.Unlock()
 
-			// Record Prometheus metrics. In single-shot mode each process
-			// starts fresh so TotalCost equals the per-run cost and can
-			// be passed directly. If single-shot ever supports session
-			// resumption (where TotalCost becomes cumulative), this must
-			// be changed to compute a delta like persistent mode does.
+			// Record Prometheus metrics.
 			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
 			if msg.Type == MessageTypeResult {
-				metrics.RecordCost(msg.TotalCost)
+				metrics.RecordCost(costToRecord)
 			}
 
 			// Use select to prevent blocking if the consumer stops reading
@@ -409,11 +435,21 @@ func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) e
 		status := p.status
 		sessionID := p.sessionID
 		totalCost := p.totalCost
+		costSeen := p.costSeen
 		lastError := p.lastError
+		tu := p.tokenUsage
 		store := p.resultStore
 		p.mu.Unlock()
 
-		persistResult(store, rs, status, sessionID, totalCost, lastError)
+		var costPtr *float64
+		if costSeen {
+			costPtr = Float64Ptr(totalCost)
+		}
+		var tuPtr *TokenUsage
+		if tu != (TokenUsage{}) {
+			tuPtr = &tu
+		}
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
 	})
 }
 
@@ -423,13 +459,21 @@ func (p *Process) Status() StatusInfo {
 		Status:        p.status,
 		SessionID:     p.sessionID,
 		ErrorMessage:  p.lastError,
-		TotalCost:     p.totalCost,
 		MessageCount:  p.messageCount,
 		ToolCallCount: p.toolCallCount,
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
+	}
+
+	if p.costSeen {
+		info.TotalCost = Float64Ptr(p.totalCost)
+	}
+
+	tu := p.tokenUsage // copy value
+	if tu != (TokenUsage{}) {
+		info.TokenUsage = &tu
 	}
 
 	if p.status == ProcessStatusCompleted {
@@ -449,11 +493,15 @@ func (p *Process) Status() StatusInfo {
 			if info.SessionID == "" {
 				info.SessionID = pr.SessionID
 			}
-			if info.TotalCost == 0 {
+			if info.TotalCost == nil && pr.TotalCost != nil {
 				info.TotalCost = pr.TotalCost
 			}
 			if info.ErrorMessage == "" {
 				info.ErrorMessage = pr.ErrorMessage
+			}
+			if info.TokenUsage == nil && pr.TokenUsage != nil {
+				tu := *pr.TokenUsage
+				info.TokenUsage = &tu
 			}
 		}
 	}
@@ -472,10 +520,16 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 		MessageCount:  len(p.result.messages),
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
-		TotalCost:     p.totalCost,
 		SessionID:     p.sessionID,
 		Status:        p.status,
 		ErrorMessage:  p.lastError,
+	}
+	if p.costSeen {
+		detail.TotalCost = Float64Ptr(p.totalCost)
+	}
+	tu := p.tokenUsage
+	if tu != (TokenUsage{}) {
+		detail.TokenUsage = &tu
 	}
 	store := p.resultStore
 	p.mu.RUnlock()

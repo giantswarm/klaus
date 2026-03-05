@@ -267,6 +267,106 @@ func TestProcess_ToolCallsOmittedWhenNil(t *testing.T) {
 	}
 }
 
+func TestProcess_TokenUsageAggregation(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	// Simulate token usage being aggregated during a run.
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.tokenUsage = TokenUsage{
+		InputTokens:              15000,
+		OutputTokens:             2500,
+		CacheCreationInputTokens: 5000,
+		CacheReadInputTokens:     8000,
+	}
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.TokenUsage == nil {
+		t.Fatal("expected non-nil TokenUsage")
+	}
+	if status.TokenUsage.InputTokens != 15000 {
+		t.Errorf("expected InputTokens 15000, got %d", status.TokenUsage.InputTokens)
+	}
+	if status.TokenUsage.OutputTokens != 2500 {
+		t.Errorf("expected OutputTokens 2500, got %d", status.TokenUsage.OutputTokens)
+	}
+	if status.TokenUsage.CacheCreationInputTokens != 5000 {
+		t.Errorf("expected CacheCreationInputTokens 5000, got %d", status.TokenUsage.CacheCreationInputTokens)
+	}
+	if status.TokenUsage.CacheReadInputTokens != 8000 {
+		t.Errorf("expected CacheReadInputTokens 8000, got %d", status.TokenUsage.CacheReadInputTokens)
+	}
+
+	// Verify TokenUsage is a copy (not a reference to internal state).
+	status.TokenUsage.InputTokens = 999
+	status2 := process.Status()
+	if status2.TokenUsage.InputTokens != 15000 {
+		t.Errorf("expected internal TokenUsage to be unchanged, got InputTokens=%d", status2.TokenUsage.InputTokens)
+	}
+}
+
+func TestProcess_TokenUsageOmittedWhenZero(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	status := process.Status()
+	if status.TokenUsage != nil {
+		t.Errorf("expected nil TokenUsage for fresh process, got %v", status.TokenUsage)
+	}
+}
+
+func TestProcess_CostNilWhenNeverSeen(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	status := process.Status()
+	if status.TotalCost != nil {
+		t.Errorf("expected nil TotalCost when no cost observed, got %v", status.TotalCost)
+	}
+}
+
+func TestProcess_CostSetWhenSeen(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.totalCost = 0.42
+	process.costSeen = true
+	process.mu.Unlock()
+
+	status := process.Status()
+	if status.TotalCost == nil {
+		t.Fatal("expected non-nil TotalCost when cost observed")
+	}
+	if *status.TotalCost != 0.42 {
+		t.Errorf("expected TotalCost 0.42, got %f", *status.TotalCost)
+	}
+}
+
+func TestProcess_ResultDetailTokenUsage(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusCompleted
+	process.result = resultState{text: "done", completed: true}
+	process.tokenUsage = TokenUsage{
+		InputTokens:  500,
+		OutputTokens: 100,
+	}
+	process.totalCost = 0.05
+	process.costSeen = true
+	process.mu.Unlock()
+
+	detail := process.ResultDetail()
+	if detail.TokenUsage == nil {
+		t.Fatal("expected non-nil TokenUsage in ResultDetail")
+	}
+	if detail.TokenUsage.InputTokens != 500 {
+		t.Errorf("expected InputTokens 500, got %d", detail.TokenUsage.InputTokens)
+	}
+	if detail.TotalCost == nil || *detail.TotalCost != 0.05 {
+		t.Errorf("expected TotalCost 0.05, got %v", detail.TotalCost)
+	}
+}
+
 func TestProcess_StopWhenNotRunning(t *testing.T) {
 	process := NewProcess(DefaultOptions())
 

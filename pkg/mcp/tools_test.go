@@ -146,8 +146,218 @@ func TestPromptTool_BlockingBasic(t *testing.T) {
 	if resp.SessionID != "sess-123" {
 		t.Errorf("expected session_id %q, got %q", "sess-123", resp.SessionID)
 	}
-	if resp.TotalCost != 0.05 {
-		t.Errorf("expected total_cost_usd %f, got %f", 0.05, resp.TotalCost)
+	if resp.TotalCost == nil || *resp.TotalCost != 0.05 {
+		t.Errorf("expected total_cost_usd 0.05, got %v", resp.TotalCost)
+	}
+}
+
+func TestPromptTool_BlockingWithTokenUsage(t *testing.T) {
+	mock := &mockPrompter{
+		result:    "Done!",
+		sessionID: "sess-tu",
+		messages: []claudepkg.StreamMessage{
+			{Type: claudepkg.MessageTypeSystem, SessionID: "sess-tu"},
+			{
+				Type:    claudepkg.MessageTypeAssistant,
+				Subtype: claudepkg.SubtypeText,
+				Text:    "thinking...",
+				Usage: &claudepkg.TokenUsage{
+					InputTokens:              1000,
+					OutputTokens:             200,
+					CacheCreationInputTokens: 500,
+				},
+			},
+			{
+				Type:    claudepkg.MessageTypeAssistant,
+				Subtype: claudepkg.SubtypeText,
+				Text:    "more thinking...",
+				Usage: &claudepkg.TokenUsage{
+					InputTokens:         2000,
+					OutputTokens:        300,
+					CacheReadInputTokens: 800,
+				},
+			},
+			{
+				Type:      claudepkg.MessageTypeResult,
+				Result:    "Done!",
+				TotalCost: 0.15,
+			},
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":  "Do something",
+		"blocking": true,
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	resp := parsePromptResponse(t, result)
+	if resp.TotalCost == nil || *resp.TotalCost != 0.15 {
+		t.Errorf("expected total_cost_usd 0.15, got %v", resp.TotalCost)
+	}
+	if resp.TokenUsage == nil {
+		t.Fatal("expected non-nil token_usage")
+	}
+	if resp.TokenUsage.InputTokens != 3000 {
+		t.Errorf("expected aggregated InputTokens 3000, got %d", resp.TokenUsage.InputTokens)
+	}
+	if resp.TokenUsage.OutputTokens != 500 {
+		t.Errorf("expected aggregated OutputTokens 500, got %d", resp.TokenUsage.OutputTokens)
+	}
+	if resp.TokenUsage.CacheCreationInputTokens != 500 {
+		t.Errorf("expected CacheCreationInputTokens 500, got %d", resp.TokenUsage.CacheCreationInputTokens)
+	}
+	if resp.TokenUsage.CacheReadInputTokens != 800 {
+		t.Errorf("expected CacheReadInputTokens 800, got %d", resp.TokenUsage.CacheReadInputTokens)
+	}
+}
+
+func TestPromptTool_BlockingCostFromPerMessageCost(t *testing.T) {
+	// When total_cost_usd is missing from result, individual cost_usd
+	// values from messages should be accumulated (issue #62).
+	mock := &mockPrompter{
+		result:    "Done!",
+		sessionID: "sess-cost",
+		messages: []claudepkg.StreamMessage{
+			{Type: claudepkg.MessageTypeSystem, SessionID: "sess-cost"},
+			{Type: claudepkg.MessageTypeAssistant, Subtype: claudepkg.SubtypeText, Text: "a", Cost: 0.01},
+			{Type: claudepkg.MessageTypeAssistant, Subtype: claudepkg.SubtypeText, Text: "b", Cost: 0.02},
+			{Type: claudepkg.MessageTypeResult, Result: "Done!"},
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":  "Hello",
+		"blocking": true,
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	resp := parsePromptResponse(t, result)
+	if resp.TotalCost == nil {
+		t.Fatal("expected non-nil TotalCost when cost_usd present on messages")
+	}
+	if *resp.TotalCost != 0.03 {
+		t.Errorf("expected accumulated cost 0.03, got %f", *resp.TotalCost)
+	}
+}
+
+func TestPromptTool_BlockingNoCostReturnsNull(t *testing.T) {
+	// When no cost data is present at all, TotalCost should be nil.
+	mock := &mockPrompter{
+		result:    "Done!",
+		sessionID: "sess-nocost",
+		messages: []claudepkg.StreamMessage{
+			{Type: claudepkg.MessageTypeSystem, SessionID: "sess-nocost"},
+			{Type: claudepkg.MessageTypeAssistant, Subtype: claudepkg.SubtypeText, Text: "thinking"},
+			{Type: claudepkg.MessageTypeResult, Result: "Done!"},
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	request := newCallToolRequest("prompt", map[string]any{
+		"message":  "Hello",
+		"blocking": true,
+	})
+
+	result, err := handler(context.Background(), request)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resp := parsePromptResponse(t, result)
+	if resp.TotalCost != nil {
+		t.Errorf("expected nil TotalCost when no cost data present, got %v", resp.TotalCost)
+	}
+}
+
+func TestStatusTool_WithTokenUsage(t *testing.T) {
+	mock := &mockPrompter{
+		status: claudepkg.StatusInfo{
+			Status:       claudepkg.ProcessStatusBusy,
+			SessionID:    "sess-tu",
+			MessageCount: 10,
+			TotalCost:    claudepkg.Float64Ptr(0.25),
+			TokenUsage: &claudepkg.TokenUsage{
+				InputTokens:              5000,
+				OutputTokens:             1000,
+				CacheCreationInputTokens: 2000,
+				CacheReadInputTokens:     3000,
+			},
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["status"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var info claudepkg.StatusInfo
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatalf("failed to parse status JSON: %v", err)
+	}
+
+	if info.TokenUsage == nil {
+		t.Fatal("expected non-nil token_usage in status response")
+	}
+	if info.TokenUsage.InputTokens != 5000 {
+		t.Errorf("expected InputTokens 5000, got %d", info.TokenUsage.InputTokens)
+	}
+	if info.TotalCost == nil || *info.TotalCost != 0.25 {
+		t.Errorf("expected TotalCost 0.25, got %v", info.TotalCost)
+	}
+}
+
+func TestStatusTool_NullCostWhenUnknown(t *testing.T) {
+	mock := &mockPrompter{
+		status: claudepkg.StatusInfo{
+			Status:    claudepkg.ProcessStatusBusy,
+			TotalCost: nil, // No cost seen
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["status"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := extractText(t, result)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		t.Fatalf("failed to parse: %v", err)
+	}
+
+	costVal := string(raw["total_cost_usd"])
+	if costVal != "null" {
+		t.Errorf("expected total_cost_usd to be null, got %s", costVal)
 	}
 }
 
@@ -519,7 +729,7 @@ func TestResultTool(t *testing.T) {
 			ResultText:   "Full result text here",
 			MessageCount: 5,
 			ToolCalls:    map[string]int{"Bash": 3, "Read": 2},
-			TotalCost:    0.15,
+			TotalCost:    claudepkg.Float64Ptr(0.15),
 			SessionID:    "sess-123",
 			Status:       claudepkg.ProcessStatusIdle,
 		},
@@ -554,8 +764,8 @@ func TestResultTool(t *testing.T) {
 	if detail.ToolCalls["Read"] != 2 {
 		t.Errorf("expected tool_calls[Read]=2, got %d", detail.ToolCalls["Read"])
 	}
-	if detail.TotalCost != 0.15 {
-		t.Errorf("expected total_cost_usd 0.15, got %f", detail.TotalCost)
+	if detail.TotalCost == nil || *detail.TotalCost != 0.15 {
+		t.Errorf("expected total_cost_usd 0.15, got %v", detail.TotalCost)
 	}
 	if detail.SessionID != "sess-123" {
 		t.Errorf("expected session_id %q, got %q", "sess-123", detail.SessionID)
@@ -819,10 +1029,11 @@ func newCallToolRequest(name string, args map[string]any) mcp.CallToolRequest {
 }
 
 type promptResponse struct {
-	Result       string  `json:"result"`
-	MessageCount int     `json:"message_count"`
-	TotalCost    float64 `json:"total_cost_usd"`
-	SessionID    string  `json:"session_id"`
+	Result       string               `json:"result"`
+	MessageCount int                   `json:"message_count"`
+	TotalCost    *float64              `json:"total_cost_usd"`
+	TokenUsage   *claudepkg.TokenUsage `json:"token_usage"`
+	SessionID    string                `json:"session_id"`
 }
 
 func parsePromptResponse(t *testing.T, result *mcp.CallToolResult) promptResponse {

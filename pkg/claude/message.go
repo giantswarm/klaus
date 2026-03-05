@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // MessageType identifies the kind of message in the stream-json protocol.
@@ -22,12 +23,21 @@ const (
 	SubtypeToolUse MessageSubtype = "tool_use"
 )
 
+// TokenUsage holds per-message token counts from the Claude API usage object.
+type TokenUsage struct {
+	InputTokens              int64 `json:"input_tokens,omitempty"`
+	OutputTokens             int64 `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+}
+
 // StreamMessage is the top-level envelope for all stream-json messages
 // emitted by the Claude CLI on stdout.
 type StreamMessage struct {
-	Type    MessageType     `json:"type"`
-	Subtype MessageSubtype  `json:"subtype,omitempty"`
-	Message json.RawMessage `json:"message,omitempty"`
+	Type      MessageType     `json:"type"`
+	Subtype   MessageSubtype  `json:"subtype,omitempty"`
+	Timestamp string          `json:"timestamp,omitempty"`
+	Message   json.RawMessage `json:"message,omitempty"`
 
 	// Fields present on "system" messages.
 	SessionID string `json:"session_id,omitempty"`
@@ -39,6 +49,9 @@ type StreamMessage struct {
 	ToolName string          `json:"tool_name,omitempty"`
 	ToolID   string          `json:"tool_id,omitempty"`
 	ToolArgs json.RawMessage `json:"tool_args,omitempty"`
+
+	// Usage holds token counts from the Claude API, present on "assistant" messages.
+	Usage *TokenUsage `json:"usage,omitempty"`
 
 	// Fields present on "result" messages.
 	Result   string  `json:"result,omitempty"`
@@ -54,11 +67,13 @@ type StreamMessage struct {
 }
 
 // ParseStreamMessage unmarshals a single line of stream-json output.
+// It stamps each message with the current UTC time in RFC3339 format.
 func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	var msg StreamMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return msg, err
 	}
+	msg.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	msg.Raw = make(json.RawMessage, len(data))
 	copy(msg.Raw, data)
 	return msg, nil
@@ -95,10 +110,11 @@ type StatusInfo struct {
 	Status        ProcessStatus  `json:"status"`
 	SessionID     string         `json:"session_id,omitempty"`
 	ErrorMessage  string         `json:"error,omitempty"`
-	TotalCost     float64        `json:"total_cost_usd,omitempty"`
+	TotalCost     *float64       `json:"total_cost_usd"`
 	MessageCount  int            `json:"message_count,omitempty"`
 	ToolCallCount int            `json:"tool_call_count,omitempty"`
 	ToolCalls     map[string]int `json:"tool_calls,omitempty"`
+	TokenUsage    *TokenUsage    `json:"token_usage,omitempty"`
 	LastMessage   string         `json:"last_message,omitempty"`
 	LastToolName  string         `json:"last_tool_name,omitempty"`
 	// SubagentCalls tracks subagent dispatches via the Task/Agent tool.
@@ -124,10 +140,16 @@ type ResultDetailInfo struct {
 	MessageCount  int             `json:"message_count"`
 	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
 	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
-	TotalCost     float64         `json:"total_cost_usd,omitempty"`
+	TokenUsage    *TokenUsage     `json:"token_usage,omitempty"`
+	TotalCost     *float64        `json:"total_cost_usd"`
 	SessionID     string          `json:"session_id,omitempty"`
 	Status        ProcessStatus   `json:"status"`
 	ErrorMessage  string          `json:"error,omitempty"`
+}
+
+// Float64Ptr returns a pointer to the given float64 value.
+func Float64Ptr(f float64) *float64 {
+	return &f
 }
 
 // SubagentCall tracks a single subagent dispatch via the Task/Agent tool.

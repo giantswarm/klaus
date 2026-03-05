@@ -36,7 +36,8 @@ type PersistedResult struct {
 	MessageCount  int             `json:"message_count"`
 	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
 	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
-	TotalCost     float64         `json:"total_cost_usd,omitempty"`
+	TokenUsage    *TokenUsage     `json:"token_usage,omitempty"`
+	TotalCost     *float64        `json:"total_cost_usd"`
 	SessionID     string          `json:"session_id,omitempty"`
 	Status        ProcessStatus   `json:"status"`
 	ErrorMessage  string          `json:"error,omitempty"`
@@ -46,7 +47,7 @@ type PersistedResult struct {
 
 // ToResultDetailInfo converts a PersistedResult back to a ResultDetailInfo.
 func (pr *PersistedResult) ToResultDetailInfo() ResultDetailInfo {
-	return ResultDetailInfo{
+	info := ResultDetailInfo{
 		ResultText:    pr.ResultText,
 		Messages:      pr.Messages,
 		MessageCount:  pr.MessageCount,
@@ -57,6 +58,11 @@ func (pr *PersistedResult) ToResultDetailInfo() ResultDetailInfo {
 		Status:        pr.Status,
 		ErrorMessage:  pr.ErrorMessage,
 	}
+	if pr.TokenUsage != nil {
+		tu := *pr.TokenUsage
+		info.TokenUsage = &tu
+	}
+	return info
 }
 
 // ResultStore persists session results to disk so they survive process
@@ -149,7 +155,7 @@ func (s *ResultStore) Load() (*PersistedResult, error) {
 // persistResult is a helper called from the setResult callbacks in both
 // Process and PersistentProcess. It saves the result to disk if a store
 // is configured and the result is complete.
-func persistResult(store *ResultStore, rs resultState, status ProcessStatus, sessionID string, totalCost float64, lastError string) {
+func persistResult(store *ResultStore, rs resultState, status ProcessStatus, sessionID string, totalCost *float64, lastError string, tokenUsage *TokenUsage) {
 	if store == nil || !rs.completed {
 		return
 	}
@@ -163,6 +169,7 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 		ToolCalls:     collectToolCalls(rs.messages),
 		SubagentCalls: collectSubagentCalls(rs.messages),
 		TotalCost:     totalCost,
+		TokenUsage:    tokenUsage,
 		SessionID:     sessionID,
 		Status:        status,
 		ErrorMessage:  lastError,
