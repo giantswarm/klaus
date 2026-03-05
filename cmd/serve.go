@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,13 +10,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/config"
 	"github.com/giantswarm/klaus/pkg/server"
 )
 
@@ -36,9 +35,10 @@ const (
 // newServeCmd creates the Cobra command for starting the klaus server.
 func newServeCmd() *cobra.Command {
 	var (
-		port string
+		port       string
+		configPath string
 
-		// OAuth options
+		// OAuth options (CLI flags override config file values).
 		enableOAuth                      bool
 		oauthBaseURL                     string
 		oauthProvider                    string
@@ -81,98 +81,83 @@ Bearer token authentication. Additional endpoints are exposed:
   - /.well-known/oauth-protected-resource
   - /oauth/register, /oauth/authorize, /oauth/token, /oauth/callback
 
-Configuration is primarily via environment variables:
-  CLAUDE_MODEL               -- Claude model to use
-  CLAUDE_SYSTEM_PROMPT       -- System prompt
-  CLAUDE_APPEND_SYSTEM_PROMPT -- Append to system prompt
-  CLAUDE_MAX_TURNS           -- Max agentic turns (0 = unlimited)
-  CLAUDE_PERMISSION_MODE     -- Permission mode (bypassPermissions, acceptEdits, dontAsk, plan, delegate, default)
-  CLAUDE_MCP_CONFIG          -- MCP config file path
-  CLAUDE_STRICT_MCP_CONFIG   -- Only use servers from MCP config (true/false)
-  CLAUDE_WORKSPACE           -- Working directory
-  CLAUDE_MAX_BUDGET_USD      -- Maximum dollar spend per invocation
-  CLAUDE_EFFORT              -- Effort level (low, medium, high)
-  CLAUDE_FALLBACK_MODEL      -- Fallback model when primary is overloaded
-  CLAUDE_JSON_SCHEMA         -- JSON Schema for structured output
-  CLAUDE_SETTINGS_FILE       -- Path to settings JSON file
-  CLAUDE_SETTING_SOURCES     -- Setting sources to load (user,project,local)
-  CLAUDE_TOOLS               -- Comma-separated list of built-in tools
-  CLAUDE_ALLOWED_TOOLS       -- Comma-separated allowed tool patterns
-  CLAUDE_DISALLOWED_TOOLS    -- Comma-separated disallowed tool patterns
-  CLAUDE_PLUGIN_DIRS         -- Comma-separated plugin directories
-  CLAUDE_ADD_DIRS            -- Comma-separated additional directories for skills/subagents
-  CLAUDE_AGENTS              -- JSON object defining subagents (delegatable via Task tool)
-  CLAUDE_ACTIVE_AGENT        -- Select a named agent as the top-level agent for the session
-  CLAUDE_INCLUDE_PARTIAL_MESSAGES -- Emit partial message chunks (true/false)
-  CLAUDE_NO_SESSION_PERSISTENCE  -- Disable session persistence (true/false)
-  CLAUDE_PERSISTENT_MODE         -- Use persistent subprocess mode (true/false)
-  PORT                           -- HTTP server port (default: 8080)`,
+Configuration is loaded from a YAML file (default /etc/klaus/config.yaml)
+with environment variable overrides for backward compatibility. See
+pkg/config for the full Config struct and supported fields.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Load TLS paths from environment if not provided via flags.
-			loadEnvIfEmpty(&tlsCertFile, "TLS_CERT_FILE")
-			loadEnvIfEmpty(&tlsKeyFile, "TLS_KEY_FILE")
+			// Load structured config: YAML file -> env var overrides.
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return fmt.Errorf("loading config: %w", err)
+			}
 
-			// Load OAuth env vars for flags not explicitly set.
-			loadEnvIfEmpty(&googleClientID, "GOOGLE_CLIENT_ID")
-			loadEnvIfEmpty(&googleClientSecret, "GOOGLE_CLIENT_SECRET")
-			loadEnvIfEmpty(&dexIssuerURL, "DEX_ISSUER_URL")
-			loadEnvIfEmpty(&dexClientID, "DEX_CLIENT_ID")
-			loadEnvIfEmpty(&dexClientSecret, "DEX_CLIENT_SECRET")
-			loadEnvIfEmpty(&dexConnectorID, "DEX_CONNECTOR_ID")
-			loadEnvIfEmpty(&dexCAFile, "DEX_CA_FILE")
-			loadEnvIfEmpty(&oauthEncryptionKey, "OAUTH_ENCRYPTION_KEY")
+			// CLI flags override config file + env values for OAuth settings.
+			// Only override when the flag was explicitly set by the user.
+			// This must happen BEFORE validation so that flag overrides are
+			// included in the validation pass.
+			applyOAuthFlagOverrides(cmd, &cfg,
+				enableOAuth, oauthBaseURL, oauthProvider,
+				googleClientID, googleClientSecret,
+				dexIssuerURL, dexClientID, dexClientSecret, dexConnectorID, dexCAFile,
+				disableStreaming, registrationToken,
+				allowPublicRegistration, allowInsecureAuthWithoutState,
+				maxClientsPerIP, oauthEncryptionKey,
+				enableCIMD, cimdAllowPrivateIPs,
+				trustedPublicRegistrationSchemes, disableStrictSchemeMatching,
+				tlsCertFile, tlsKeyFile,
+			)
 
-			var encryptionKey []byte
-			if enableOAuth && oauthEncryptionKey != "" {
-				decoded, err := base64.StdEncoding.DecodeString(oauthEncryptionKey)
-				if err != nil {
-					return fmt.Errorf("OAuth encryption key must be base64 encoded (use: openssl rand -base64 32): %w", err)
-				}
-				if len(decoded) != 32 {
-					return fmt.Errorf("encryption key must be exactly 32 bytes, got %d bytes", len(decoded))
-				}
-				encryptionKey = decoded
+			// Validate after all overrides (YAML -> env -> flags) are applied.
+			if err := cfg.Validate(); err != nil {
+				return fmt.Errorf("config validation: %w", err)
+			}
+
+			// Build the OAuthConfig from the unified config struct.
+			encryptionKey, err := cfg.DecodeEncryptionKey()
+			if err != nil {
+				return fmt.Errorf("OAuth encryption key must be base64 encoded (use: openssl rand -base64 32): %w", err)
 			}
 
 			oauthConfig := server.OAuthConfig{
-				BaseURL:  oauthBaseURL,
-				Provider: oauthProvider,
+				BaseURL:  cfg.OAuth.BaseURL,
+				Provider: cfg.OAuth.Provider,
 				Google: server.GoogleOAuthConfig{
-					ClientID:     googleClientID,
-					ClientSecret: googleClientSecret,
+					ClientID:     cfg.OAuth.Google.ClientID,
+					ClientSecret: cfg.OAuth.Google.ClientSecret,
 				},
 				Dex: server.DexOAuthConfig{
-					IssuerURL:    dexIssuerURL,
-					ClientID:     dexClientID,
-					ClientSecret: dexClientSecret,
-					ConnectorID:  dexConnectorID,
-					CAFile:       dexCAFile,
+					IssuerURL:    cfg.OAuth.Dex.IssuerURL,
+					ClientID:     cfg.OAuth.Dex.ClientID,
+					ClientSecret: cfg.OAuth.Dex.ClientSecret,
+					ConnectorID:  cfg.OAuth.Dex.ConnectorID,
+					CAFile:       cfg.OAuth.Dex.CAFile,
 				},
 				Security: server.SecurityConfig{
 					EncryptionKey:                    encryptionKey,
-					RegistrationAccessToken:          registrationToken,
-					AllowPublicClientRegistration:    allowPublicRegistration,
-					AllowInsecureAuthWithoutState:    allowInsecureAuthWithoutState,
-					MaxClientsPerIP:                  maxClientsPerIP,
-					EnableCIMD:                       enableCIMD,
-					CIMDAllowPrivateIPs:              cimdAllowPrivateIPs,
-					TrustedPublicRegistrationSchemes: trustedPublicRegistrationSchemes,
-					DisableStrictSchemeMatching:      disableStrictSchemeMatching,
+					RegistrationAccessToken:          cfg.OAuth.Security.RegistrationToken,
+					AllowPublicClientRegistration:    cfg.OAuth.Security.AllowPublicRegistration,
+					AllowInsecureAuthWithoutState:    cfg.OAuth.Security.AllowInsecureAuthWithoutState,
+					MaxClientsPerIP:                  cfg.OAuth.Security.MaxClientsPerIP,
+					EnableCIMD:                       cfg.EnableCIMD(),
+					CIMDAllowPrivateIPs:              cfg.OAuth.Security.CIMDAllowPrivateIPs,
+					TrustedPublicRegistrationSchemes: cfg.OAuth.Security.TrustedPublicRegistrationSchemes,
+					DisableStrictSchemeMatching:      cfg.OAuth.Security.DisableStrictSchemeMatching,
 				},
 				TLS: server.TLSConfig{
-					CertFile: tlsCertFile,
-					KeyFile:  tlsKeyFile,
+					CertFile: cfg.OAuth.TLS.CertFile,
+					KeyFile:  cfg.OAuth.TLS.KeyFile,
 				},
-				DisableStreaming: disableStreaming,
+				DisableStreaming: cfg.OAuth.DisableStreaming,
 			}
 
-			return runServe(port, enableOAuth, oauthConfig)
+			return runServe(port, cfg, enableOAuth || cfg.OAuth.Enabled, oauthConfig)
 		},
 	}
 
-	cmd.Flags().StringVar(&port, "port", "", "HTTP server port (overrides PORT env var, default: 8080)")
+	cmd.Flags().StringVar(&configPath, "config", config.DefaultConfigPath, "Path to YAML config file")
+	cmd.Flags().StringVar(&port, "port", "", "HTTP server port (overrides config file and PORT env var, default: 8080)")
 
-	// OAuth flags
+	// OAuth flags (override config file values when explicitly set).
 	cmd.Flags().BoolVar(&enableOAuth, "enable-oauth", false, "Enable OAuth 2.1 authentication for the MCP endpoint")
 	cmd.Flags().StringVar(&oauthBaseURL, "oauth-base-url", "", "OAuth base URL (e.g., https://klaus.example.com)")
 	cmd.Flags().StringVar(&oauthProvider, "oauth-provider", server.OAuthProviderDex, fmt.Sprintf("OAuth provider: %s or %s", server.OAuthProviderDex, server.OAuthProviderGoogle))
@@ -199,127 +184,89 @@ Configuration is primarily via environment variables:
 	return cmd
 }
 
-// runServe contains the main server logic.
-func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig) error {
-	// Build Claude options from environment variables.
+// runServe contains the main server logic, now driven by the structured Config.
+func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig server.OAuthConfig) error {
+	// Build Claude options from config struct.
 	opts := claude.DefaultOptions()
 
-	if v := os.Getenv("CLAUDE_MODEL"); v != "" {
-		opts.Model = v
+	if cfg.Claude.Model != "" {
+		opts.Model = cfg.Claude.Model
 	}
-	if v := os.Getenv("CLAUDE_SYSTEM_PROMPT"); v != "" {
-		opts.SystemPrompt = v
+	if cfg.Claude.SystemPrompt != "" {
+		opts.SystemPrompt = cfg.Claude.SystemPrompt
 	}
-	if v := os.Getenv("CLAUDE_APPEND_SYSTEM_PROMPT"); v != "" {
-		opts.AppendSystemPrompt = v
+	if cfg.Claude.AppendSystemPrompt != "" {
+		opts.AppendSystemPrompt = cfg.Claude.AppendSystemPrompt
 	}
-	if v := os.Getenv("CLAUDE_MAX_TURNS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("invalid CLAUDE_MAX_TURNS %q: %w", v, err)
-		}
-		if n < 0 {
-			return fmt.Errorf("invalid CLAUDE_MAX_TURNS %q: must be >= 0", v)
-		}
-		if n > 0 {
-			opts.MaxTurns = n
-		}
+	if cfg.Claude.MaxTurns > 0 {
+		opts.MaxTurns = cfg.Claude.MaxTurns
 	}
-	if v := os.Getenv("CLAUDE_PERMISSION_MODE"); v != "" {
-		opts.PermissionMode = v
+	if cfg.Claude.PermissionMode != "" {
+		opts.PermissionMode = cfg.Claude.PermissionMode
 	}
-	if v := os.Getenv("CLAUDE_MCP_CONFIG"); v != "" {
-		opts.MCPConfigPath = v
+	if cfg.Claude.MCPConfigPath != "" {
+		opts.MCPConfigPath = cfg.Claude.MCPConfigPath
 	}
-	if v := os.Getenv("CLAUDE_STRICT_MCP_CONFIG"); v != "" {
-		opts.StrictMCPConfig = parseBool(v)
+	if cfg.Claude.StrictMCPConfig {
+		opts.StrictMCPConfig = true
 	}
-	if v := os.Getenv("CLAUDE_WORKSPACE"); v != "" {
-		opts.WorkDir = v
+	if cfg.Claude.Workspace != "" {
+		opts.WorkDir = cfg.Claude.Workspace
 	}
-
-	// Operational controls.
-	if v := os.Getenv("CLAUDE_MAX_BUDGET_USD"); v != "" {
-		f, err := strconv.ParseFloat(v, 64)
-		if err != nil {
-			return fmt.Errorf("invalid CLAUDE_MAX_BUDGET_USD %q: %w", v, err)
-		}
-		if f < 0 {
-			return fmt.Errorf("invalid CLAUDE_MAX_BUDGET_USD %q: must be >= 0", v)
-		}
-		if f > 0 {
-			opts.MaxBudgetUSD = f
-		}
+	if cfg.Claude.MaxBudgetUSD > 0 {
+		opts.MaxBudgetUSD = cfg.Claude.MaxBudgetUSD
 	}
-	if v := os.Getenv("CLAUDE_EFFORT"); v != "" {
-		opts.Effort = v
+	if cfg.Claude.Effort != "" {
+		opts.Effort = cfg.Claude.Effort
 	}
-	if v := os.Getenv("CLAUDE_FALLBACK_MODEL"); v != "" {
-		opts.FallbackModel = v
+	if cfg.Claude.FallbackModel != "" {
+		opts.FallbackModel = cfg.Claude.FallbackModel
 	}
-
-	// Structured output.
-	if v := os.Getenv("CLAUDE_JSON_SCHEMA"); v != "" {
-		opts.JSONSchema = v
+	if cfg.Claude.JSONSchema != "" {
+		opts.JSONSchema = cfg.Claude.JSONSchema
 	}
-
-	// Settings.
-	if v := os.Getenv("CLAUDE_SETTINGS_FILE"); v != "" {
-		opts.SettingsFile = v
+	if cfg.Claude.SettingsFile != "" {
+		opts.SettingsFile = cfg.Claude.SettingsFile
 	}
-	if v := os.Getenv("CLAUDE_SETTING_SOURCES"); v != "" {
-		opts.SettingSources = v
+	if cfg.Claude.SettingSources != "" {
+		opts.SettingSources = cfg.Claude.SettingSources
+	}
+	if len(cfg.Claude.Tools) > 0 {
+		opts.Tools = cfg.Claude.Tools
+	}
+	if len(cfg.Claude.AllowedTools) > 0 {
+		opts.AllowedTools = cfg.Claude.AllowedTools
+	}
+	if len(cfg.Claude.DisallowedTools) > 0 {
+		opts.DisallowedTools = cfg.Claude.DisallowedTools
+	}
+	if len(cfg.Claude.PluginDirs) > 0 {
+		opts.PluginDirs = cfg.Claude.PluginDirs
+	}
+	if len(cfg.Claude.AddDirs) > 0 {
+		opts.AddDirs = cfg.Claude.AddDirs
 	}
 
-	// Tool control.
-	if v := os.Getenv("CLAUDE_TOOLS"); v != "" {
-		opts.Tools = strings.Split(v, ",")
-	}
-	if v := os.Getenv("CLAUDE_ALLOWED_TOOLS"); v != "" {
-		opts.AllowedTools = strings.Split(v, ",")
-	}
-	if v := os.Getenv("CLAUDE_DISALLOWED_TOOLS"); v != "" {
-		opts.DisallowedTools = strings.Split(v, ",")
-	}
-
-	// Plugin directories.
-	if v := os.Getenv("CLAUDE_PLUGIN_DIRS"); v != "" {
-		opts.PluginDirs = strings.Split(v, ",")
-	}
-
-	// Additional directories.
-	if v := os.Getenv("CLAUDE_ADD_DIRS"); v != "" {
-		opts.AddDirs = strings.Split(v, ",")
-	}
-
-	// Subagent definitions (--agents JSON, highest priority).
-	// These are delegatable via the Task tool by the main agent.
-	if v := os.Getenv("CLAUDE_AGENTS"); v != "" {
+	// Subagent definitions.
+	if cfg.Claude.Agents != "" {
 		var agents map[string]claude.AgentConfig
-		if err := json.Unmarshal([]byte(v), &agents); err != nil {
-			log.Printf("WARNING: failed to parse CLAUDE_AGENTS: %v", err)
+		if err := json.Unmarshal([]byte(cfg.Claude.Agents), &agents); err != nil {
+			log.Printf("WARNING: failed to parse claude.agents: %v", err)
 		} else {
 			opts.Agents = agents
 		}
 	}
-	// Agent selection: changes the top-level agent, not which subagents exist.
-	if v := os.Getenv("CLAUDE_ACTIVE_AGENT"); v != "" {
-		opts.ActiveAgent = v
+	if cfg.Claude.ActiveAgent != "" {
+		opts.ActiveAgent = cfg.Claude.ActiveAgent
 	}
-
-	// Streaming.
-	if v := os.Getenv("CLAUDE_INCLUDE_PARTIAL_MESSAGES"); v != "" {
-		opts.IncludePartialMessages = parseBool(v)
+	if cfg.Claude.IncludePartialMessages {
+		opts.IncludePartialMessages = true
 	}
-
-	// Session persistence.
-	if v := os.Getenv("CLAUDE_NO_SESSION_PERSISTENCE"); v != "" {
-		opts.NoSessionPersistence = parseBool(v)
+	if cfg.Claude.NoSessionPersistence {
+		opts.NoSessionPersistence = true
 	}
 
 	// Load personality SOUL.md if mounted by klausctl.
-	// Content is appended after any CLAUDE_APPEND_SYSTEM_PROMPT value,
-	// separated by a blank line, so both the env var and file contribute.
 	if soul, err := loadSOULFile(defaultSOULPath); err != nil {
 		log.Printf("WARNING: failed to load personality from %s: %v", defaultSOULPath, err)
 	} else if soul != "" {
@@ -330,64 +277,47 @@ func runServe(portFlag string, enableOAuth bool, oauthConfig server.OAuthConfig)
 		log.Printf("Loaded personality from %s (%d bytes)", defaultSOULPath, len(soul))
 	}
 
-	// Validate configuration.
-	if err := claude.ValidatePermissionMode(opts.PermissionMode); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-	if err := claude.ValidateEffort(opts.Effort); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
-
 	// Create the Claude process manager.
-	// Persistent mode maintains a long-running subprocess for multi-turn conversations.
-	persistentMode := parseBool(os.Getenv("CLAUDE_PERSISTENT_MODE"))
+	// Note: permissionMode and effort are already validated by cfg.Validate()
+	// using the canonical validators from the claude package.
 	var process claude.Prompter
-	if persistentMode {
+	if cfg.Claude.PersistentMode {
 		log.Println("Starting in persistent mode (bidirectional stream-json)")
 		process = claude.NewPersistentProcess(opts)
 	} else {
 		process = claude.NewProcess(opts)
 	}
 
-	// Owner-based access control: restricts /mcp to the configured identity.
-	ownerSubject := os.Getenv("KLAUS_OWNER_SUBJECT")
-	if ownerSubject != "" {
-		log.Printf("Owner-based access control enabled (subject: %s)", ownerSubject)
+	// Owner-based access control.
+	if cfg.Server.OwnerSubject != "" {
+		log.Printf("Owner-based access control enabled (subject: %s)", cfg.Server.OwnerSubject)
 	}
 
-	// Determine listen port: flag > env > default.
-	port := portFlag
-	if port == "" {
-		port = os.Getenv("PORT")
-	}
-	if port == "" {
-		port = "8080"
-	}
+	// Determine listen port: flag > config > default.
+	listenPort := cfg.EffectivePort(portFlag)
 
 	// Wait for interrupt signal for graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	// Server-scoped context: cancelled during shutdown to clean up
-	// background drain goroutines from non-blocking prompt submissions.
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
 
 	mode := server.ModeSingleShot
-	if persistentMode {
+	if cfg.Claude.PersistentMode {
 		mode = server.ModePersistent
 	}
 
-	cfg := server.Config{
-		Port:         port,
+	srvCfg := server.Config{
+		Port:         listenPort,
 		Mode:         mode,
-		OwnerSubject: ownerSubject,
+		OwnerSubject: cfg.Server.OwnerSubject,
 	}
 
 	if enableOAuth {
-		return runWithOAuth(serverCtx, process, cfg, oauthConfig, quit)
+		return runWithOAuth(serverCtx, process, srvCfg, oauthConfig, quit)
 	}
-	return runWithoutOAuth(serverCtx, process, cfg, quit)
+	return runWithoutOAuth(serverCtx, process, srvCfg, quit)
 }
 
 func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server.Config, config server.OAuthConfig, quit chan os.Signal) error {
@@ -466,20 +396,85 @@ func runServerLifecycle(
 	return nil
 }
 
-// loadEnvIfEmpty loads an environment variable into a string pointer if it's empty.
-func loadEnvIfEmpty(target *string, envKey string) {
-	if *target == "" {
-		*target = os.Getenv(envKey)
+// applyOAuthFlagOverrides applies CLI flag values to the config struct.
+// Only flags that were explicitly set by the user override config/env values.
+func applyOAuthFlagOverrides(
+	cmd *cobra.Command, cfg *config.Config,
+	enableOAuth bool, baseURL, provider string,
+	gClientID, gClientSecret string,
+	dIssuerURL, dClientID, dClientSecret, dConnectorID, dCAFile string,
+	disableStreaming bool, regToken string,
+	allowPubReg, allowInsecureAuth bool,
+	maxClients int, encKey string,
+	eCIMD, cimdPrivIPs bool,
+	trustedSchemes []string, disableStrictScheme bool,
+	tlsCert, tlsKey string,
+) {
+	if cmd.Flags().Changed("enable-oauth") {
+		cfg.OAuth.Enabled = enableOAuth
 	}
-}
-
-// parseBool returns true for "true", "1", "yes" (case-insensitive).
-func parseBool(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "true", "1", "yes":
-		return true
-	default:
-		return false
+	if cmd.Flags().Changed("oauth-base-url") {
+		cfg.OAuth.BaseURL = baseURL
+	}
+	if cmd.Flags().Changed("oauth-provider") {
+		cfg.OAuth.Provider = provider
+	}
+	if cmd.Flags().Changed("google-client-id") {
+		cfg.OAuth.Google.ClientID = gClientID
+	}
+	if cmd.Flags().Changed("google-client-secret") {
+		cfg.OAuth.Google.ClientSecret = gClientSecret
+	}
+	if cmd.Flags().Changed("dex-issuer-url") {
+		cfg.OAuth.Dex.IssuerURL = dIssuerURL
+	}
+	if cmd.Flags().Changed("dex-client-id") {
+		cfg.OAuth.Dex.ClientID = dClientID
+	}
+	if cmd.Flags().Changed("dex-client-secret") {
+		cfg.OAuth.Dex.ClientSecret = dClientSecret
+	}
+	if cmd.Flags().Changed("dex-connector-id") {
+		cfg.OAuth.Dex.ConnectorID = dConnectorID
+	}
+	if cmd.Flags().Changed("dex-ca-file") {
+		cfg.OAuth.Dex.CAFile = dCAFile
+	}
+	if cmd.Flags().Changed("disable-streaming") {
+		cfg.OAuth.DisableStreaming = disableStreaming
+	}
+	if cmd.Flags().Changed("registration-token") {
+		cfg.OAuth.Security.RegistrationToken = regToken
+	}
+	if cmd.Flags().Changed("allow-public-registration") {
+		cfg.OAuth.Security.AllowPublicRegistration = allowPubReg
+	}
+	if cmd.Flags().Changed("allow-insecure-auth-without-state") {
+		cfg.OAuth.Security.AllowInsecureAuthWithoutState = allowInsecureAuth
+	}
+	if cmd.Flags().Changed("max-clients-per-ip") {
+		cfg.OAuth.Security.MaxClientsPerIP = maxClients
+	}
+	if cmd.Flags().Changed("oauth-encryption-key") {
+		cfg.OAuth.Security.EncryptionKey = encKey
+	}
+	if cmd.Flags().Changed("enable-cimd") {
+		cfg.OAuth.Security.EnableCIMD = &eCIMD
+	}
+	if cmd.Flags().Changed("cimd-allow-private-ips") {
+		cfg.OAuth.Security.CIMDAllowPrivateIPs = cimdPrivIPs
+	}
+	if cmd.Flags().Changed("trusted-public-registration-schemes") {
+		cfg.OAuth.Security.TrustedPublicRegistrationSchemes = trustedSchemes
+	}
+	if cmd.Flags().Changed("disable-strict-scheme-matching") {
+		cfg.OAuth.Security.DisableStrictSchemeMatching = disableStrictScheme
+	}
+	if cmd.Flags().Changed("tls-cert-file") {
+		cfg.OAuth.TLS.CertFile = tlsCert
+	}
+	if cmd.Flags().Changed("tls-key-file") {
+		cfg.OAuth.TLS.KeyFile = tlsKey
 	}
 }
 

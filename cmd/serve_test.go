@@ -163,18 +163,4 @@ func TestLoadSOULFile_ExactlyMaxSize(t *testing.T) {
 	}
 }
 
-func TestParseBool(t *testing.T) {
-	trueCases := []string{"true", "TRUE", "True", "1", "yes", "YES", "Yes", " true ", " 1 "}
-	for _, tc := range trueCases {
-		if !parseBool(tc) {
-			t.Errorf("expected parseBool(%q) to be true", tc)
-		}
-	}
-
-	falseCases := []string{"false", "FALSE", "0", "no", "NO", "", "invalid", " false "}
-	for _, tc := range falseCases {
-		if parseBool(tc) {
-			t.Errorf("expected parseBool(%q) to be false", tc)
-		}
-	}
-}
+// TestParseBool has moved to pkg/config/config_test.go alongside the config loader.
