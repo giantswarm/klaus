@@ -147,15 +147,15 @@ type DexConfig struct {
 // SecurityFileConfig holds OAuth security settings in YAML.
 type SecurityFileConfig struct {
 	// EncryptionKey is a base64-encoded AES-256 key for token encryption (32 bytes decoded).
-	EncryptionKey                string   `yaml:"encryptionKey"`
-	RegistrationToken            string   `yaml:"registrationToken"`
-	AllowPublicRegistration      bool     `yaml:"allowPublicRegistration"`
-	AllowInsecureAuthWithoutState bool    `yaml:"allowInsecureAuthWithoutState"`
-	MaxClientsPerIP              int      `yaml:"maxClientsPerIP"`
-	EnableCIMD                   *bool    `yaml:"enableCIMD"`
-	CIMDAllowPrivateIPs          bool     `yaml:"cimdAllowPrivateIPs"`
+	EncryptionKey                    string   `yaml:"encryptionKey"`
+	RegistrationToken                string   `yaml:"registrationToken"`
+	AllowPublicRegistration          bool     `yaml:"allowPublicRegistration"`
+	AllowInsecureAuthWithoutState    bool     `yaml:"allowInsecureAuthWithoutState"`
+	MaxClientsPerIP                  int      `yaml:"maxClientsPerIP"`
+	EnableCIMD                       *bool    `yaml:"enableCIMD"`
+	CIMDAllowPrivateIPs              bool     `yaml:"cimdAllowPrivateIPs"`
 	TrustedPublicRegistrationSchemes []string `yaml:"trustedPublicRegistrationSchemes"`
-	DisableStrictSchemeMatching  bool     `yaml:"disableStrictSchemeMatching"`
+	DisableStrictSchemeMatching      bool     `yaml:"disableStrictSchemeMatching"`
 }
 
 // TLSFileConfig holds TLS certificate paths.

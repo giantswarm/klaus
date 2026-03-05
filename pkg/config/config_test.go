@@ -500,4 +500,3 @@ func assertEqualSlice(t *testing.T, field string, want, got []string) {
 		}
 	}
 }
-
