@@ -1,0 +1,26 @@
+# DO NOT EDIT. Generated with:
+#
+#    devctl
+#
+#    https://github.com/giantswarm/devctl/blob/3790bcb9f57144eee85fc805c8f89c6c6ce294ab/pkg/gen/input/workflows/internal/file/check_values_schema.yaml.template
+#
+
+name: 'Values and schema'
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'helm/**/values.yaml'         # default helm chart values
+      - 'helm/**/values.schema.json'  # schema
+      - 'helm/**/ci/ci-values.yaml'   # overrides for CI (can contain required entries)
+
+permissions: {}
+
+jobs:
+  check:
+    uses: giantswarm/github-workflows/.github/workflows/chart-values.yaml@main
+    permissions:
+      contents: read

@@ -1,0 +1,371 @@
+# Default values for klaus.
+replicaCount: 1
+
+image:
+  name: giantswarm/klaus
+  tag: ""
+
+registry:
+  domain: gsoci.azurecr.io
+
+port: 8080
+
+# Toolchain image overrides the default Klaus image.
+# When set, this image is used for the container instead of image.name.
+# This should be a composite image that includes both the language toolchain
+# and the Klaus agent (built by klausctl toolchain build + push, or pre-built by CI/CD).
+# Example: gsoci.azurecr.io/giantswarm/klaus-go:1.25
+toolchainImage: ""
+
+# Claude Code agent configuration.
+claude:
+  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
+  # Empty string uses the Claude CLI default.
+  model: ""
+  # maxTurns limits the number of agentic turns per prompt.
+  # 0 means no limit.
+  maxTurns: 0
+  # permissionMode controls how Claude handles tool permissions.
+  # Valid values: "bypassPermissions", "acceptEdits", "dontAsk", "plan", "delegate", "default".
+  # "bypassPermissions" is required for headless/autonomous operation.
+  permissionMode: "bypassPermissions"
+  # systemPrompt overrides the default system prompt entirely.
+  # Set via ConfigMap when non-empty.
+  systemPrompt: ""
+  # appendSystemPrompt is appended to the default system prompt.
+  appendSystemPrompt: ""
+  # mcpConfig is an inline MCP configuration (JSON) for Claude to use.
+  # Mounted as a file in the container.
+  # Mutually exclusive with mcpServers.
+  mcpConfig: ""
+  # mcpServers defines MCP servers as typed entries, rendered to .mcp.json format.
+  # Each entry is a free-form object passed through to JSON as-is (forward-compatible
+  # with future MCP config fields). Mutually exclusive with mcpConfig.
+  # Example:
+  #   mcpServers:
+  #     github:
+  #       type: http
+  #       url: https://api.githubcopilot.com/mcp/
+  #       headers:
+  #         Authorization: "Bearer ${GITHUB_TOKEN}"
+  #     database:
+  #       command: npx
+  #       args: ["-y", "@bytebase/dbhub"]
+  #       env:
+  #         DB_URL: "${DATABASE_URL}"
+  mcpServers: {}
+  # mcpServerSecrets injects Kubernetes Secret values as container env vars
+  # for ${VAR} expansion in MCP server configuration.
+  # Example:
+  #   mcpServerSecrets:
+  #     - secretName: mcp-github-token
+  #       env:
+  #         GITHUB_TOKEN: token
+  #     - secretName: mcp-database-url
+  #       env:
+  #         DATABASE_URL: connection-string
+  mcpServerSecrets: []
+  # mcpTimeout sets the MCP server connection timeout in milliseconds.
+  # Set as MCP_TIMEOUT env var (consumed by Claude Code subprocess).
+  # 0 means use the default.
+  mcpTimeout: 0
+  # maxMcpOutputTokens limits the maximum tokens in MCP server output.
+  # Set as MAX_MCP_OUTPUT_TOKENS env var (consumed by Claude Code subprocess).
+  # 0 means use the default.
+  maxMcpOutputTokens: 0
+  # strictMcpConfig when true only uses MCP servers from mcpConfig/mcpServers,
+  # ignoring user, project, and local MCP configurations.
+  # Recommended for production security.
+  strictMcpConfig: true
+
+  # -- Operational controls --
+  # maxBudgetUSD caps the maximum dollar spend per invocation; 0 means no limit.
+  maxBudgetUSD: 0
+  # effort controls the effort level: "low", "medium", "high"; empty means default.
+  effort: ""
+  # fallbackModel specifies a model to use when the primary is overloaded.
+  fallbackModel: ""
+
+  # -- Structured output --
+  # jsonSchema constrains the output to conform to a JSON Schema (JSON string).
+  jsonSchema: ""
+
+  # -- Settings --
+  # settingsFile is a path to a settings JSON file inside the container.
+  settingsFile: ""
+  # settingSources controls which setting sources are loaded (comma-separated: "user,project,local").
+  # Empty string means only explicit configuration is used.
+  settingSources: ""
+
+  # -- Tool control --
+  # tools controls the base set of built-in tools available.
+  # Empty list means all default tools. Use ["Bash","Edit","Read"] to restrict.
+  tools: []
+  # allowedTools restricts tool access with patterns (e.g. ["Bash(git:*)", "Edit"]).
+  allowedTools: []
+  # disallowedTools explicitly blocks specific tools (e.g. ["Bash(rm:*)"]).
+  disallowedTools: []
+
+  # -- Plugin support --
+  # pluginDirs are directories to load plugins from.
+  pluginDirs: []
+
+  # -- Extension directories --
+  # addDirs are additional directories to search for .claude/ subdirectories (skills, agents).
+  # These are passed to Claude Code via --add-dir / CLAUDE_ADD_DIRS.
+  addDirs: []
+  # loadAdditionalDirsMemory enables loading CLAUDE.md memory files from
+  # additional directories (addDirs, skills, agentFiles). Sets the
+  # CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD env var when add dirs are present.
+  # See https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+  loadAdditionalDirsMemory: true
+
+  # -- Inline skills --
+  # skills defines Claude Code skills rendered as SKILL.md files and loaded via --add-dir.
+  # Supported frontmatter fields: description, disableModelInvocation, userInvocable,
+  # allowedTools, model, context, agent, argumentHint.
+  # Example:
+  #   skills:
+  #     api-conventions:
+  #       description: "API design patterns"
+  #       content: |
+  #         When writing API endpoints...
+  skills: {}
+
+  # -- Inline subagent files (markdown format) --
+  # agentFiles defines markdown-format subagent definitions loaded via --add-dir.
+  # These are mounted as .claude/agents/<name>.md files. Claude Code discovers
+  # them and makes them available for delegation via the Task tool, and for
+  # selection as the main agent via activeAgent or the MCP agent parameter.
+  # Subagents defined here have lower priority than those in `agents` (JSON).
+  # See https://code.claude.com/docs/en/sub-agents
+  # Example:
+  #   agentFiles:
+  #     researcher:
+  #       content: |
+  #         ---
+  #         name: researcher
+  #         description: Research agent that gathers information
+  #         tools: Read, Grep, Glob
+  #         ---
+  #         You are a research agent...
+  agentFiles: {}
+
+  # -- Hooks --
+  # hooks defines Claude Code lifecycle hooks, rendered to settings.json.
+  # Mutually exclusive with settingsFile.
+  # Example:
+  #   hooks:
+  #     PreToolUse:
+  #       - matcher: "Bash"
+  #         hooks:
+  #           - type: command
+  #             command: /etc/klaus/hooks/block-dangerous.sh
+  hooks: {}
+  # hookScripts defines hook script contents mounted at /etc/klaus/hooks/ with mode 0755.
+  # Example:
+  #   hookScripts:
+  #     block-dangerous.sh: |
+  #       #!/bin/bash
+  #       INPUT=$(cat)
+  #       exit 0
+  hookScripts: {}
+
+  # -- Plugins --
+  # plugins references Klaus plugins stored in OCI registries, delivered via
+  # Kubernetes OCI image volumes (beta since Kubernetes 1.33, KEP-4639).
+  # Each plugin is a versioned, distributable package of skills, hooks, agents,
+  # and MCP servers. See giantswarm/klaus-operator#6 for the OCI artifact format.
+  # Example:
+  #   plugins:
+  #     - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+  #       tag: v0.6.0
+  #     - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/security
+  #       digest: sha256:abc123...
+  plugins: []
+
+  # -- Subagents (JSON format, highest priority) --
+  # agents defines custom subagents via the --agents CLI flag (JSON).
+  # Subagents are specialized AI assistants that the main Claude Code agent
+  # can delegate work to via the built-in "Task" tool. Each runs in its own
+  # context window with its own prompt, tools, model, and permissions.
+  # These have the highest priority and override agent files with the same name.
+  # See https://code.claude.com/docs/en/sub-agents
+  # Example:
+  #   agents:
+  #     reviewer:
+  #       description: "Reviews code changes. Use proactively after edits."
+  #       prompt: "You are a senior code reviewer..."
+  #       tools: ["Read", "Grep", "Glob", "Bash"]
+  #       model: "sonnet"
+  #     deployer:
+  #       description: "Handles deployments"
+  #       prompt: "You are a deployment specialist..."
+  agents: {}
+  # activeAgent selects which agent runs as the top-level agent for the session
+  # (--agent flag). This changes the main agent persona, NOT which subagents
+  # are available. The selected agent can still delegate to other subagents.
+  # Must match a name defined in agents or agentFiles.
+  activeAgent: ""
+
+  # -- Streaming --
+  # includePartialMessages emits partial message chunks during streaming.
+  # Enables progress tracking with message count, tool call count, and last activity.
+  includePartialMessages: false
+
+  # -- Process mode --
+  # persistentMode enables bidirectional stream-json mode where a single
+  # long-running Claude subprocess handles multiple prompts with conversation
+  # continuity. When false (default), a new subprocess is spawned per prompt.
+  persistentMode: false
+
+  # -- Session management --
+  # noSessionPersistence disables saving sessions to disk.
+  # Recommended for ephemeral container workloads.
+  noSessionPersistence: true
+
+# Owner-based access control.
+# When set, only the user whose JWT sub or email claim matches this value
+# can access the /mcp endpoint. Other authenticated users receive HTTP 403.
+# Leave empty to allow any authenticated user (backward-compatible).
+owner:
+  subject: ""
+
+# anthropicApiKey configures the API key secret reference.
+anthropicApiKey:
+  # secretName is the name of the Kubernetes Secret containing the API key.
+  secretName: ""
+  # secretKey is the key within the Secret that holds the API key value.
+  secretKey: "api-key"
+
+# workspace configures persistent storage for the Claude agent workspace.
+workspace:
+  enabled: false
+  storageClass: ""
+  size: 1Gi
+  # existingClaim allows using a pre-existing PVC.
+  existingClaim: ""
+  # gitRepo is a git repository URL to clone into the workspace.
+  gitRepo: ""
+  # gitRef is the branch, tag, or commit SHA to checkout. Defaults to the repo's default branch.
+  gitRef: ""
+  # gitDepth limits clone history depth (e.g. 1 for a shallow clone).
+  # 0 (default) clones the full history. Shallow clones are faster and use
+  # less disk for large repositories where only the working tree matters.
+  gitDepth: 0
+  # gitTimeout is the maximum time in seconds for the git clone/fetch operation.
+  # Prevents pod startup from hanging indefinitely on network issues or very
+  # large repositories. 0 means no timeout (not recommended for production).
+  gitTimeout: 300
+  # gitImage is the container image used by the git-clone init container.
+  # This image must be available in your cluster's container registry.
+  # For air-gapped environments, mirror this image to your internal registry
+  # and set this value to the internal image reference.
+  gitImage: "alpine/git:v2.52.0"
+  # gitSecretName references a K8s Secret containing a personal access token
+  # (key: token) for HTTPS repo authentication. The token is injected into the
+  # clone URL as x-access-token and stripped from the persisted remote URL
+  # after clone/fetch to avoid leaking credentials on the workspace PVC.
+  gitSecretName: ""
+  # gitResources sets resource requests/limits for the git-clone init container.
+  # Useful for large repositories that require significant memory during clone.
+  # Example:
+  #   gitResources:
+  #     requests:
+  #       cpu: 100m
+  #       memory: 128Mi
+  #     limits:
+  #       cpu: 500m
+  #       memory: 512Mi
+  gitResources: {}
+
+# OpenTelemetry monitoring configuration.
+# These env vars are inherited by the Claude Code subprocess, enabling its
+# native telemetry (tokens, cost, sessions, tool events, API requests).
+# See https://code.claude.com/docs/en/monitoring-usage for details.
+#
+# Note: the /metrics endpoint (Prometheus format) is always served by klaus
+# regardless of the enabled flag. Setting enabled=true controls the OTel
+# env vars passed to the Claude subprocess.
+#
+# Prometheus scrape annotations (scrapeAnnotations) and the ServiceMonitor
+# are independently toggleable so you can scrape /metrics without injecting
+# OTel env vars into the Claude subprocess.
+telemetry:
+  enabled: false
+  # metricsExporter selects the metrics exporter: "otlp", "prometheus", "console".
+  metricsExporter: "otlp"
+  # logsExporter selects the logs/events exporter: "otlp", "console".
+  logsExporter: "otlp"
+  # otlp configures the OTLP exporter endpoint.
+  otlp:
+    protocol: "grpc"
+    endpoint: ""
+    # headers for authentication (e.g. "Authorization=Bearer token").
+    headers: ""
+  # exportIntervals control how often data is flushed (milliseconds).
+  metricExportIntervalMs: 60000
+  logsExportIntervalMs: 5000
+  # Privacy controls.
+  logUserPrompts: false
+  logToolDetails: false
+  # Cardinality controls.
+  includeSessionId: true
+  includeVersion: false
+  includeAccountUuid: true
+  # Custom resource attributes for team identification (W3C Baggage format).
+  # Example: "department=engineering,team.id=platform,cost_center=eng-123"
+  resourceAttributes: ""
+  # scrapeAnnotations adds prometheus.io/* annotations to the Service,
+  # independent of the OTel enabled flag above. Enable this when you want
+  # annotation-based Prometheus discovery of the /metrics endpoint.
+  scrapeAnnotations: false
+  # serviceMonitor configures a Prometheus Operator ServiceMonitor for
+  # scraping the /metrics endpoint exposed by klaus itself. This is also
+  # independent of the OTel enabled flag.
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+    # namespaceSelector restricts which namespaces the ServiceMonitor
+    # matches. Leave empty to match only the release namespace (default).
+    # Set any=true for cross-namespace matching, or use matchNames.
+    namespaceSelector: {}
+
+resources:
+  limits:
+    cpu: "2"
+    memory: 2Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+global:
+  podSecurityStandards:
+    enforced: false

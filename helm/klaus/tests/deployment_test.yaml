@@ -1,0 +1,790 @@
+# Deployment template tests for klaus Helm chart
+#
+# These tests verify the Deployment configuration, particularly:
+# - Security context settings
+# - Container configuration
+# - Volume mounts and environment variables
+#
+# Run with: helm unittest ./helm/klaus
+
+suite: Deployment template tests
+templates:
+  - templates/deployment.yaml
+  - templates/configmap.yaml
+tests:
+  - it: should set replicas from values
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: should run as non-root
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+
+  - it: should drop all capabilities
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value:
+            - ALL
+
+  - it: should not allow privilege escalation
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation
+          value: false
+
+  - it: should use correct container port
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[0].containerPort
+          value: 8080
+
+  - it: should have liveness probe on /healthz
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+
+  - it: should have readiness probe on /readyz
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+
+  - it: should set resource limits
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.limits
+      - isNotEmpty:
+          path: spec.template.spec.containers[0].resources.requests
+
+  - it: should mount workspace volume when enabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        size: 1Gi
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /workspace
+
+  - it: should not have workspace volume mount when disabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_WORKSPACE
+          any: true
+
+  - it: should set CLAUDE_MODEL when configured
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        model: "sonnet"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MODEL
+            value: "sonnet"
+
+  - it: should set configmap checksum annotation
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - isNotEmpty:
+          path: spec.template.metadata.annotations["checksum/config"]
+
+  - it: should set CLAUDE_ADD_DIRS when skills are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        skills:
+          api-conventions:
+            description: "API patterns"
+            content: "API content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+            value: "true"
+
+  - it: should not set CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD when loadAdditionalDirsMemory is false
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        loadAdditionalDirsMemory: false
+        skills:
+          test:
+            description: "Test"
+            content: "Test content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD
+            value: "true"
+
+  - it: should aggregate CLAUDE_ADD_DIRS from skills and addDirs
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        addDirs:
+          - /custom/dir
+        skills:
+          test:
+            description: "Test"
+            content: "Test content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_ADD_DIRS
+            value: "/etc/klaus/extensions,/custom/dir"
+
+  - it: should mount inline skills as SKILL.md via subPath
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        skills:
+          api-conventions:
+            description: "API patterns"
+            content: "API content"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/klaus/extensions/.claude/skills/api-conventions/SKILL.md
+            subPath: skill-api-conventions
+            readOnly: true
+
+  - it: should set CLAUDE_SETTINGS_FILE when hooks are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hooks:
+          PreToolUse:
+            - matcher: "Bash"
+              hooks:
+                - type: command
+                  command: /etc/klaus/hooks/validate.sh
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_SETTINGS_FILE
+            value: /etc/klaus/settings.json
+
+  - it: should fail when both hooks and settingsFile are set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hooks:
+          PreToolUse:
+            - matcher: "Bash"
+              hooks:
+                - type: command
+                  command: /etc/klaus/hooks/validate.sh
+        settingsFile: "/custom/settings.json"
+    asserts:
+      - failedTemplate:
+          errorMessage: "claude.hooks and claude.settingsFile are mutually exclusive; use one or the other"
+
+  - it: should mount plugin as image volume
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-gs-base
+            image:
+              reference: "gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base:v0.6.0"
+              pullPolicy: IfNotPresent
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: plugin-gs-base
+            mountPath: /var/lib/klaus/plugins/gs-base
+            readOnly: true
+
+  - it: should mount plugin by digest
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/security
+            digest: "sha256:abc123def456"
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: plugin-security
+            image:
+              reference: "gsoci.azurecr.io/giantswarm/klaus-plugins/security@sha256:abc123def456"
+              pullPolicy: IfNotPresent
+
+  - it: should include plugins in CLAUDE_PLUGIN_DIRS
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_PLUGIN_DIRS
+            value: "/var/lib/klaus/plugins/gs-base"
+
+  - it: should create config-scripts volume with items filter when hookScripts defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        hookScripts:
+          validate.sh: |
+            #!/bin/bash
+            exit 0
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: config-scripts
+            configMap:
+              name: RELEASE-NAME-klaus
+              defaultMode: 493
+              items:
+                - key: hookscript-validate.sh
+                  path: hookscript-validate.sh
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config-scripts
+            mountPath: /etc/klaus/hooks/validate.sh
+            subPath: hookscript-validate.sh
+            readOnly: true
+
+  - it: should fail when plugin has neither tag nor digest
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+    asserts:
+      - failedTemplate:
+          errorMessage: "plugin gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base requires either tag or digest"
+
+  - it: should fail when two plugins share the same short name
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        plugins:
+          - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base
+            tag: v0.6.0
+          - repository: other.registry.io/custom/gs-base
+            tag: v1.0.0
+    asserts:
+      - failedTemplate:
+          errorMessage: 'duplicate plugin short name "gs-base" (from gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base and other.registry.io/custom/gs-base); use unique final path segments'
+
+  # -- Structured MCP server configuration tests --
+
+  - it: should mount mcp-config.json when mcpServers are defined
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MCP_CONFIG
+            value: /etc/klaus/mcp-config.json
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: config
+            mountPath: /etc/klaus/mcp-config.json
+            subPath: mcp-config.json
+            readOnly: true
+
+  - it: should not mount mcp-config.json when mcpServers is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServers: {}
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_MCP_CONFIG
+          any: true
+
+  - it: should fail when both mcpConfig and mcpServers are set
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpConfig: '{"mcpServers":{}}'
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+    asserts:
+      - failedTemplate:
+          errorMessage: "claude.mcpConfig and claude.mcpServers are mutually exclusive; use one or the other"
+
+  - it: should render mcpServers to mcp-config.json in configmap
+    documentIndex: 0
+    template: templates/configmap.yaml
+    set:
+      claude:
+        mcpServers:
+          github:
+            type: http
+            url: https://api.githubcopilot.com/mcp/
+            headers:
+              Authorization: "Bearer ${GITHUB_TOKEN}"
+    asserts:
+      - isNotEmpty:
+          path: data["mcp-config.json"]
+
+  - it: should inject mcpServerSecrets as secretKeyRef env vars
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServerSecrets:
+          - secretName: mcp-github-token
+            env:
+              GITHUB_TOKEN: token
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: mcp-github-token
+                key: token
+
+  - it: should inject multiple mcpServerSecrets
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpServerSecrets:
+          - secretName: mcp-github-token
+            env:
+              GITHUB_TOKEN: token
+          - secretName: mcp-database-url
+            env:
+              DATABASE_URL: connection-string
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITHUB_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: mcp-github-token
+                key: token
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DATABASE_URL
+            valueFrom:
+              secretKeyRef:
+                name: mcp-database-url
+                key: connection-string
+
+  - it: should set MCP_TIMEOUT when mcpTimeout is non-zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpTimeout: 60000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MCP_TIMEOUT
+            value: "60000"
+
+  - it: should not set MCP_TIMEOUT when mcpTimeout is zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        mcpTimeout: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MCP_TIMEOUT
+          any: true
+
+  - it: should set MAX_MCP_OUTPUT_TOKENS when maxMcpOutputTokens is non-zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        maxMcpOutputTokens: 8000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MCP_OUTPUT_TOKENS
+            value: "8000"
+
+  - it: should not set MAX_MCP_OUTPUT_TOKENS when maxMcpOutputTokens is zero
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        maxMcpOutputTokens: 0
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MAX_MCP_OUTPUT_TOKENS
+          any: true
+
+  # -- Toolchain image tests --
+
+  - it: should use default image when toolchainImage is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "gsoci.azurecr.io/giantswarm/klaus:0.1.0"
+
+  - it: should use toolchainImage when set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      toolchainImage: "gsoci.azurecr.io/giantswarm/klaus-go:1.25"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "gsoci.azurecr.io/giantswarm/klaus-go:1.25"
+
+  # -- Workspace git clone tests --
+
+  - it: should not have init containers when gitRepo is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers
+
+  - it: should add git-clone init container when gitRepo is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].name
+          value: git-clone
+      - isNotEmpty:
+          path: spec.template.spec.initContainers[0].image
+
+  - it: should use custom gitImage for init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitImage: "registry.internal/git:2.47"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].image
+          value: "registry.internal/git:2.47"
+
+  - it: should wrap git-clone command with timeout when gitTimeout is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitTimeout: 600
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["timeout", "600", "sh", "-c"]
+
+  - it: should not wrap git-clone with timeout when gitTimeout is 0
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitTimeout: 0
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].command
+          value: ["sh", "-c"]
+
+  - it: should mount workspace volume in init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: workspace
+            mountPath: /workspace
+
+  - it: should mount git-credentials volume when gitSecretName is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitSecretName: "my-git-creds"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-credentials
+            mountPath: /etc/git-secret
+            readOnly: true
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-credentials
+            secret:
+              secretName: my-git-creds
+              defaultMode: 256
+
+  - it: should not mount git-credentials volume when gitSecretName is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - notContains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-credentials
+          any: true
+
+  - it: should set init container security context from podSecurityContext
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 2000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsUser
+          value: 2000
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.runAsGroup
+          value: 2000
+
+  - it: should harden init container security context
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.allowPrivilegeEscalation
+          value: false
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.initContainers[0].securityContext.capabilities.drop
+          value:
+            - ALL
+
+  - it: should mount git-tmp emptyDir at /tmp for init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].volumeMounts
+          content:
+            name: git-tmp
+            mountPath: /tmp
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: git-tmp
+            emptyDir: {}
+
+  - it: should set GIT_CONFIG_NOSYSTEM and HOME env vars on init container
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: HOME
+            value: /tmp
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GIT_CONFIG_NOSYSTEM
+            value: "1"
+
+  - it: should set init container resources when gitResources is set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitResources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.requests.cpu
+          value: 100m
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.requests.memory
+          value: 128Mi
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.limits.cpu
+          value: 500m
+      - equal:
+          path: spec.template.spec.initContainers[0].resources.limits.memory
+          value: 512Mi
+
+  - it: should not set init container resources when gitResources is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - isNull:
+          path: spec.template.spec.initContainers[0].resources
+
+  - it: should fail when gitRepo is set without workspace.enabled
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: false
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - failedTemplate:
+          errorMessage: "workspace.gitRepo requires workspace.enabled to be true"
+
+  - it: should fail when gitSecretName is set without gitRepo
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitSecretName: "my-git-creds"
+    asserts:
+      - failedTemplate:
+          errorMessage: "workspace.gitSecretName requires workspace.gitRepo to be set"

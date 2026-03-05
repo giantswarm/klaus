@@ -1,0 +1,22 @@
+# Service template tests for klaus Helm chart
+#
+# Run with: helm unittest ./helm/klaus
+
+suite: Service template tests
+templates:
+  - templates/service.yaml
+tests:
+  - it: should be a ClusterIP service
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: should expose the configured port
+    asserts:
+      - equal:
+          path: spec.ports[0].port
+          value: 8080
+      - equal:
+          path: spec.ports[0].name
+          value: http

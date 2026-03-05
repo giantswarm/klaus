@@ -1,0 +1,67 @@
+# VARIANT controls the base distribution: "alpine" (default, ~50 MB) or "slim" (Debian, ~200 MB).
+# Both variants produce the same minimal contents: Node.js, Claude Code CLI, ca-certificates, klaus binary.
+# Declared before the first FROM so it is available to all FROM instructions.
+ARG VARIANT=alpine
+
+# Stage 1: Build the Go binary (runs on the build host, cross-compiles for target).
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+    -ldflags "-w -extldflags '-static' \
+    -X 'main.version=${VERSION}' \
+    -X 'main.commit=${COMMIT}' \
+    -X 'main.date=${DATE}'" \
+    -o klaus .
+
+# Stage 2: Minimal runtime with Node.js and Claude CLI.
+FROM node:24-${VARIANT}
+ARG VARIANT
+
+# Install ca-certificates (required for TLS).
+RUN if [ "$VARIANT" = "alpine" ]; then \
+        apk add --no-cache bash ca-certificates; \
+    else \
+        apt-get update && \
+        apt-get install -y --no-install-recommends ca-certificates && \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Install Claude Code CLI globally.
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm cache clean --force
+
+# Create a non-root user for running the application.
+RUN if [ "$VARIANT" = "alpine" ]; then \
+        addgroup -g 1001 klaus && \
+        adduser -u 1001 -G klaus -D -s /bin/sh klaus; \
+    else \
+        groupadd -g 1001 klaus && \
+        useradd -u 1001 -g klaus -m -s /bin/sh klaus; \
+    fi
+
+# Create workspace directory.
+RUN mkdir -p /workspace && chown klaus:klaus /workspace
+
+# Copy the Go binary from the builder stage.
+COPY --from=builder /app/klaus /usr/local/bin/klaus
+
+LABEL io.giantswarm.klaus.type=toolchain \
+      io.giantswarm.klaus.name=klaus
+USER klaus
+WORKDIR /workspace
+
+ENV PORT=8080
+ENV SHELL=/bin/bash
+EXPOSE 8080
+
+ENTRYPOINT ["klaus"]

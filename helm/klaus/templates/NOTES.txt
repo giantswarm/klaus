@@ -1,0 +1,4 @@
+klaus has been deployed.
+
+To check the status:
+  kubectl get pods -l app.kubernetes.io/name=klaus -n {{ .Release.Namespace }}

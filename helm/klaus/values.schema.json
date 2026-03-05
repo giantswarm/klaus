@@ -1,0 +1,495 @@
+{
+  "$schema": "http://json-schema.org/schema#",
+  "type": "object",
+  "properties": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      }
+    },
+    "registry": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string"
+        }
+      }
+    },
+    "claude": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Claude model to use (e.g. claude-sonnet-4-20250514, sonnet, opus)"
+        },
+        "maxTurns": {
+          "type": "integer",
+          "description": "Max agentic turns per prompt (0 = unlimited)"
+        },
+        "permissionMode": {
+          "type": "string",
+          "description": "Permission mode for tool usage",
+          "enum": ["default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "delegate"]
+        },
+        "systemPrompt": {
+          "type": "string",
+          "description": "Override the default system prompt"
+        },
+        "appendSystemPrompt": {
+          "type": "string",
+          "description": "Append to the default system prompt"
+        },
+        "mcpConfig": {
+          "type": "string",
+          "description": "Inline MCP configuration JSON. Mutually exclusive with mcpServers."
+        },
+        "mcpServers": {
+          "type": "object",
+          "description": "Structured MCP server definitions rendered to .mcp.json. Each entry is a free-form object passed through as-is. Mutually exclusive with mcpConfig.",
+          "additionalProperties": {
+            "type": "object",
+            "description": "MCP server configuration (type, url, command, args, env, headers, etc.)"
+          }
+        },
+        "mcpServerSecrets": {
+          "type": "array",
+          "description": "Kubernetes Secret references injected as container env vars for ${VAR} expansion in MCP server config",
+          "items": {
+            "type": "object",
+            "properties": {
+              "secretName": {
+                "type": "string",
+                "description": "Name of the Kubernetes Secret"
+              },
+              "env": {
+                "type": "object",
+                "description": "Mapping of env var name to Secret key",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["secretName", "env"]
+          }
+        },
+        "mcpTimeout": {
+          "type": "integer",
+          "description": "MCP server connection timeout in milliseconds (0 = default)"
+        },
+        "maxMcpOutputTokens": {
+          "type": "integer",
+          "description": "Maximum tokens in MCP server output (0 = default)"
+        },
+        "strictMcpConfig": {
+          "type": "boolean",
+          "description": "Only use MCP servers from mcpConfig/mcpServers"
+        },
+        "maxBudgetUSD": {
+          "type": "number",
+          "description": "Maximum dollar spend per invocation (0 = no limit)"
+        },
+        "effort": {
+          "type": "string",
+          "description": "Effort level for responses",
+          "enum": ["", "low", "medium", "high"]
+        },
+        "fallbackModel": {
+          "type": "string",
+          "description": "Fallback model when primary is overloaded"
+        },
+        "jsonSchema": {
+          "type": "string",
+          "description": "JSON Schema for structured output validation"
+        },
+        "settingsFile": {
+          "type": "string",
+          "description": "Path to settings JSON file inside the container"
+        },
+        "settingSources": {
+          "type": "string",
+          "description": "Setting sources to load (comma-separated: user,project,local)"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Base set of built-in tools available"
+        },
+        "allowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool access patterns to allow"
+        },
+        "disallowedTools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool patterns to explicitly block"
+        },
+        "pluginDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Directories to load plugins from"
+        },
+        "addDirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional directories to search for .claude/ subdirectories (skills, agents)"
+        },
+        "loadAdditionalDirsMemory": {
+          "type": "boolean",
+          "description": "Enable loading CLAUDE.md memory files from additional directories",
+          "default": true
+        },
+        "skills": {
+          "type": "object",
+          "description": "Inline skills rendered as SKILL.md files",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "disableModelInvocation": {
+                "type": "boolean"
+              },
+              "userInvocable": {
+                "type": "boolean"
+              },
+              "allowedTools": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "context": {
+                "type": "array"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "argumentHint": {
+                "type": "string"
+              }
+            },
+            "required": ["content"]
+          }
+        },
+        "agentFiles": {
+          "type": "object",
+          "description": "Markdown-format agent definitions loaded via --add-dir",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": ["content"]
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "description": "Claude Code lifecycle hooks rendered to settings.json. Mutually exclusive with settingsFile. Keys are event names (PreToolUse, PostToolUse, Stop, SubagentStart, SubagentStop, Notification).",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "matcher": {
+                  "type": "string",
+                  "description": "Pattern to match (e.g. tool name for PreToolUse, agent name for SubagentStart)"
+                },
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["command"]
+                      },
+                      "command": {
+                        "type": "string",
+                        "description": "Shell command to execute. Receives JSON via stdin."
+                      },
+                      "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in milliseconds for the hook command"
+                      }
+                    },
+                    "required": ["type", "command"]
+                  }
+                }
+              },
+              "required": ["hooks"]
+            }
+          }
+        },
+        "hookScripts": {
+          "type": "object",
+          "description": "Hook script contents mounted at /etc/klaus/hooks/ with mode 0755",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "plugins": {
+          "type": "array",
+          "description": "Klaus plugin references delivered via Kubernetes OCI image volumes",
+          "items": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "description": "OCI repository URL"
+              },
+              "tag": {
+                "type": "string",
+                "description": "Image tag (mutually exclusive with digest)"
+              },
+              "digest": {
+                "type": "string",
+                "description": "Image digest (mutually exclusive with tag)"
+              }
+            },
+            "required": ["repository"]
+          }
+        },
+        "agents": {
+          "type": "object",
+          "description": "Custom subagents delegatable via the Task tool. Each runs in its own context with its own prompt, tools, and model.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string",
+                "description": "When Claude should delegate to this subagent"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "System prompt for the subagent"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tools the subagent can use (inherits all if omitted)"
+              },
+              "disallowedTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tools to deny from the subagent"
+              },
+              "model": {
+                "type": "string",
+                "description": "Model override: sonnet, opus, haiku, or inherit"
+              },
+              "permissionMode": {
+                "type": "string",
+                "description": "Permission mode override for the subagent",
+                "enum": ["default", "acceptEdits", "dontAsk", "delegate", "bypassPermissions", "plan"]
+              },
+              "maxTurns": {
+                "type": "integer",
+                "description": "Maximum agentic turns before the subagent stops"
+              },
+              "skills": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Skills to preload into the subagent context at startup"
+              },
+              "mcpServers": {
+                "type": "object",
+                "description": "MCP servers available to this subagent"
+              },
+              "hooks": {
+                "type": "object",
+                "description": "Lifecycle hooks scoped to this subagent"
+              },
+              "memory": {
+                "type": "string",
+                "description": "Persistent memory scope: user, project, or local",
+                "enum": ["user", "project", "local"]
+              }
+            },
+            "required": ["description", "prompt"]
+          }
+        },
+        "activeAgent": {
+          "type": "string",
+          "description": "Select which agent runs as the top-level agent for the session (--agent flag). Must match a name in agents or agentFiles."
+        },
+        "includePartialMessages": {
+          "type": "boolean",
+          "description": "Emit partial message chunks during streaming"
+        },
+        "persistentMode": {
+          "type": "boolean",
+          "description": "Enable bidirectional stream-json persistent subprocess mode"
+        },
+        "noSessionPersistence": {
+          "type": "boolean",
+          "description": "Disable saving sessions to disk"
+        }
+      }
+    },
+    "anthropicApiKey": {
+      "type": "object",
+      "properties": {
+        "secretName": {
+          "type": "string"
+        },
+        "secretKey": {
+          "type": "string"
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "storageClass": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "existingClaim": {
+          "type": "string"
+        }
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "OpenTelemetry monitoring and Prometheus metrics configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable OTel env var pass-through to the Claude Code subprocess"
+        },
+        "metricsExporter": {
+          "type": "string",
+          "description": "Metrics exporter for Claude Code telemetry",
+          "enum": ["otlp", "prometheus", "console"]
+        },
+        "logsExporter": {
+          "type": "string",
+          "description": "Logs/events exporter for Claude Code telemetry",
+          "enum": ["otlp", "console"]
+        },
+        "otlp": {
+          "type": "object",
+          "description": "OTLP exporter configuration",
+          "properties": {
+            "protocol": {
+              "type": "string",
+              "description": "OTLP transport protocol",
+              "enum": ["grpc", "http/protobuf"]
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "OTLP collector endpoint URL"
+            },
+            "headers": {
+              "type": "string",
+              "description": "OTLP headers for authentication (e.g. Authorization=Bearer token)"
+            }
+          }
+        },
+        "metricExportIntervalMs": {
+          "type": "integer",
+          "description": "Metric flush interval in milliseconds"
+        },
+        "logsExportIntervalMs": {
+          "type": "integer",
+          "description": "Logs flush interval in milliseconds"
+        },
+        "logUserPrompts": {
+          "type": "boolean",
+          "description": "Include user prompt text in OTel log events (privacy sensitive)"
+        },
+        "logToolDetails": {
+          "type": "boolean",
+          "description": "Include tool input/output in OTel log events (privacy sensitive)"
+        },
+        "includeSessionId": {
+          "type": "boolean",
+          "description": "Include session_id label in OTel metrics"
+        },
+        "includeVersion": {
+          "type": "boolean",
+          "description": "Include version label in OTel metrics"
+        },
+        "includeAccountUuid": {
+          "type": "boolean",
+          "description": "Include account_uuid label in OTel metrics"
+        },
+        "resourceAttributes": {
+          "type": "string",
+          "description": "Custom OTEL_RESOURCE_ATTRIBUTES in W3C Baggage format"
+        },
+        "scrapeAnnotations": {
+          "type": "boolean",
+          "description": "Add prometheus.io/* scrape annotations to the Service"
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "description": "Prometheus Operator ServiceMonitor configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Create a ServiceMonitor resource for Prometheus Operator"
+            },
+            "interval": {
+              "type": "string",
+              "description": "Scrape interval (e.g. 30s)"
+            },
+            "scrapeTimeout": {
+              "type": "string",
+              "description": "Scrape timeout (e.g. 10s)"
+            },
+            "namespaceSelector": {
+              "type": "object",
+              "description": "Optional namespace selector for cross-namespace monitoring",
+              "properties": {
+                "any": {
+                  "type": "boolean"
+                },
+                "matchNames": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
