@@ -40,6 +40,10 @@ type PersistentProcess struct {
 	// allowing callers to retrieve results asynchronously.
 	result resultState
 
+	// resultStore persists results to disk so they survive restarts.
+	// Nil means no persistence.
+	resultStore *ResultStore
+
 	// responseCh receives stream-json messages during an active prompt.
 	// It is set by Send and cleared when the response is complete.
 	responseCh chan StreamMessage
@@ -76,6 +80,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
+		resultStore: NewResultStore(ResultStorePath(opts.WorkDir)),
 	}
 }
 
@@ -513,15 +518,20 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		if rs.completed && p.status == ProcessStatusIdle {
 			p.status = ProcessStatusCompleted
 		}
+		status := p.status
+		sessionID := p.sessionID
+		totalCost := p.totalCost
+		lastError := p.lastError
+		store := p.resultStore
 		p.mu.Unlock()
+
+		persistResult(store, rs, status, sessionID, totalCost, lastError)
 	})
 }
 
 // Status returns the current status information.
 func (p *PersistentProcess) Status() StatusInfo {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	info := StatusInfo{
 		Status:        p.status,
 		SessionID:     p.sessionID,
@@ -538,16 +548,35 @@ func (p *PersistentProcess) Status() StatusInfo {
 		info.Result = Truncate(p.result.text, maxStatusResultLen)
 	}
 
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	// Fall back to disk when in-memory result is empty and a store exists.
+	// Skip disk I/O when the process is actively running to avoid unnecessary reads.
+	if info.Result == "" && store != nil && info.Status != ProcessStatusBusy && info.Status != ProcessStatusStarting {
+		if pr, err := store.Load(); err == nil && pr != nil && pr.ResultText != "" {
+			info.Result = Truncate(pr.ResultText, maxStatusResultLen)
+			if info.SessionID == "" {
+				info.SessionID = pr.SessionID
+			}
+			if info.TotalCost == 0 {
+				info.TotalCost = pr.TotalCost
+			}
+			if info.ErrorMessage == "" {
+				info.ErrorMessage = pr.ErrorMessage
+			}
+		}
+	}
+
 	return info
 }
 
 // ResultDetail returns the full untruncated result and detailed metadata from
-// the last completed Submit run. Intended for debugging and troubleshooting.
+// the last completed Submit run. Falls back to the persisted result on disk
+// when the in-memory state is empty.
 func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	return ResultDetailInfo{
+	detail := ResultDetailInfo{
 		ResultText:   p.result.text,
 		Messages:     p.result.messages,
 		MessageCount: len(p.result.messages),
@@ -557,6 +586,17 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 		Status:       p.status,
 		ErrorMessage: p.lastError,
 	}
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	// Fall back to disk when in-memory result is empty.
+	if detail.ResultText == "" && store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil {
+			return pr.ToResultDetailInfo()
+		}
+	}
+
+	return detail
 }
 
 // Done returns a channel closed when the current prompt response is complete.
