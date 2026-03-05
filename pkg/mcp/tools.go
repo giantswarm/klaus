@@ -224,7 +224,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 
 		// Build a structured response including cost and token usage info.
 		response := struct {
-			Result       string               `json:"result"`
+			Result       string                `json:"result"`
 			MessageCount int                   `json:"message_count"`
 			TotalCost    *float64              `json:"total_cost_usd"`
 			TokenUsage   *claudepkg.TokenUsage `json:"token_usage,omitempty"`

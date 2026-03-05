@@ -172,8 +172,8 @@ func TestPromptTool_BlockingWithTokenUsage(t *testing.T) {
 				Subtype: claudepkg.SubtypeText,
 				Text:    "more thinking...",
 				Usage: &claudepkg.TokenUsage{
-					InputTokens:         2000,
-					OutputTokens:        300,
+					InputTokens:          2000,
+					OutputTokens:         300,
 					CacheReadInputTokens: 800,
 				},
 			},
@@ -1029,7 +1029,7 @@ func newCallToolRequest(name string, args map[string]any) mcp.CallToolRequest {
 }
 
 type promptResponse struct {
-	Result       string               `json:"result"`
+	Result       string                `json:"result"`
 	MessageCount int                   `json:"message_count"`
 	TotalCost    *float64              `json:"total_cost_usd"`
 	TokenUsage   *claudepkg.TokenUsage `json:"token_usage"`
