@@ -35,6 +35,7 @@ type PersistentProcess struct {
 	toolCalls     map[string]int
 	lastMessage   string
 	lastToolName  string
+	subagents     *subagentTracker
 
 	// result stores the output of the last completed Submit run,
 	// allowing callers to retrieve results asynchronously.
@@ -77,6 +78,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 	return &PersistentProcess{
 		opts:        opts,
 		status:      ProcessStatusIdle,
+		subagents:   newSubagentTracker(),
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
@@ -280,7 +282,12 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				p.toolCallCount++
 				p.lastToolName = msg.ToolName
 				p.toolCalls[msg.ToolName]++
+				p.subagents.handleToolUse(msg)
+			} else {
+				p.subagents.handleMessage(msg)
 			}
+		} else {
+			p.subagents.handleMessage(msg)
 		}
 		// Compute the cost delta before overwriting the running total so we
 		// only add the incremental cost to the Prometheus counter.
@@ -393,6 +400,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.toolCalls = make(map[string]int)
 	p.lastMessage = ""
 	p.lastToolName = ""
+	p.subagents.reset()
 
 	// Create response channel and done channel for this prompt.
 	ch := make(chan StreamMessage, 100)
@@ -542,6 +550,7 @@ func (p *PersistentProcess) Status() StatusInfo {
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
+		SubagentCalls: copySubagentCalls(p.subagents.calls()),
 	}
 
 	if p.status == ProcessStatusCompleted {
@@ -577,14 +586,15 @@ func (p *PersistentProcess) Status() StatusInfo {
 func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 	p.mu.RLock()
 	detail := ResultDetailInfo{
-		ResultText:   p.result.text,
-		Messages:     p.result.messages,
-		MessageCount: len(p.result.messages),
-		ToolCalls:    copyToolCalls(p.toolCalls),
-		TotalCost:    p.totalCost,
-		SessionID:    p.sessionID,
-		Status:       p.status,
-		ErrorMessage: p.lastError,
+		ResultText:    p.result.text,
+		Messages:      p.result.messages,
+		MessageCount:  len(p.result.messages),
+		ToolCalls:     copyToolCalls(p.toolCalls),
+		SubagentCalls: copySubagentCalls(p.subagents.calls()),
+		TotalCost:     p.totalCost,
+		SessionID:     p.sessionID,
+		Status:        p.status,
+		ErrorMessage:  p.lastError,
 	}
 	store := p.resultStore
 	p.mu.RUnlock()

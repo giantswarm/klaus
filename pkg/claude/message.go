@@ -101,6 +101,8 @@ type StatusInfo struct {
 	ToolCalls     map[string]int `json:"tool_calls,omitempty"`
 	LastMessage   string         `json:"last_message,omitempty"`
 	LastToolName  string         `json:"last_tool_name,omitempty"`
+	// SubagentCalls tracks subagent dispatches via the Task/Agent tool.
+	SubagentCalls []SubagentCall `json:"subagent_calls,omitempty"`
 	// Result contains the agent's final output text from the last completed
 	// non-blocking Submit run, truncated to maxStatusResultLen runes. It is
 	// populated when the status is "completed". Use the result debug tool
@@ -117,14 +119,26 @@ type StatusInfo struct {
 // from the last completed run. Intended for debugging and troubleshooting.
 // Unlike StatusInfo.Result, ResultText is never truncated.
 type ResultDetailInfo struct {
-	ResultText   string          `json:"result_text"`
-	Messages     []StreamMessage `json:"messages,omitempty"`
-	MessageCount int             `json:"message_count"`
-	ToolCalls    map[string]int  `json:"tool_calls,omitempty"`
-	TotalCost    float64         `json:"total_cost_usd,omitempty"`
-	SessionID    string          `json:"session_id,omitempty"`
-	Status       ProcessStatus   `json:"status"`
-	ErrorMessage string          `json:"error,omitempty"`
+	ResultText    string          `json:"result_text"`
+	Messages      []StreamMessage `json:"messages,omitempty"`
+	MessageCount  int             `json:"message_count"`
+	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
+	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
+	TotalCost     float64         `json:"total_cost_usd,omitempty"`
+	SessionID     string          `json:"session_id,omitempty"`
+	Status        ProcessStatus   `json:"status"`
+	ErrorMessage  string          `json:"error,omitempty"`
+}
+
+// SubagentCall tracks a single subagent dispatch via the Task/Agent tool.
+type SubagentCall struct {
+	Type        string  `json:"type"`
+	Description string  `json:"description,omitempty"`
+	ToolID      string  `json:"tool_id,omitempty"`
+	ToolCalls   int     `json:"tool_calls,omitempty"`
+	Tokens      int     `json:"tokens,omitempty"`
+	DurationMS  float64 `json:"duration_ms,omitempty"`
+	Status      string  `json:"status,omitempty"`
 }
 
 // copyToolCalls returns a shallow copy of the map to avoid exposing internal
