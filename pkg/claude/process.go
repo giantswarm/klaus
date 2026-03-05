@@ -90,6 +90,10 @@ type Process struct {
 	// allowing callers to retrieve results asynchronously.
 	result resultState
 
+	// resultStore persists results to disk so they survive restarts.
+	// Nil means no persistence.
+	resultStore *ResultStore
+
 	done      chan struct{}
 	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
@@ -100,9 +104,10 @@ func NewProcess(opts Options) *Process {
 	done := make(chan struct{})
 	close(done) // Pre-closed: "not running" == "already done".
 	return &Process{
-		opts:   opts,
-		status: ProcessStatusIdle,
-		done:   done,
+		opts:        opts,
+		status:      ProcessStatusIdle,
+		done:        done,
+		resultStore: NewResultStore(ResultStorePath(opts.WorkDir)),
 	}
 }
 
@@ -393,14 +398,19 @@ func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) e
 		if rs.completed && p.status == ProcessStatusIdle {
 			p.status = ProcessStatusCompleted
 		}
+		status := p.status
+		sessionID := p.sessionID
+		totalCost := p.totalCost
+		lastError := p.lastError
+		store := p.resultStore
 		p.mu.Unlock()
+
+		persistResult(store, rs, status, sessionID, totalCost, lastError)
 	})
 }
 
 func (p *Process) Status() StatusInfo {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	info := StatusInfo{
 		Status:        p.status,
 		SessionID:     p.sessionID,
@@ -417,16 +427,37 @@ func (p *Process) Status() StatusInfo {
 		info.Result = Truncate(p.result.text, maxStatusResultLen)
 	}
 
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	// Fall back to disk when in-memory result is empty and a store exists.
+	// Skip disk I/O when the process is actively running to avoid unnecessary reads.
+	if info.Result == "" && store != nil && info.Status != ProcessStatusBusy && info.Status != ProcessStatusStarting {
+		if pr, err := store.Load(); err == nil && pr != nil && pr.ResultText != "" {
+			info.Result = Truncate(pr.ResultText, maxStatusResultLen)
+			// Backfill status metadata from persisted result if the
+			// in-memory state has been cleared (e.g. after restart).
+			if info.SessionID == "" {
+				info.SessionID = pr.SessionID
+			}
+			if info.TotalCost == 0 {
+				info.TotalCost = pr.TotalCost
+			}
+			if info.ErrorMessage == "" {
+				info.ErrorMessage = pr.ErrorMessage
+			}
+		}
+	}
+
 	return info
 }
 
 // ResultDetail returns the full untruncated result and detailed metadata from
 // the last completed Submit run. Intended for debugging and troubleshooting.
+// Falls back to the persisted result on disk when the in-memory state is empty.
 func (p *Process) ResultDetail() ResultDetailInfo {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	return ResultDetailInfo{
+	detail := ResultDetailInfo{
 		ResultText:   p.result.text,
 		Messages:     p.result.messages,
 		MessageCount: len(p.result.messages),
@@ -436,6 +467,17 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 		Status:       p.status,
 		ErrorMessage: p.lastError,
 	}
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	// Fall back to disk when in-memory result is empty.
+	if detail.ResultText == "" && store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil {
+			return pr.ToResultDetailInfo()
+		}
+	}
+
+	return detail
 }
 
 // Done returns a channel closed when the current run completes.
