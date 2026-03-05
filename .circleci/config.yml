@@ -16,8 +16,8 @@ jobs:
             exit 1
           fi
           if [ -z "$DOWNSTREAM_DISPATCH_TOKEN" ]; then
-            echo "DOWNSTREAM_DISPATCH_TOKEN not set -- skipping"
-            exit 0
+            echo "DOWNSTREAM_DISPATCH_TOKEN not set -- aborting" >&2
+            exit 1
           fi
 
           PAYLOAD=$(jq -cn --arg v "$VERSION" \
@@ -35,8 +35,11 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${DOWNSTREAM_DISPATCH_TOKEN}" \
               "https://api.github.com/repos/${repo}/dispatches" \
-              -d "$PAYLOAD")
-            if [ "$HTTP_CODE" = "204" ]; then
+              -d "$PAYLOAD") || true
+            if [ -z "$HTTP_CODE" ]; then
+              echo "  -> curl failed for $repo (network error)" >&2
+              FAILED=1
+            elif [ "$HTTP_CODE" = "204" ]; then
               echo "  -> Notified $repo"
             else
               echo "  -> Failed to notify $repo (HTTP $HTTP_CODE)" >&2
