@@ -149,6 +149,20 @@ func TestPluginCompliance_Partial(t *testing.T) {
 	}
 }
 
+func TestPluginCompliance_RunningNotCounted(t *testing.T) {
+	calls := []claude.SubagentCall{
+		{Type: "base:code-reviewer", Status: "running"},
+		{Type: "code-quality:security-auditor", Status: "running"},
+	}
+	pc := checkPluginCompliance(calls)
+	if pc.CodeReviewer {
+		t.Error("expected CodeReviewer = false for running status")
+	}
+	if pc.SecurityAuditor {
+		t.Error("expected SecurityAuditor = false for running status")
+	}
+}
+
 func TestPluginCompliance_None(t *testing.T) {
 	pc := checkPluginCompliance(nil)
 	if pc.CodeReviewer || pc.SecurityAuditor {
@@ -217,7 +231,10 @@ func TestSummarize_JSONRoundTrip(t *testing.T) {
 	if decoded.ErrorCount != 1 {
 		t.Errorf("ErrorCount mismatch after round-trip")
 	}
-	if !decoded.PluginCompliance.CodeReviewer == summary.PluginCompliance.CodeReviewer {
-		t.Errorf("PluginCompliance mismatch after round-trip")
+	if decoded.PluginCompliance.CodeReviewer != summary.PluginCompliance.CodeReviewer {
+		t.Errorf("PluginCompliance.CodeReviewer mismatch after round-trip")
+	}
+	if decoded.PluginCompliance.SecurityAuditor != summary.PluginCompliance.SecurityAuditor {
+		t.Errorf("PluginCompliance.SecurityAuditor mismatch after round-trip")
 	}
 }

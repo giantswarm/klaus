@@ -7,14 +7,8 @@ import (
 // maxErrorTextLen is the maximum number of runes kept per error message.
 const maxErrorTextLen = 200
 
-// requiredPlugins lists the plugin subagents that must appear in subagent
-// dispatches for a session to be considered plugin-compliant.
-var requiredPlugins = []string{
-	"base:code-reviewer",
-	"code-quality:security-auditor",
-}
-
-// PluginCompliance reports whether the required review plugins were dispatched.
+// PluginCompliance reports whether the required review plugins were dispatched
+// and completed successfully.
 type PluginCompliance struct {
 	CodeReviewer    bool `json:"code_reviewer"`
 	SecurityAuditor bool `json:"security_auditor"`
@@ -109,35 +103,44 @@ func collectMessageTypes(messages []claude.StreamMessage) map[string]int {
 	for _, msg := range messages {
 		counts[string(msg.Type)]++
 	}
-	if len(counts) == 0 {
-		return nil
-	}
 	return counts
 }
+
+// maxErrorTexts caps the number of error text entries collected.
+const maxErrorTexts = 100
 
 // collectErrorTexts extracts truncated error messages from tool_result blocks.
 func collectErrorTexts(messages []claude.StreamMessage) []string {
 	var texts []string
 	for _, msg := range messages {
+		if len(texts) >= maxErrorTexts {
+			break
+		}
 		blocks := claude.ExtractToolResults(msg)
 		for _, block := range blocks {
 			if block.IsError && block.Content != "" {
 				texts = append(texts, claude.Truncate(block.Content, maxErrorTextLen))
+				if len(texts) >= maxErrorTexts {
+					break
+				}
 			}
 		}
 	}
 	return texts
 }
 
-// checkPluginCompliance verifies that the required review plugins were dispatched.
+// checkPluginCompliance verifies that the required review plugins were dispatched
+// and completed. Only calls with Status "completed" count toward compliance.
 func checkPluginCompliance(calls []claude.SubagentCall) PluginCompliance {
-	dispatched := make(map[string]bool)
+	completed := make(map[string]bool)
 	for _, call := range calls {
-		dispatched[call.Type] = true
+		if call.Status == "completed" {
+			completed[call.Type] = true
+		}
 	}
 	return PluginCompliance{
-		CodeReviewer:    dispatched["base:code-reviewer"],
-		SecurityAuditor: dispatched["code-quality:security-auditor"],
+		CodeReviewer:    completed["base:code-reviewer"],
+		SecurityAuditor: completed["code-quality:security-auditor"],
 	}
 }
 

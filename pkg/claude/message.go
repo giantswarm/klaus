@@ -189,6 +189,9 @@ type ToolResultBlock struct {
 // prURLPattern matches GitHub pull request URLs in tool result content.
 var prURLPattern = regexp.MustCompile(`https://github\.com/[\w.\-]+/[\w.\-]+/pull/\d+`)
 
+// maxModelNameLen caps model name strings to prevent unbounded map key growth.
+const maxModelNameLen = 256
+
 // extractModel parses the model field from a StreamMessage's raw Message JSON.
 // Returns an empty string if the message has no model field or cannot be parsed.
 func extractModel(msg StreamMessage) string {
@@ -197,6 +200,9 @@ func extractModel(msg StreamMessage) string {
 	}
 	var env messageModelEnvelope
 	if err := json.Unmarshal(msg.Message, &env); err != nil {
+		return ""
+	}
+	if len(env.Model) > maxModelNameLen {
 		return ""
 	}
 	return env.Model
@@ -221,9 +227,12 @@ func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
 	return results
 }
 
-// extractPRURLs returns all unique GitHub PR URLs found in the given text.
+// maxPRURLsPerBlock caps the number of PR URLs extracted from a single content block.
+const maxPRURLsPerBlock = 20
+
+// extractPRURLs returns GitHub PR URLs found in the given text, capped at maxPRURLsPerBlock.
 func extractPRURLs(text string) []string {
-	return prURLPattern.FindAllString(text, -1)
+	return prURLPattern.FindAllString(text, maxPRURLsPerBlock)
 }
 
 // countErrors returns the number of tool_result blocks with is_error set to true.

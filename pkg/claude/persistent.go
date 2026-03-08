@@ -635,6 +635,12 @@ func (p *PersistentProcess) Status() StatusInfo {
 				tu := *pr.TokenUsage
 				info.TokenUsage = &tu
 			}
+			if info.ModelUsage == nil && pr.ModelUsage != nil {
+				info.ModelUsage = copyToolCalls(pr.ModelUsage)
+			}
+			if info.ErrorCount == 0 && pr.ErrorCount != 0 {
+				info.ErrorCount = pr.ErrorCount
+			}
 		}
 	}
 
