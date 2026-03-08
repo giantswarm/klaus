@@ -36,6 +36,9 @@ type PersistedResult struct {
 	MessageCount  int             `json:"message_count"`
 	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
 	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
+	ModelUsage    map[string]int  `json:"model_usage,omitempty"`
+	PRURLs        []string        `json:"pr_urls,omitempty"`
+	ErrorCount    int             `json:"error_count,omitempty"`
 	TokenUsage    *TokenUsage     `json:"token_usage,omitempty"`
 	TotalCost     *float64        `json:"total_cost_usd"`
 	SessionID     string          `json:"session_id,omitempty"`
@@ -53,6 +56,9 @@ func (pr *PersistedResult) ToResultDetailInfo() ResultDetailInfo {
 		MessageCount:  pr.MessageCount,
 		ToolCalls:     pr.ToolCalls,
 		SubagentCalls: copySubagentCalls(pr.SubagentCalls),
+		ModelUsage:    copyToolCalls(pr.ModelUsage),
+		PRURLs:        copyStringSlice(pr.PRURLs),
+		ErrorCount:    pr.ErrorCount,
 		TotalCost:     pr.TotalCost,
 		SessionID:     pr.SessionID,
 		Status:        pr.Status,
@@ -168,6 +174,9 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 		MessageCount:  len(rs.messages),
 		ToolCalls:     collectToolCalls(rs.messages),
 		SubagentCalls: collectSubagentCalls(rs.messages),
+		ModelUsage:    CollectModelUsage(rs.messages),
+		PRURLs:        CollectPRURLs(rs.messages),
+		ErrorCount:    CollectErrorCount(rs.messages),
 		TotalCost:     totalCost,
 		TokenUsage:    tokenUsage,
 		SessionID:     sessionID,

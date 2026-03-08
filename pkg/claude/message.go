@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"time"
 )
 
@@ -119,6 +120,8 @@ type StatusInfo struct {
 	LastToolName  string         `json:"last_tool_name,omitempty"`
 	// SubagentCalls tracks subagent dispatches via the Task/Agent tool.
 	SubagentCalls []SubagentCall `json:"subagent_calls,omitempty"`
+	ModelUsage    map[string]int `json:"model_usage,omitempty"`
+	ErrorCount    int            `json:"error_count,omitempty"`
 	// Result contains the agent's final output text from the last completed
 	// non-blocking Submit run, truncated to maxStatusResultLen runes. It is
 	// populated when the status is "completed". Use the result debug tool
@@ -140,6 +143,9 @@ type ResultDetailInfo struct {
 	MessageCount  int             `json:"message_count"`
 	ToolCalls     map[string]int  `json:"tool_calls,omitempty"`
 	SubagentCalls []SubagentCall  `json:"subagent_calls,omitempty"`
+	ModelUsage    map[string]int  `json:"model_usage,omitempty"`
+	PRURLs        []string        `json:"pr_urls,omitempty"`
+	ErrorCount    int             `json:"error_count,omitempty"`
 	TokenUsage    *TokenUsage     `json:"token_usage,omitempty"`
 	TotalCost     *float64        `json:"total_cost_usd"`
 	SessionID     string          `json:"session_id,omitempty"`
@@ -161,6 +167,141 @@ type SubagentCall struct {
 	Tokens      int     `json:"tokens,omitempty"`
 	DurationMS  float64 `json:"duration_ms,omitempty"`
 	Status      string  `json:"status,omitempty"`
+}
+
+// messageModelEnvelope is used for partial-parsing msg.Message to extract the model field.
+type messageModelEnvelope struct {
+	Model string `json:"model"`
+}
+
+// messageContentEnvelope is used for parsing the content array from msg.Message.
+type messageContentEnvelope struct {
+	Content []ToolResultBlock `json:"content"`
+}
+
+// ToolResultBlock represents a single content block from a user message (tool result).
+type ToolResultBlock struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+	IsError bool   `json:"is_error"`
+}
+
+// prURLPattern matches GitHub pull request URLs in tool result content.
+var prURLPattern = regexp.MustCompile(`https://github\.com/[\w.\-]+/[\w.\-]+/pull/\d+`)
+
+// extractModel parses the model field from a StreamMessage's raw Message JSON.
+// Returns an empty string if the message has no model field or cannot be parsed.
+func extractModel(msg StreamMessage) string {
+	if len(msg.Message) == 0 {
+		return ""
+	}
+	var env messageModelEnvelope
+	if err := json.Unmarshal(msg.Message, &env); err != nil {
+		return ""
+	}
+	return env.Model
+}
+
+// ExtractToolResults parses tool_result content blocks from a StreamMessage's raw Message JSON.
+// Returns nil if the message has no content blocks or cannot be parsed.
+func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
+	if len(msg.Message) == 0 {
+		return nil
+	}
+	var env messageContentEnvelope
+	if err := json.Unmarshal(msg.Message, &env); err != nil {
+		return nil
+	}
+	var results []ToolResultBlock
+	for _, block := range env.Content {
+		if block.Type == "tool_result" {
+			results = append(results, block)
+		}
+	}
+	return results
+}
+
+// extractPRURLs returns all unique GitHub PR URLs found in the given text.
+func extractPRURLs(text string) []string {
+	return prURLPattern.FindAllString(text, -1)
+}
+
+// countErrors returns the number of tool_result blocks with is_error set to true.
+func countErrors(blocks []ToolResultBlock) int {
+	n := 0
+	for _, b := range blocks {
+		if b.IsError {
+			n++
+		}
+	}
+	return n
+}
+
+// appendUnique appends values to dst that are not already present.
+func appendUnique(dst []string, values ...string) []string {
+	seen := make(map[string]bool, len(dst))
+	for _, v := range dst {
+		seen[v] = true
+	}
+	for _, v := range values {
+		if !seen[v] {
+			dst = append(dst, v)
+			seen[v] = true
+		}
+	}
+	return dst
+}
+
+// copyStringSlice returns a copy of the slice. Returns nil for nil/empty input.
+func copyStringSlice(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	cp := make([]string, len(s))
+	copy(cp, s)
+	return cp
+}
+
+// CollectModelUsage extracts model usage counts from a set of messages.
+func CollectModelUsage(messages []StreamMessage) map[string]int {
+	usage := make(map[string]int)
+	for _, msg := range messages {
+		if msg.Type == MessageTypeAssistant {
+			if model := extractModel(msg); model != "" {
+				usage[model]++
+			}
+		}
+	}
+	if len(usage) == 0 {
+		return nil
+	}
+	return usage
+}
+
+// CollectPRURLs extracts unique GitHub PR URLs from tool_result content blocks.
+func CollectPRURLs(messages []StreamMessage) []string {
+	var urls []string
+	for _, msg := range messages {
+		blocks := ExtractToolResults(msg)
+		for _, block := range blocks {
+			found := extractPRURLs(block.Content)
+			urls = appendUnique(urls, found...)
+		}
+	}
+	if len(urls) == 0 {
+		return nil
+	}
+	return urls
+}
+
+// CollectErrorCount counts tool_result blocks with is_error set to true.
+func CollectErrorCount(messages []StreamMessage) int {
+	n := 0
+	for _, msg := range messages {
+		blocks := ExtractToolResults(msg)
+		n += countErrors(blocks)
+	}
+	return n
 }
 
 // copyToolCalls returns a shallow copy of the map to avoid exposing internal

@@ -34,6 +34,9 @@ type PersistentProcess struct {
 	messageCount  int
 	toolCallCount int
 	toolCalls     map[string]int
+	modelUsage    map[string]int
+	prURLs        []string
+	errorCount    int
 	tokenUsage    TokenUsage
 	lastMessage   string
 	lastToolName  string
@@ -277,6 +280,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			p.sessionID = msg.SessionID
 		}
 		if msg.Type == MessageTypeAssistant {
+			if model := extractModel(msg); model != "" {
+				p.modelUsage[model]++
+			}
 			if msg.Subtype == SubtypeText && msg.Text != "" {
 				p.lastMessage = Truncate(msg.Text, 200)
 			}
@@ -290,6 +296,15 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			}
 		} else {
 			p.subagents.handleMessage(msg)
+		}
+		// Extract PR URLs and count errors from tool_result content blocks.
+		if blocks := ExtractToolResults(msg); len(blocks) > 0 {
+			for _, block := range blocks {
+				p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
+				if block.IsError {
+					p.errorCount++
+				}
+			}
 		}
 		// Aggregate token usage from assistant messages.
 		if msg.Usage != nil {
@@ -414,6 +429,9 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.messageCount = 0
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
+	p.modelUsage = make(map[string]int)
+	p.prURLs = nil
+	p.errorCount = 0
 	p.tokenUsage = TokenUsage{}
 	p.totalCost = 0
 	p.costSeen = false
@@ -579,6 +597,8 @@ func (p *PersistentProcess) Status() StatusInfo {
 		LastMessage:   p.lastMessage,
 		LastToolName:  p.lastToolName,
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
+		ModelUsage:    copyToolCalls(p.modelUsage),
+		ErrorCount:    p.errorCount,
 	}
 
 	if p.costSeen {
@@ -632,6 +652,9 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 		MessageCount:  len(p.result.messages),
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
+		ModelUsage:    copyToolCalls(p.modelUsage),
+		PRURLs:        copyStringSlice(p.prURLs),
+		ErrorCount:    p.errorCount,
 		SessionID:     p.sessionID,
 		Status:        p.status,
 		ErrorMessage:  p.lastError,
