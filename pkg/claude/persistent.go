@@ -36,6 +36,7 @@ type PersistentProcess struct {
 	toolCalls     map[string]int
 	modelUsage    map[string]int
 	prURLs        []string
+	toolUseIDs    map[string]string // toolUseID -> toolName
 	errorCount    int
 	tokenUsage    TokenUsage
 	lastMessage   string
@@ -84,6 +85,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		opts:        opts,
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
+		toolUseIDs:  make(map[string]string),
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
@@ -290,6 +292,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				p.toolCallCount++
 				p.lastToolName = msg.ToolName
 				p.toolCalls[msg.ToolName]++
+				if msg.ToolID != "" {
+					p.toolUseIDs[msg.ToolID] = msg.ToolName
+				}
 				p.subagents.handleToolUse(msg)
 			} else {
 				p.subagents.handleMessage(msg)
@@ -300,7 +305,11 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		// Extract PR URLs and count errors from tool_result content blocks.
 		if blocks := ExtractToolResults(msg); len(blocks) > 0 {
 			for _, block := range blocks {
-				p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
+				// Only extract PR URLs from Bash tool results to avoid
+				// false positives from file content (Read, Write, etc.).
+				if block.ToolUseID == "" || isBashTool(p.toolUseIDs[block.ToolUseID]) {
+					p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
+				}
 				if block.IsError {
 					p.errorCount++
 				}
@@ -431,6 +440,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
 	p.prURLs = nil
+	p.toolUseIDs = make(map[string]string)
 	p.errorCount = 0
 	p.tokenUsage = TokenUsage{}
 	p.totalCost = 0
