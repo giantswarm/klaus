@@ -7,9 +7,9 @@ import (
 
 func TestExtractModel(t *testing.T) {
 	tests := []struct {
-		name    string
-		msg     StreamMessage
-		want    string
+		name string
+		msg  StreamMessage
+		want string
 	}{
 		{
 			name: "assistant message with model",
