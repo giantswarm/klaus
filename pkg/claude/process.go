@@ -86,6 +86,7 @@ type Process struct {
 	toolCalls     map[string]int
 	modelUsage    map[string]int
 	prURLs        []string
+	toolUseIDs    map[string]string // toolUseID -> toolName
 	errorCount    int
 	tokenUsage    TokenUsage
 	lastMessage   string
@@ -171,6 +172,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
 	p.prURLs = nil
+	p.toolUseIDs = make(map[string]string)
 	p.errorCount = 0
 	p.tokenUsage = TokenUsage{}
 	p.totalCost = 0
@@ -299,6 +301,9 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 					p.toolCallCount++
 					p.lastToolName = msg.ToolName
 					p.toolCalls[msg.ToolName]++
+					if msg.ToolID != "" {
+						p.toolUseIDs[msg.ToolID] = msg.ToolName
+					}
 					p.subagents.handleToolUse(msg)
 				} else {
 					p.subagents.handleMessage(msg)
@@ -309,7 +314,11 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			// Extract PR URLs and count errors from tool_result content blocks.
 			if blocks := ExtractToolResults(msg); len(blocks) > 0 {
 				for _, block := range blocks {
-					p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
+					// Only extract PR URLs from Bash tool results to avoid
+					// false positives from file content (Read, Write, etc.).
+					if block.ToolUseID == "" || isBashTool(p.toolUseIDs[block.ToolUseID]) {
+						p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
+					}
 					if block.IsError {
 						p.errorCount++
 					}

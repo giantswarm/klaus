@@ -280,29 +280,131 @@ func TestCollectModelUsage(t *testing.T) {
 }
 
 func TestCollectPRURLs(t *testing.T) {
-	messages := []StreamMessage{
-		{
-			Message: json.RawMessage(`{"content":[{"type":"tool_result","content":"Created PR: https://github.com/owner/repo/pull/42","is_error":false}]}`),
-		},
-		{
-			Message: json.RawMessage(`{"content":[{"type":"tool_result","content":"Also: https://github.com/owner/repo/pull/42 and https://github.com/other/repo/pull/7","is_error":false}]}`),
-		},
-	}
+	t.Run("legacy blocks without tool_use_id", func(t *testing.T) {
+		messages := []StreamMessage{
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","content":"Created PR: https://github.com/owner/repo/pull/42","is_error":false}]}`),
+			},
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","content":"Also: https://github.com/owner/repo/pull/42 and https://github.com/other/repo/pull/7","is_error":false}]}`),
+			},
+		}
 
-	urls := CollectPRURLs(messages)
-	if len(urls) != 2 {
-		t.Fatalf("CollectPRURLs() returned %d URLs, want 2", len(urls))
-	}
-	if urls[0] != "https://github.com/owner/repo/pull/42" {
-		t.Errorf("urls[0] = %q", urls[0])
-	}
-	if urls[1] != "https://github.com/other/repo/pull/7" {
-		t.Errorf("urls[1] = %q", urls[1])
-	}
+		urls := CollectPRURLs(messages)
+		if len(urls) != 2 {
+			t.Fatalf("CollectPRURLs() returned %d URLs, want 2", len(urls))
+		}
+		if urls[0] != "https://github.com/owner/repo/pull/42" {
+			t.Errorf("urls[0] = %q", urls[0])
+		}
+		if urls[1] != "https://github.com/other/repo/pull/7" {
+			t.Errorf("urls[1] = %q", urls[1])
+		}
+	})
 
-	// Empty returns nil.
-	if got := CollectPRURLs(nil); got != nil {
-		t.Errorf("CollectPRURLs(nil) = %v, want nil", got)
+	t.Run("extracts PR URLs from Bash tool results", func(t *testing.T) {
+		messages := []StreamMessage{
+			// Assistant invokes Bash tool.
+			{
+				Type:     MessageTypeAssistant,
+				Subtype:  SubtypeToolUse,
+				ToolName: "Bash",
+				ToolID:   "tool_bash_1",
+			},
+			// Tool result from Bash with a PR URL.
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"tool_bash_1","content":"https://github.com/owner/repo/pull/99","is_error":false}]}`),
+			},
+		}
+
+		urls := CollectPRURLs(messages)
+		if len(urls) != 1 {
+			t.Fatalf("CollectPRURLs() returned %d URLs, want 1", len(urls))
+		}
+		if urls[0] != "https://github.com/owner/repo/pull/99" {
+			t.Errorf("urls[0] = %q", urls[0])
+		}
+	})
+
+	t.Run("ignores PR URLs from Read tool results", func(t *testing.T) {
+		messages := []StreamMessage{
+			// Assistant invokes Read tool.
+			{
+				Type:     MessageTypeAssistant,
+				Subtype:  SubtypeToolUse,
+				ToolName: "Read",
+				ToolID:   "tool_read_1",
+			},
+			// Tool result from Read containing a PR URL in file content.
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"tool_read_1","content":"Test fixture: https://github.com/owner/repo/pull/42","is_error":false}]}`),
+			},
+		}
+
+		urls := CollectPRURLs(messages)
+		if urls != nil {
+			t.Errorf("CollectPRURLs() = %v, want nil (Read tool results should be ignored)", urls)
+		}
+	})
+
+	t.Run("mixed Bash and Read results", func(t *testing.T) {
+		messages := []StreamMessage{
+			// Bash tool_use
+			{
+				Type:     MessageTypeAssistant,
+				Subtype:  SubtypeToolUse,
+				ToolName: "Bash",
+				ToolID:   "tool_bash_1",
+			},
+			// Read tool_use
+			{
+				Type:     MessageTypeAssistant,
+				Subtype:  SubtypeToolUse,
+				ToolName: "Read",
+				ToolID:   "tool_read_1",
+			},
+			// Bash result with real PR URL.
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"tool_bash_1","content":"Created https://github.com/owner/repo/pull/10","is_error":false}]}`),
+			},
+			// Read result with PR URL in file content (should be ignored).
+			{
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"tool_read_1","content":"docs mention https://github.com/owner/repo/pull/999","is_error":false}]}`),
+			},
+		}
+
+		urls := CollectPRURLs(messages)
+		if len(urls) != 1 {
+			t.Fatalf("CollectPRURLs() returned %d URLs, want 1", len(urls))
+		}
+		if urls[0] != "https://github.com/owner/repo/pull/10" {
+			t.Errorf("urls[0] = %q, want https://github.com/owner/repo/pull/10", urls[0])
+		}
+	})
+
+	t.Run("nil returns nil", func(t *testing.T) {
+		if got := CollectPRURLs(nil); got != nil {
+			t.Errorf("CollectPRURLs(nil) = %v, want nil", got)
+		}
+	})
+}
+
+func TestIsBashTool(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"Bash", true},
+		{"bash", true},
+		{"Read", false},
+		{"Write", false},
+		{"Edit", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isBashTool(tt.name); got != tt.want {
+			t.Errorf("isBashTool(%q) = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 

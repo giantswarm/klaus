@@ -181,9 +181,10 @@ type messageContentEnvelope struct {
 
 // ToolResultBlock represents a single content block from a user message (tool result).
 type ToolResultBlock struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	IsError bool   `json:"is_error"`
+	Type      string `json:"type"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content"`
+	IsError   bool   `json:"is_error"`
 }
 
 // prURLPattern matches GitHub pull request URLs in tool result content.
@@ -225,6 +226,13 @@ func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
 		}
 	}
 	return results
+}
+
+// isBashTool reports whether the given tool name refers to a Bash/shell tool
+// whose output may contain real PR URLs (as opposed to file content tools like
+// Read/Write that may contain PR URLs embedded in source code or docs).
+func isBashTool(name string) bool {
+	return name == "Bash" || name == "bash"
 }
 
 // maxPRURLsPerBlock caps the number of PR URLs extracted from a single content block.
@@ -287,12 +295,30 @@ func CollectModelUsage(messages []StreamMessage) map[string]int {
 	return usage
 }
 
-// CollectPRURLs extracts unique GitHub PR URLs from tool_result content blocks.
+// CollectPRURLs extracts unique GitHub PR URLs from tool_result content blocks
+// that correspond to Bash/shell tool invocations. Tool results from file-reading
+// tools (Read, Write, etc.) are skipped to avoid false positives from PR URLs
+// embedded in source code or documentation.
 func CollectPRURLs(messages []StreamMessage) []string {
+	// Build a map from tool_use_id to tool_name by scanning assistant tool_use messages.
+	toolNames := make(map[string]string)
+	for _, msg := range messages {
+		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse && msg.ToolID != "" {
+			toolNames[msg.ToolID] = msg.ToolName
+		}
+	}
+
 	var urls []string
 	for _, msg := range messages {
 		blocks := ExtractToolResults(msg)
 		for _, block := range blocks {
+			// Only extract PR URLs from Bash tool results.
+			if block.ToolUseID != "" {
+				toolName := toolNames[block.ToolUseID]
+				if !isBashTool(toolName) {
+					continue
+				}
+			}
 			found := extractPRURLs(block.Content)
 			urls = appendUnique(urls, found...)
 		}
