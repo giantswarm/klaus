@@ -40,7 +40,7 @@ klaus serve
 Or with Docker:
 
 ```bash
-docker run -d -p 8080:8080 -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY klaus:latest serve
+docker run -d -p 8080:8080 -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY gsoci.azurecr.io/giantswarm/klaus:latest serve
 ```
 
 Or deploy to Kubernetes:
