@@ -266,15 +266,20 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		opts.NoSessionPersistence = true
 	}
 
-	// Load personality SOUL.md if mounted by klausctl.
-	if soul, err := loadSOULFile(defaultSOULPath); err != nil {
-		log.Printf("WARNING: failed to load personality from %s: %v", defaultSOULPath, err)
+	// Load personality SOUL.md. The KLAUS_SOUL_FILE env var allows operators
+	// to override the default path (useful for Kubernetes image volumes where
+	// SubPath is not supported).
+	soulPath := soulFilePath()
+	if soul, err := loadSOULFile(soulPath); err != nil {
+		log.Printf("WARNING: failed to load personality from %q: %v", soulPath, err)
 	} else if soul != "" {
 		if opts.AppendSystemPrompt != "" {
 			opts.AppendSystemPrompt += "\n\n"
 		}
 		opts.AppendSystemPrompt += soul
-		log.Printf("Loaded personality from %s (%d bytes)", defaultSOULPath, len(soul))
+		log.Printf("Loaded personality from %q (%d bytes)", soulPath, len(soul))
+	} else if os.Getenv("KLAUS_SOUL_FILE") != "" {
+		log.Printf("WARNING: KLAUS_SOUL_FILE is set to %q but the file does not exist or is empty", soulPath)
 	}
 
 	// Create the Claude process manager.
@@ -476,6 +481,16 @@ func applyOAuthFlagOverrides(
 	if cmd.Flags().Changed("tls-key-file") {
 		cfg.OAuth.TLS.KeyFile = tlsKey
 	}
+}
+
+// soulFilePath returns the path to the SOUL.md personality file.
+// If the KLAUS_SOUL_FILE environment variable is set, its value is used;
+// otherwise defaultSOULPath is returned.
+func soulFilePath() string {
+	if p := os.Getenv("KLAUS_SOUL_FILE"); p != "" {
+		return p
+	}
+	return defaultSOULPath
 }
 
 // loadSOULFile reads a SOUL.md personality file and returns its content

@@ -163,4 +163,32 @@ func TestLoadSOULFile_ExactlyMaxSize(t *testing.T) {
 	}
 }
 
+func TestSoulFilePath_Unset(t *testing.T) {
+	// Ensure the env var is saved/restored, then unset it.
+	t.Setenv("KLAUS_SOUL_FILE", "")
+	os.Unsetenv("KLAUS_SOUL_FILE")
+
+	got := soulFilePath()
+	if got != defaultSOULPath {
+		t.Errorf("expected default path %q, got %q", defaultSOULPath, got)
+	}
+}
+
+func TestSoulFilePath_EmptyString(t *testing.T) {
+	t.Setenv("KLAUS_SOUL_FILE", "")
+	got := soulFilePath()
+	if got != defaultSOULPath {
+		t.Errorf("expected default path %q when env is empty string, got %q", defaultSOULPath, got)
+	}
+}
+
+func TestSoulFilePath_EnvOverride(t *testing.T) {
+	custom := "/var/lib/klaus/personality/SOUL.md"
+	t.Setenv("KLAUS_SOUL_FILE", custom)
+	got := soulFilePath()
+	if got != custom {
+		t.Errorf("expected %q, got %q", custom, got)
+	}
+}
+
 // TestParseBool has moved to pkg/config/config_test.go alongside the config loader.
