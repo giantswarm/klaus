@@ -41,7 +41,9 @@ RUN if [ "$VARIANT" = "alpine" ]; then \
     fi
 
 # Install Claude Code CLI globally.
-RUN npm install -g @anthropic-ai/claude-code && \
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG CLAUDE_CODE_VER=2.1.72
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VER} && \
     npm cache clean --force
 
 # Create a non-root user for running the application.
