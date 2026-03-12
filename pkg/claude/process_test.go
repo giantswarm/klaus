@@ -88,6 +88,25 @@ func TestProcess_ResultDetail_InitialState(t *testing.T) {
 	}
 }
 
+func TestProcess_ResultDetail_MessageCountWhileBusy(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	// Simulate a busy process that has received messages but has no
+	// completed result yet (result.messages is empty).
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.messageCount = 7
+	process.mu.Unlock()
+
+	detail := process.ResultDetail()
+	if detail.MessageCount != 7 {
+		t.Errorf("expected MessageCount 7 from live counter while busy, got %d", detail.MessageCount)
+	}
+	if detail.Status != ProcessStatusBusy {
+		t.Errorf("expected status %q, got %q", ProcessStatusBusy, detail.Status)
+	}
+}
+
 func TestProcess_StatusNoResultWhenBusy(t *testing.T) {
 	process := NewProcess(DefaultOptions())
 

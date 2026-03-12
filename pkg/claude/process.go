@@ -552,7 +552,7 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 	detail := ResultDetailInfo{
 		ResultText:    p.result.text,
 		Messages:      p.result.messages,
-		MessageCount:  len(p.result.messages),
+		MessageCount:  p.messageCount,
 		ToolCalls:     copyToolCalls(p.toolCalls),
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
 		ModelUsage:    copyToolCalls(p.modelUsage),
