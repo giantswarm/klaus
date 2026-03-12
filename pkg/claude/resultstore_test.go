@@ -265,16 +265,22 @@ func Test_resultStorePath(t *testing.T) {
 			want:    "/home/user/.klaus/results",
 		},
 		{
+			name:    "relative env var is ignored",
+			getenv:  func(string) string { return "relative/path" },
+			homeDir: func() (string, error) { return "/home/user", nil },
+			want:    "/home/user/.klaus/results",
+		},
+		{
 			name:    "home dir error falls back to tmp",
 			getenv:  func(string) string { return "" },
 			homeDir: func() (string, error) { return "", fmt.Errorf("no home") },
-			want:    filepath.Join(os.TempDir(), "klaus-results"),
+			want:    filepath.Join(os.TempDir(), fmt.Sprintf("klaus-results-%d", os.Getuid())),
 		},
 		{
 			name:    "empty home falls back to tmp",
 			getenv:  func(string) string { return "" },
 			homeDir: func() (string, error) { return "", nil },
-			want:    filepath.Join(os.TempDir(), "klaus-results"),
+			want:    filepath.Join(os.TempDir(), fmt.Sprintf("klaus-results-%d", os.Getuid())),
 		},
 	}
 
@@ -306,6 +312,18 @@ func Test_resultStoreDir(t *testing.T) {
 		expected := ResultStorePath("/workspace")
 		if got != expected {
 			t.Errorf("resultStoreDir() = %q, want %q", got, expected)
+		}
+	})
+
+	t.Run("relative ResultDir is rejected", func(t *testing.T) {
+		opts := Options{
+			WorkDir:   "/workspace",
+			ResultDir: "relative/path",
+		}
+		got := resultStoreDir(opts)
+		expected := ResultStorePath("/workspace")
+		if got != expected {
+			t.Errorf("resultStoreDir() with relative path = %q, want fallback %q", got, expected)
 		}
 	})
 }

@@ -102,20 +102,30 @@ func ResultStorePath(workDir string) string {
 // resultStorePath is the testable inner implementation of ResultStorePath.
 func resultStorePath(_ string, getenv func(string) string, homeDir func() (string, error)) string {
 	if dir := getenv(resultDirEnvVar); dir != "" {
-		return dir
+		dir = filepath.Clean(dir)
+		if filepath.IsAbs(dir) {
+			return dir
+		}
+		log.Printf("[klaus] WARNING: %s=%q is not an absolute path, ignoring", resultDirEnvVar, dir)
 	}
 	if home, err := homeDir(); err == nil && home != "" {
 		return filepath.Join(home, defaultResultSubdir)
 	}
 	// Last resort: fall back to /tmp so we never write inside a workspace.
-	return filepath.Join(os.TempDir(), "klaus-results")
+	// Include UID to prevent other users from pre-creating the directory.
+	return filepath.Join(os.TempDir(), fmt.Sprintf("klaus-results-%d", os.Getuid()))
 }
 
 // resultStoreDir returns the result store directory for the given options.
-// It uses Options.ResultDir if set, otherwise falls back to ResultStorePath.
+// It uses Options.ResultDir if set (and absolute), otherwise falls back to
+// ResultStorePath.
 func resultStoreDir(opts Options) string {
 	if opts.ResultDir != "" {
-		return opts.ResultDir
+		cleaned := filepath.Clean(opts.ResultDir)
+		if filepath.IsAbs(cleaned) {
+			return cleaned
+		}
+		log.Printf("[klaus] WARNING: ResultDir %q is not an absolute path, falling back to default", opts.ResultDir)
 	}
 	return ResultStorePath(opts.WorkDir)
 }
