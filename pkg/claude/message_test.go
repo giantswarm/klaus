@@ -80,6 +80,224 @@ func TestParseStreamMessage_ToolUse(t *testing.T) {
 	}
 }
 
+func TestParseStreamMessage_NestedAssistantText(t *testing.T) {
+	// Claude Code 2.1+ format: text content nested in message.content[].
+	data := []byte(`{"type":"assistant","message":{"model":"claude-sonnet-4-6","id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Hi!"}],"usage":{"input_tokens":3,"output_tokens":1}},"session_id":"sess-1"}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeAssistant {
+		t.Errorf("expected type %q, got %q", MessageTypeAssistant, msg.Type)
+	}
+	if msg.Subtype != SubtypeText {
+		t.Errorf("expected subtype %q, got %q", SubtypeText, msg.Subtype)
+	}
+	if msg.Text != "Hi!" {
+		t.Errorf("expected text %q, got %q", "Hi!", msg.Text)
+	}
+	if msg.Usage == nil {
+		t.Fatal("expected Usage to be parsed from nested message")
+	}
+	if msg.Usage.InputTokens != 3 {
+		t.Errorf("expected InputTokens 3, got %d", msg.Usage.InputTokens)
+	}
+	if msg.Usage.OutputTokens != 1 {
+		t.Errorf("expected OutputTokens 1, got %d", msg.Usage.OutputTokens)
+	}
+	if msg.SessionID != "sess-1" {
+		t.Errorf("expected session_id %q, got %q", "sess-1", msg.SessionID)
+	}
+}
+
+func TestParseStreamMessage_NestedAssistantToolUse(t *testing.T) {
+	// Claude Code 2.1+ format: tool_use content nested in message.content[].
+	data := []byte(`{"type":"assistant","message":{"id":"msg_02","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls -la"}}]},"session_id":"sess-2"}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeAssistant {
+		t.Errorf("expected type %q, got %q", MessageTypeAssistant, msg.Type)
+	}
+	if msg.Subtype != SubtypeToolUse {
+		t.Errorf("expected subtype %q, got %q", SubtypeToolUse, msg.Subtype)
+	}
+	if msg.ToolName != "Bash" {
+		t.Errorf("expected tool_name %q, got %q", "Bash", msg.ToolName)
+	}
+	if msg.ToolID != "toolu_1" {
+		t.Errorf("expected tool_id %q, got %q", "toolu_1", msg.ToolID)
+	}
+	if string(msg.ToolArgs) != `{"command":"ls -la"}` {
+		t.Errorf("expected tool_args %q, got %q", `{"command":"ls -la"}`, string(msg.ToolArgs))
+	}
+}
+
+func TestParseStreamMessage_NestedUsageFallback(t *testing.T) {
+	// When top-level usage is nil, nested message.usage should be used.
+	data := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":10,"output_tokens":5}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Usage == nil {
+		t.Fatal("expected Usage from nested message")
+	}
+	if msg.Usage.InputTokens != 10 || msg.Usage.OutputTokens != 5 {
+		t.Errorf("unexpected usage: %+v", msg.Usage)
+	}
+}
+
+func TestParseStreamMessage_NestedUsageDoesNotOverrideTopLevel(t *testing.T) {
+	// When top-level usage is present, nested usage should not override it.
+	data := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":99,"output_tokens":99}},"usage":{"input_tokens":10,"output_tokens":5}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Usage == nil {
+		t.Fatal("expected Usage to be present")
+	}
+	// Top-level usage should win.
+	if msg.Usage.InputTokens != 10 || msg.Usage.OutputTokens != 5 {
+		t.Errorf("expected top-level usage to be preserved, got %+v", msg.Usage)
+	}
+}
+
+func TestParseStreamMessage_OldFormatStillWorks(t *testing.T) {
+	// Old format with top-level fields should continue to work unchanged.
+	data := []byte(`{"type":"assistant","subtype":"text","text":"Hello world","usage":{"input_tokens":100,"output_tokens":50}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Subtype != SubtypeText {
+		t.Errorf("expected subtype %q, got %q", SubtypeText, msg.Subtype)
+	}
+	if msg.Text != "Hello world" {
+		t.Errorf("expected text %q, got %q", "Hello world", msg.Text)
+	}
+	if msg.Usage == nil || msg.Usage.InputTokens != 100 {
+		t.Errorf("expected top-level usage to be preserved")
+	}
+}
+
+func TestParseStreamMessage_NestedTextConcatenation(t *testing.T) {
+	// Multiple text blocks should be concatenated.
+	data := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Hello "},{"type":"text","text":"world!"}]}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Subtype != SubtypeText {
+		t.Errorf("expected subtype %q, got %q", SubtypeText, msg.Subtype)
+	}
+	if msg.Text != "Hello world!" {
+		t.Errorf("expected concatenated text %q, got %q", "Hello world!", msg.Text)
+	}
+}
+
+func TestParseStreamMessage_NestedInvalidEnvelope(t *testing.T) {
+	// When message is present but not a valid envelope, degrade gracefully.
+	data := []byte(`{"type":"assistant","message":{"content":"not-an-array"}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should fall through without populating nested fields.
+	if msg.Subtype != "" {
+		t.Errorf("expected empty subtype for unparseable envelope, got %q", msg.Subtype)
+	}
+}
+
+func TestParseStreamMessage_NestedEmptyContent(t *testing.T) {
+	// Empty content array should not populate any fields.
+	data := []byte(`{"type":"assistant","message":{"content":[]}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Subtype != "" {
+		t.Errorf("expected empty subtype for empty content, got %q", msg.Subtype)
+	}
+}
+
+func TestParseStreamMessage_NestedMultipleToolUse(t *testing.T) {
+	// Only the first tool_use block should be used.
+	data := []byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"cmd":"a"}},{"type":"tool_use","id":"t2","name":"Read","input":{"path":"b"}}]}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.ToolName != "Bash" {
+		t.Errorf("expected first tool_use (Bash), got %q", msg.ToolName)
+	}
+	if msg.ToolID != "t1" {
+		t.Errorf("expected first tool_id (t1), got %q", msg.ToolID)
+	}
+}
+
+func TestParseStreamMessage_NestedToolUseOverridesTextSubtype(t *testing.T) {
+	// When both text and tool_use blocks are present, tool_use should win for subtype.
+	data := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Let me check..."},{"type":"tool_use","id":"t1","name":"Read","input":{"path":"/tmp"}}]}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Subtype != SubtypeToolUse {
+		t.Errorf("expected subtype %q, got %q", SubtypeToolUse, msg.Subtype)
+	}
+	if msg.Text != "Let me check..." {
+		t.Errorf("expected text %q, got %q", "Let me check...", msg.Text)
+	}
+	if msg.ToolName != "Read" {
+		t.Errorf("expected tool_name %q, got %q", "Read", msg.ToolName)
+	}
+}
+
+func TestSummarizeMessages_NestedFormat(t *testing.T) {
+	// Verify that SummarizeMessages works with messages parsed from the new format.
+	textData := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"Hi there!"}]}}`)
+	toolData := []byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}`)
+
+	textMsg, err := ParseStreamMessage(textData)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	toolMsg, err := ParseStreamMessage(toolData)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	summaries := SummarizeMessages([]StreamMessage{textMsg, toolMsg})
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 summaries, got %d", len(summaries))
+	}
+	if summaries[0].Content != "Hi there!" {
+		t.Errorf("expected text content %q, got %q", "Hi there!", summaries[0].Content)
+	}
+	if summaries[1].Content != "Using tool: Bash" {
+		t.Errorf("expected tool content %q, got %q", "Using tool: Bash", summaries[1].Content)
+	}
+}
+
+func TestCollectResultText_NestedFormat(t *testing.T) {
+	// Fallback to concatenated assistant text should work with nested format.
+	textData := []byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"partial output"}]}}`)
+	msg, err := ParseStreamMessage(textData)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	text := CollectResultText([]StreamMessage{msg})
+	if text != "partial output" {
+		t.Errorf("expected %q, got %q", "partial output", text)
+	}
+}
+
 func TestParseStreamMessage_InvalidJSON(t *testing.T) {
 	data := []byte(`not json`)
 	_, err := ParseStreamMessage(data)

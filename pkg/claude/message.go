@@ -69,6 +69,11 @@ type StreamMessage struct {
 
 // ParseStreamMessage unmarshals a single line of stream-json output.
 // It stamps each message with the current UTC time in RFC3339 format.
+//
+// Claude Code 2.1+ nests assistant message content inside message.content[]
+// instead of using top-level fields. When top-level subtype is empty and
+// msg.Message is populated, this function extracts content from the nested
+// structure to populate Subtype, Text, ToolName, ToolID, ToolArgs, and Usage.
 func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	var msg StreamMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -77,6 +82,49 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	msg.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	msg.Raw = make(json.RawMessage, len(data))
 	copy(msg.Raw, data)
+
+	// Extract nested content for assistant messages in the new format.
+	if msg.Type == MessageTypeAssistant && msg.Subtype == "" && len(msg.Message) > 0 {
+		var env assistantMessageEnvelope
+		if err := json.Unmarshal(msg.Message, &env); err == nil {
+			// The Claude CLI emits at most one tool_use block per assistant
+			// message. If multiple text blocks are present they are concatenated
+			// (capped at maxNestedTextLen to prevent unbounded allocation).
+			// Only the first tool_use block is used; subsequent ones are ignored.
+			// tool_use takes precedence over text for the Subtype field.
+			textLen := 0
+			for _, block := range env.Content {
+				switch block.Type {
+				case "text":
+					if msg.Subtype == "" {
+						msg.Subtype = SubtypeText
+					}
+					remaining := maxNestedTextLen - textLen
+					if remaining <= 0 {
+						continue
+					}
+					t := block.Text
+					if len(t) > remaining {
+						t = t[:remaining]
+					}
+					msg.Text += t
+					textLen += len(t)
+				case "tool_use":
+					if msg.Subtype == SubtypeToolUse {
+						continue // keep the first tool_use block
+					}
+					msg.Subtype = SubtypeToolUse
+					msg.ToolName = block.Name
+					msg.ToolID = block.ID
+					msg.ToolArgs = block.Input
+				}
+			}
+			if msg.Usage == nil && env.Usage != nil {
+				msg.Usage = env.Usage
+			}
+		}
+	}
+
 	return msg, nil
 }
 
@@ -101,6 +149,10 @@ var AllProcessStatuses = []ProcessStatus{
 	ProcessStatusStopped,
 	ProcessStatusError,
 }
+
+// maxNestedTextLen caps the accumulated text length extracted from nested
+// message.content[] blocks to prevent unbounded memory allocation.
+const maxNestedTextLen = 1 << 20 // 1 MiB
 
 // maxStatusResultLen is the maximum number of runes included in the
 // StatusInfo.Result field. Longer results are truncated with "...";
@@ -235,6 +287,24 @@ type messageModelEnvelope struct {
 // messageContentEnvelope is used for parsing the content array from msg.Message.
 type messageContentEnvelope struct {
 	Content []ToolResultBlock `json:"content"`
+}
+
+// assistantContentBlock represents a single content block in message.content[]
+// for assistant messages (text or tool_use). Claude Code 2.1+ nests assistant
+// content here instead of using top-level fields.
+type assistantContentBlock struct {
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+// assistantMessageEnvelope is used to extract content and usage from the nested
+// message object in the new Claude Code 2.1+ stream-json format.
+type assistantMessageEnvelope struct {
+	Content []assistantContentBlock `json:"content"`
+	Usage   *TokenUsage             `json:"usage,omitempty"`
 }
 
 // ToolResultBlock represents a single content block from a user message (tool result).
