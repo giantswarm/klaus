@@ -87,37 +87,46 @@ func NewResultStore(dir string) *ResultStore {
 	return &ResultStore{dir: dir}
 }
 
-// ResultStorePath returns the result store directory. It resolves the path
-// using the following precedence:
-//  1. The explicitly provided resultDir (from Options.ResultDir)
-//  2. The KLAUS_RESULT_DIR environment variable
-//  3. $HOME/.klaus/results/ (default, outside any workspace)
+// ResultStorePath returns the default result store directory based on the
+// environment. It checks (in order):
+//  1. The KLAUS_RESULT_DIR environment variable (must be absolute)
+//  2. $HOME/.klaus/results/
+//  3. A UID-scoped directory under os.TempDir() as a last resort
 //
-// The workDir parameter is no longer used but is kept for backward
-// compatibility of the function signature.
-func ResultStorePath(workDir string) string {
-	return resultStorePath(workDir, os.Getenv, os.UserHomeDir)
+// Note: Options.ResultDir is handled by resultStoreDir, not this function.
+func ResultStorePath() string {
+	return resultStorePath(os.Getenv, os.UserHomeDir)
 }
 
 // resultStorePath is the testable inner implementation of ResultStorePath.
-func resultStorePath(_ string, getenv func(string) string, homeDir func() (string, error)) string {
+func resultStorePath(getenv func(string) string, homeDir func() (string, error)) string {
 	if dir := getenv(resultDirEnvVar); dir != "" {
-		return dir
+		dir = filepath.Clean(dir)
+		if filepath.IsAbs(dir) {
+			return dir
+		}
+		log.Printf("[klaus] WARNING: %s=%q is not an absolute path, ignoring", resultDirEnvVar, dir)
 	}
 	if home, err := homeDir(); err == nil && home != "" {
 		return filepath.Join(home, defaultResultSubdir)
 	}
 	// Last resort: fall back to /tmp so we never write inside a workspace.
-	return filepath.Join(os.TempDir(), "klaus-results")
+	// Include UID to prevent other users from pre-creating the directory.
+	return filepath.Join(os.TempDir(), fmt.Sprintf("klaus-results-%d", os.Getuid()))
 }
 
 // resultStoreDir returns the result store directory for the given options.
-// It uses Options.ResultDir if set, otherwise falls back to ResultStorePath.
+// It uses Options.ResultDir if set (and absolute), otherwise falls back to
+// ResultStorePath.
 func resultStoreDir(opts Options) string {
 	if opts.ResultDir != "" {
-		return opts.ResultDir
+		cleaned := filepath.Clean(opts.ResultDir)
+		if filepath.IsAbs(cleaned) {
+			return cleaned
+		}
+		log.Printf("[klaus] WARNING: ResultDir %q is not an absolute path, falling back to default", opts.ResultDir)
 	}
-	return ResultStorePath(opts.WorkDir)
+	return ResultStorePath()
 }
 
 // Save persists a result to disk. It creates the directory if needed.
