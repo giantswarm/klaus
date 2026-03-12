@@ -42,6 +42,7 @@ type PersistentProcess struct {
 	lastMessage   string
 	lastToolName  string
 	subagents     *subagentTracker
+	liveMessages  []StreamMessage
 
 	// result stores the output of the last completed Submit run,
 	// allowing callers to retrieve results asynchronously.
@@ -277,6 +278,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 
 		p.mu.Lock()
 		p.messageCount++
+		p.liveMessages = append(p.liveMessages, msg)
 
 		if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 			p.sessionID = msg.SessionID
@@ -448,6 +450,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
+	p.liveMessages = nil
 
 	// Create response channel and done channel for this prompt.
 	ch := make(chan StreamMessage, 100)
@@ -693,6 +696,50 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 	}
 
 	return detail
+}
+
+// Messages returns the current conversation messages. While the agent is
+// busy, it returns the live-accumulated messages. When completed, it falls
+// back to the stored result messages or persisted state on disk.
+func (p *PersistentProcess) Messages() MessagesInfo {
+	p.mu.RLock()
+	status := p.status
+	live := p.liveMessages
+	res := p.result
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	if status == ProcessStatusBusy || status == ProcessStatusStarting {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(copyStreamMessages(live)),
+		}
+	}
+
+	if len(res.messages) > 0 {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(res.messages),
+		}
+	}
+
+	if len(live) > 0 {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(copyStreamMessages(live)),
+		}
+	}
+
+	if store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil && len(pr.Messages) > 0 {
+			return MessagesInfo{
+				Status:   status,
+				Messages: SummarizeMessages(pr.Messages),
+			}
+		}
+	}
+
+	return MessagesInfo{Status: status}
 }
 
 // Done returns a channel closed when the current prompt response is complete.

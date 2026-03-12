@@ -92,6 +92,7 @@ type Process struct {
 	lastMessage   string
 	lastToolName  string
 	subagents     *subagentTracker
+	liveMessages  []StreamMessage
 
 	// result stores the output of the last completed Submit run,
 	// allowing callers to retrieve results asynchronously.
@@ -180,6 +181,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
+	p.liveMessages = nil
 
 	// Create a new done channel for this run while holding the lock,
 	// ensuring no race between concurrent callers.
@@ -287,6 +289,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 
 			p.mu.Lock()
 			p.messageCount++
+			p.liveMessages = append(p.liveMessages, msg)
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
 			}
@@ -580,6 +583,54 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 	}
 
 	return detail
+}
+
+// Messages returns the current conversation messages. While the agent is
+// busy, it returns the live-accumulated messages. When completed, it falls
+// back to the stored result messages or persisted state on disk.
+func (p *Process) Messages() MessagesInfo {
+	p.mu.RLock()
+	status := p.status
+	live := p.liveMessages
+	res := p.result
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	// While busy or starting, return live messages.
+	if status == ProcessStatusBusy || status == ProcessStatusStarting {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(copyStreamMessages(live)),
+		}
+	}
+
+	// When completed, prefer in-memory result messages.
+	if len(res.messages) > 0 {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(res.messages),
+		}
+	}
+
+	// If live messages are available (e.g. just finished), use those.
+	if len(live) > 0 {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(copyStreamMessages(live)),
+		}
+	}
+
+	// Fall back to persisted result on disk.
+	if store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil && len(pr.Messages) > 0 {
+			return MessagesInfo{
+				Status:   status,
+				Messages: SummarizeMessages(pr.Messages),
+			}
+		}
+	}
+
+	return MessagesInfo{Status: status}
 }
 
 // Done returns a channel closed when the current run completes.

@@ -386,6 +386,110 @@ func TestProcess_ResultDetailTokenUsage(t *testing.T) {
 	}
 }
 
+func TestProcess_Messages_Idle(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	info := process.Messages()
+	if info.Status != ProcessStatusIdle {
+		t.Errorf("expected status %q, got %q", ProcessStatusIdle, info.Status)
+	}
+	if len(info.Messages) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(info.Messages))
+	}
+}
+
+func TestProcess_Messages_Busy(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "thinking..."},
+		{Type: MessageTypeAssistant, Subtype: SubtypeToolUse, ToolName: "Bash"},
+	}
+	process.mu.Unlock()
+
+	info := process.Messages()
+	if info.Status != ProcessStatusBusy {
+		t.Errorf("expected status %q, got %q", ProcessStatusBusy, info.Status)
+	}
+	if len(info.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(info.Messages))
+	}
+	if info.Messages[0].Role != "system" {
+		t.Errorf("expected role %q, got %q", "system", info.Messages[0].Role)
+	}
+	if info.Messages[0].Content != "Session: sess-1" {
+		t.Errorf("expected content %q, got %q", "Session: sess-1", info.Messages[0].Content)
+	}
+	if info.Messages[1].Content != "thinking..." {
+		t.Errorf("expected content %q, got %q", "thinking...", info.Messages[1].Content)
+	}
+	if info.Messages[2].Content != "Using tool: Bash" {
+		t.Errorf("expected content %q, got %q", "Using tool: Bash", info.Messages[2].Content)
+	}
+}
+
+func TestProcess_Messages_Completed(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusCompleted
+	process.result = resultState{
+		text:      "done",
+		completed: true,
+		messages: []StreamMessage{
+			{Type: MessageTypeSystem, SessionID: "sess-1"},
+			{Type: MessageTypeResult, Result: "final answer"},
+		},
+	}
+	process.mu.Unlock()
+
+	info := process.Messages()
+	if info.Status != ProcessStatusCompleted {
+		t.Errorf("expected status %q, got %q", ProcessStatusCompleted, info.Status)
+	}
+	if len(info.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(info.Messages))
+	}
+	if info.Messages[1].Role != "result" {
+		t.Errorf("expected role %q, got %q", "result", info.Messages[1].Role)
+	}
+	if info.Messages[1].Content != "final answer" {
+		t.Errorf("expected content %q, got %q", "final answer", info.Messages[1].Content)
+	}
+}
+
+func TestSummarizeMessages(t *testing.T) {
+	msgs := []StreamMessage{
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeSystem}, // no session ID, should be skipped
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "hello"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText}, // empty text, should be skipped
+		{Type: MessageTypeAssistant, Subtype: SubtypeToolUse, ToolName: "Read"},
+		{Type: MessageTypeResult, Result: "done"},
+		{Type: MessageTypeResult}, // empty result, should be skipped
+	}
+
+	summaries := SummarizeMessages(msgs)
+	if len(summaries) != 4 {
+		t.Fatalf("expected 4 summaries, got %d: %+v", len(summaries), summaries)
+	}
+	if summaries[0].Role != "system" || summaries[0].Content != "Session: sess-1" {
+		t.Errorf("unexpected summary[0]: %+v", summaries[0])
+	}
+	if summaries[1].Role != "assistant" || summaries[1].Content != "hello" {
+		t.Errorf("unexpected summary[1]: %+v", summaries[1])
+	}
+	if summaries[2].Role != "assistant" || summaries[2].Content != "Using tool: Read" {
+		t.Errorf("unexpected summary[2]: %+v", summaries[2])
+	}
+	if summaries[3].Role != "result" || summaries[3].Content != "done" {
+		t.Errorf("unexpected summary[3]: %+v", summaries[3])
+	}
+}
+
 func TestProcess_StopWhenNotRunning(t *testing.T) {
 	process := NewProcess(DefaultOptions())
 

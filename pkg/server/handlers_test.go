@@ -53,6 +53,10 @@ func (m *mockPrompter) ResultDetail() claude.ResultDetailInfo {
 	return claude.ResultDetailInfo{}
 }
 
+func (m *mockPrompter) Messages() claude.MessagesInfo {
+	return claude.MessagesInfo{Status: m.status.Status}
+}
+
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {
 	return json.Marshal(m.status)
 }

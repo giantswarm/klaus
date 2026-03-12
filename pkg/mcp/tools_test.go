@@ -29,6 +29,8 @@ type mockPrompter struct {
 	submitCalled bool
 	// resultDetail is returned by ResultDetail.
 	resultDetail claudepkg.ResultDetailInfo
+	// messagesInfo is returned by Messages.
+	messagesInfo claudepkg.MessagesInfo
 }
 
 func (m *mockPrompter) Run(ctx context.Context, prompt string) (<-chan claudepkg.StreamMessage, error) {
@@ -101,6 +103,8 @@ func (m *mockPrompter) Done() <-chan struct{} {
 	close(ch)
 	return ch
 }
+
+func (m *mockPrompter) Messages() claudepkg.MessagesInfo { return m.messagesInfo }
 
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {
 	return json.Marshal(m.status)
@@ -819,6 +823,86 @@ func TestStopTool(t *testing.T) {
 	}
 }
 
+// --- Messages tool tests ---
+
+func TestMessagesTool_WithMessages(t *testing.T) {
+	mock := &mockPrompter{
+		messagesInfo: claudepkg.MessagesInfo{
+			Status: claudepkg.ProcessStatusBusy,
+			Messages: []claudepkg.MessageSummary{
+				{Role: "system", Content: "Session: sess-001"},
+				{Role: "assistant", Content: "Working on it..."},
+				{Role: "assistant", Content: "Using tool: Bash"},
+			},
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["messages"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	text := extractText(t, result)
+	var info claudepkg.MessagesInfo
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatalf("failed to parse messages JSON: %v (text: %s)", err, text)
+	}
+
+	if info.Status != claudepkg.ProcessStatusBusy {
+		t.Errorf("expected status %q, got %q", claudepkg.ProcessStatusBusy, info.Status)
+	}
+	if len(info.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(info.Messages))
+	}
+	if info.Messages[0].Role != "system" {
+		t.Errorf("expected first message role %q, got %q", "system", info.Messages[0].Role)
+	}
+	if info.Messages[1].Content != "Working on it..." {
+		t.Errorf("expected second message content %q, got %q", "Working on it...", info.Messages[1].Content)
+	}
+	if info.Messages[2].Content != "Using tool: Bash" {
+		t.Errorf("expected third message content %q, got %q", "Using tool: Bash", info.Messages[2].Content)
+	}
+}
+
+func TestMessagesTool_Empty(t *testing.T) {
+	mock := &mockPrompter{
+		messagesInfo: claudepkg.MessagesInfo{
+			Status: claudepkg.ProcessStatusIdle,
+		},
+	}
+
+	tools := buildToolMap(mock)
+	handler := tools["messages"]
+
+	result, err := handler(context.Background(), mcp.CallToolRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %v", result.Content)
+	}
+
+	text := extractText(t, result)
+	var info claudepkg.MessagesInfo
+	if err := json.Unmarshal([]byte(text), &info); err != nil {
+		t.Fatalf("failed to parse messages JSON: %v (text: %s)", err, text)
+	}
+
+	if info.Status != claudepkg.ProcessStatusIdle {
+		t.Errorf("expected status %q, got %q", claudepkg.ProcessStatusIdle, info.Status)
+	}
+	if len(info.Messages) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(info.Messages))
+	}
+}
+
 // --- Progress message tests ---
 
 func TestProgressMessage(t *testing.T) {
@@ -1014,6 +1098,9 @@ func buildToolMap(process claudepkg.Prompter) map[string]func(context.Context, m
 
 	rt := resultTool(process)
 	tools[rt.Tool.Name] = rt.Handler
+
+	mt := messagesTool(process)
+	tools[mt.Tool.Name] = mt.Handler
 
 	return tools
 }
