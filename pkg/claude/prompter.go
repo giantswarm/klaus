@@ -43,6 +43,11 @@ type Prompter interface {
 	// from the last completed run. Intended for debugging and troubleshooting.
 	ResultDetail() ResultDetailInfo
 
+	// Messages returns the current conversation messages. While the agent
+	// is busy, it returns the live-accumulated messages; when completed,
+	// it falls back to the stored result messages or persisted state.
+	Messages() MessagesInfo
+
 	// MarshalStatus returns the status as JSON.
 	MarshalStatus() ([]byte, error)
 }

@@ -153,6 +153,64 @@ type ResultDetailInfo struct {
 	ErrorMessage  string          `json:"error,omitempty"`
 }
 
+// MessagesInfo holds the current conversation messages along with the
+// process status. Used by the messages MCP tool for real-time access.
+type MessagesInfo struct {
+	Status   ProcessStatus    `json:"status"`
+	Messages []MessageSummary `json:"messages"`
+}
+
+// MessageSummary is a simplified representation of a StreamMessage
+// with only role and content, suitable for external consumers.
+type MessageSummary struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// SummarizeMessages converts a slice of StreamMessages to simplified
+// MessageSummary entries for external consumption.
+func SummarizeMessages(msgs []StreamMessage) []MessageSummary {
+	summaries := make([]MessageSummary, 0, len(msgs))
+	for _, msg := range msgs {
+		s := summarizeMessage(msg)
+		if s.Content == "" && s.Role == "" {
+			continue
+		}
+		summaries = append(summaries, s)
+	}
+	return summaries
+}
+
+// summarizeMessage converts a single StreamMessage to a MessageSummary.
+func summarizeMessage(msg StreamMessage) MessageSummary {
+	switch msg.Type {
+	case MessageTypeSystem:
+		content := ""
+		if msg.SessionID != "" {
+			content = "Session: " + msg.SessionID
+		}
+		if content == "" {
+			return MessageSummary{}
+		}
+		return MessageSummary{Role: "system", Content: content}
+	case MessageTypeAssistant:
+		if msg.Subtype == SubtypeToolUse {
+			return MessageSummary{Role: "assistant", Content: "Using tool: " + msg.ToolName}
+		}
+		if msg.Subtype == SubtypeText && msg.Text != "" {
+			return MessageSummary{Role: "assistant", Content: msg.Text}
+		}
+		return MessageSummary{}
+	case MessageTypeResult:
+		if msg.Result != "" {
+			return MessageSummary{Role: "result", Content: msg.Result}
+		}
+		return MessageSummary{}
+	default:
+		return MessageSummary{}
+	}
+}
+
 // Float64Ptr returns a pointer to the given float64 value.
 func Float64Ptr(f float64) *float64 {
 	return &f
@@ -337,6 +395,17 @@ func CollectErrorCount(messages []StreamMessage) int {
 		n += countErrors(blocks)
 	}
 	return n
+}
+
+// copyStreamMessages returns a copy of the slice to avoid exposing internal
+// state to callers. Returns nil for nil/empty input.
+func copyStreamMessages(msgs []StreamMessage) []StreamMessage {
+	if len(msgs) == 0 {
+		return nil
+	}
+	cp := make([]StreamMessage, len(msgs))
+	copy(cp, msgs)
+	return cp
 }
 
 // copyToolCalls returns a shallow copy of the map to avoid exposing internal

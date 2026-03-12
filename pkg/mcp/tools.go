@@ -24,6 +24,7 @@ func RegisterTools(serverCtx context.Context, s *server.MCPServer, process claud
 		statusTool(process),
 		stopTool(process),
 		resultTool(process),
+		messagesTool(process),
 	)
 }
 
@@ -345,6 +346,25 @@ func resultTool(process claudepkg.Prompter) server.ServerTool {
 		data, err := json.Marshal(detail)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result detail: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	return server.ServerTool{Tool: tool, Handler: handler}
+}
+
+func messagesTool(process claudepkg.Prompter) server.ServerTool {
+	tool := mcp.NewTool("messages",
+		mcp.WithDescription("Get the conversation messages from the current or last completed run. "+
+			"Returns messages in real time while the agent is busy, or from the last completed run otherwise. "+
+			"Each message has a role (system/assistant/result) and content."),
+	)
+
+	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		info := process.Messages()
+		data, err := json.Marshal(info)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal messages: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(data)), nil
 	}
