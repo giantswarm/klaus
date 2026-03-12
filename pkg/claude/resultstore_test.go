@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -225,7 +226,7 @@ func TestPersistedResult_ToResultDetailInfo(t *testing.T) {
 
 func TestResultStorePath_EnvVar(t *testing.T) {
 	t.Setenv("KLAUS_RESULT_DIR", "/custom/result/dir")
-	got := ResultStorePath("/workspace")
+	got := ResultStorePath()
 	if got != "/custom/result/dir" {
 		t.Errorf("ResultStorePath with env = %q, want %q", got, "/custom/result/dir")
 	}
@@ -235,13 +236,13 @@ func TestResultStorePath_DefaultHome(t *testing.T) {
 	// Ensure the env var is unset so the home-based default is used.
 	t.Setenv("KLAUS_RESULT_DIR", "")
 
-	got := ResultStorePath("/workspace")
-	// The result should be under $HOME/.klaus/results/, not inside /workspace.
-	if got == "/workspace/.klaus" {
-		t.Errorf("ResultStorePath should NOT return workspace-relative path, got %q", got)
-	}
+	got := ResultStorePath()
+	// The result should be under $HOME/.klaus/results/, not inside a workspace.
 	if !filepath.IsAbs(got) {
 		t.Errorf("ResultStorePath should return an absolute path, got %q", got)
+	}
+	if !strings.HasSuffix(got, ".klaus/results") && !strings.Contains(got, "klaus-results") {
+		t.Errorf("ResultStorePath should contain klaus result dir, got %q", got)
 	}
 }
 
@@ -253,8 +254,13 @@ func Test_resultStorePath(t *testing.T) {
 		want    string
 	}{
 		{
-			name:    "env var takes precedence",
-			getenv:  func(k string) string { return "/env/result/dir" },
+			name: "env var takes precedence",
+			getenv: func(k string) string {
+				if k == "KLAUS_RESULT_DIR" {
+					return "/env/result/dir"
+				}
+				return ""
+			},
 			homeDir: func() (string, error) { return "/home/user", nil },
 			want:    "/env/result/dir",
 		},
@@ -286,7 +292,7 @@ func Test_resultStorePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resultStorePath("", tt.getenv, tt.homeDir)
+			got := resultStorePath(tt.getenv, tt.homeDir)
 			if got != tt.want {
 				t.Errorf("resultStorePath() = %q, want %q", got, tt.want)
 			}
@@ -309,7 +315,7 @@ func Test_resultStoreDir(t *testing.T) {
 	t.Run("falls back to ResultStorePath when ResultDir empty", func(t *testing.T) {
 		opts := Options{WorkDir: "/workspace"}
 		got := resultStoreDir(opts)
-		expected := ResultStorePath("/workspace")
+		expected := ResultStorePath()
 		if got != expected {
 			t.Errorf("resultStoreDir() = %q, want %q", got, expected)
 		}
@@ -321,7 +327,7 @@ func Test_resultStoreDir(t *testing.T) {
 			ResultDir: "relative/path",
 		}
 		got := resultStoreDir(opts)
-		expected := ResultStorePath("/workspace")
+		expected := ResultStorePath()
 		if got != expected {
 			t.Errorf("resultStoreDir() with relative path = %q, want fallback %q", got, expected)
 		}

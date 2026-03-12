@@ -87,20 +87,19 @@ func NewResultStore(dir string) *ResultStore {
 	return &ResultStore{dir: dir}
 }
 
-// ResultStorePath returns the result store directory. It resolves the path
-// using the following precedence:
-//  1. The explicitly provided resultDir (from Options.ResultDir)
-//  2. The KLAUS_RESULT_DIR environment variable
-//  3. $HOME/.klaus/results/ (default, outside any workspace)
+// ResultStorePath returns the default result store directory based on the
+// environment. It checks (in order):
+//  1. The KLAUS_RESULT_DIR environment variable (must be absolute)
+//  2. $HOME/.klaus/results/
+//  3. A UID-scoped directory under os.TempDir() as a last resort
 //
-// The workDir parameter is no longer used but is kept for backward
-// compatibility of the function signature.
-func ResultStorePath(workDir string) string {
-	return resultStorePath(workDir, os.Getenv, os.UserHomeDir)
+// Note: Options.ResultDir is handled by resultStoreDir, not this function.
+func ResultStorePath() string {
+	return resultStorePath(os.Getenv, os.UserHomeDir)
 }
 
 // resultStorePath is the testable inner implementation of ResultStorePath.
-func resultStorePath(_ string, getenv func(string) string, homeDir func() (string, error)) string {
+func resultStorePath(getenv func(string) string, homeDir func() (string, error)) string {
 	if dir := getenv(resultDirEnvVar); dir != "" {
 		dir = filepath.Clean(dir)
 		if filepath.IsAbs(dir) {
@@ -127,7 +126,7 @@ func resultStoreDir(opts Options) string {
 		}
 		log.Printf("[klaus] WARNING: ResultDir %q is not an absolute path, falling back to default", opts.ResultDir)
 	}
-	return ResultStorePath(opts.WorkDir)
+	return ResultStorePath()
 }
 
 // Save persists a result to disk. It creates the directory if needed.
