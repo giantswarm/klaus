@@ -89,7 +89,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
-		resultStore: NewResultStore(ResultStorePath(opts.WorkDir)),
+		resultStore: NewResultStore(resultStoreDir(opts)),
 	}
 }
 

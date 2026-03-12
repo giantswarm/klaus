@@ -115,7 +115,7 @@ func NewProcess(opts Options) *Process {
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
 		done:        done,
-		resultStore: NewResultStore(ResultStorePath(opts.WorkDir)),
+		resultStore: NewResultStore(resultStoreDir(opts)),
 	}
 }
 

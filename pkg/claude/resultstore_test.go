@@ -1,6 +1,7 @@
 package claude
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -222,22 +223,91 @@ func TestPersistedResult_ToResultDetailInfo(t *testing.T) {
 	}
 }
 
-func TestResultStorePath(t *testing.T) {
+func TestResultStorePath_EnvVar(t *testing.T) {
+	t.Setenv("KLAUS_RESULT_DIR", "/custom/result/dir")
+	got := ResultStorePath("/workspace")
+	if got != "/custom/result/dir" {
+		t.Errorf("ResultStorePath with env = %q, want %q", got, "/custom/result/dir")
+	}
+}
+
+func TestResultStorePath_DefaultHome(t *testing.T) {
+	// Ensure the env var is unset so the home-based default is used.
+	t.Setenv("KLAUS_RESULT_DIR", "")
+
+	got := ResultStorePath("/workspace")
+	// The result should be under $HOME/.klaus/results/, not inside /workspace.
+	if got == "/workspace/.klaus" {
+		t.Errorf("ResultStorePath should NOT return workspace-relative path, got %q", got)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("ResultStorePath should return an absolute path, got %q", got)
+	}
+}
+
+func Test_resultStorePath(t *testing.T) {
 	tests := []struct {
-		workDir  string
-		expected string
+		name    string
+		getenv  func(string) string
+		homeDir func() (string, error)
+		want    string
 	}{
-		{"/workspace", "/workspace/.klaus"},
-		{"", ".klaus"},
-		{"/home/user/project", "/home/user/project/.klaus"},
+		{
+			name:    "env var takes precedence",
+			getenv:  func(k string) string { return "/env/result/dir" },
+			homeDir: func() (string, error) { return "/home/user", nil },
+			want:    "/env/result/dir",
+		},
+		{
+			name:    "home directory default",
+			getenv:  func(string) string { return "" },
+			homeDir: func() (string, error) { return "/home/user", nil },
+			want:    "/home/user/.klaus/results",
+		},
+		{
+			name:    "home dir error falls back to tmp",
+			getenv:  func(string) string { return "" },
+			homeDir: func() (string, error) { return "", fmt.Errorf("no home") },
+			want:    filepath.Join(os.TempDir(), "klaus-results"),
+		},
+		{
+			name:    "empty home falls back to tmp",
+			getenv:  func(string) string { return "" },
+			homeDir: func() (string, error) { return "", nil },
+			want:    filepath.Join(os.TempDir(), "klaus-results"),
+		},
 	}
 
 	for _, tt := range tests {
-		got := ResultStorePath(tt.workDir)
-		if got != tt.expected {
-			t.Errorf("ResultStorePath(%q) = %q, want %q", tt.workDir, got, tt.expected)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := resultStorePath("", tt.getenv, tt.homeDir)
+			if got != tt.want {
+				t.Errorf("resultStorePath() = %q, want %q", got, tt.want)
+			}
+		})
 	}
+}
+
+func Test_resultStoreDir(t *testing.T) {
+	t.Run("explicit ResultDir takes precedence", func(t *testing.T) {
+		opts := Options{
+			WorkDir:   "/workspace",
+			ResultDir: "/explicit/results",
+		}
+		got := resultStoreDir(opts)
+		if got != "/explicit/results" {
+			t.Errorf("resultStoreDir() = %q, want %q", got, "/explicit/results")
+		}
+	})
+
+	t.Run("falls back to ResultStorePath when ResultDir empty", func(t *testing.T) {
+		opts := Options{WorkDir: "/workspace"}
+		got := resultStoreDir(opts)
+		expected := ResultStorePath("/workspace")
+		if got != expected {
+			t.Errorf("resultStoreDir() = %q, want %q", got, expected)
+		}
+	})
 }
 
 func TestStopReasonFromStatus(t *testing.T) {
