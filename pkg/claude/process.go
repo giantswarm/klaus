@@ -591,8 +591,8 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 func (p *Process) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status
-	live := p.liveMessages
-	res := p.result
+	live := copyStreamMessages(p.liveMessages)
+	resMessages := copyStreamMessages(p.result.messages)
 	store := p.resultStore
 	p.mu.RUnlock()
 
@@ -600,15 +600,15 @@ func (p *Process) Messages() MessagesInfo {
 	if status == ProcessStatusBusy || status == ProcessStatusStarting {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(copyStreamMessages(live)),
+			Messages: SummarizeMessages(live),
 		}
 	}
 
 	// When completed, prefer in-memory result messages.
-	if len(res.messages) > 0 {
+	if len(resMessages) > 0 {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(res.messages),
+			Messages: SummarizeMessages(resMessages),
 		}
 	}
 
@@ -616,7 +616,7 @@ func (p *Process) Messages() MessagesInfo {
 	if len(live) > 0 {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(copyStreamMessages(live)),
+			Messages: SummarizeMessages(live),
 		}
 	}
 

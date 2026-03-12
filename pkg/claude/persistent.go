@@ -704,29 +704,29 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 func (p *PersistentProcess) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status
-	live := p.liveMessages
-	res := p.result
+	live := copyStreamMessages(p.liveMessages)
+	resMessages := copyStreamMessages(p.result.messages)
 	store := p.resultStore
 	p.mu.RUnlock()
 
 	if status == ProcessStatusBusy || status == ProcessStatusStarting {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(copyStreamMessages(live)),
+			Messages: SummarizeMessages(live),
 		}
 	}
 
-	if len(res.messages) > 0 {
+	if len(resMessages) > 0 {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(res.messages),
+			Messages: SummarizeMessages(resMessages),
 		}
 	}
 
 	if len(live) > 0 {
 		return MessagesInfo{
 			Status:   status,
-			Messages: SummarizeMessages(copyStreamMessages(live)),
+			Messages: SummarizeMessages(live),
 		}
 	}
 
