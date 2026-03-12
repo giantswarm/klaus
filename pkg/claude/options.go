@@ -111,6 +111,11 @@ type Options struct {
 	// SettingSources controls which setting sources are loaded (comma-separated: "user,project,local").
 	SettingSources string
 
+	// ResultDir overrides the directory where session results are persisted.
+	// When empty, ResultStorePath determines the default location outside
+	// the workspace (e.g. $HOME/.klaus/results/).
+	ResultDir string
+
 	// PluginDirs are directories to load plugins from.
 	PluginDirs []string
 	// AddDirs are directories to search for .claude/ subdirectories containing

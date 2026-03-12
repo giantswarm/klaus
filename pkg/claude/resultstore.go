@@ -10,12 +10,16 @@ import (
 )
 
 const (
-	// DefaultResultDir is the subdirectory under the workspace where
-	// persisted results are stored.
-	DefaultResultDir = ".klaus"
+	// defaultResultSubdir is the subdirectory name used under the user's
+	// home directory for persisting session results (e.g. $HOME/.klaus/results/).
+	defaultResultSubdir = ".klaus/results"
 
 	// resultFileName is the name of the persisted result file.
 	resultFileName = "last-result.json"
+
+	// resultDirEnvVar is the environment variable that overrides the default
+	// result store directory.
+	resultDirEnvVar = "KLAUS_RESULT_DIR"
 )
 
 // StopReason indicates why the agent stopped.
@@ -83,12 +87,37 @@ func NewResultStore(dir string) *ResultStore {
 	return &ResultStore{dir: dir}
 }
 
-// ResultStorePath returns the default result store directory for a workspace.
+// ResultStorePath returns the result store directory. It resolves the path
+// using the following precedence:
+//  1. The explicitly provided resultDir (from Options.ResultDir)
+//  2. The KLAUS_RESULT_DIR environment variable
+//  3. $HOME/.klaus/results/ (default, outside any workspace)
+//
+// The workDir parameter is no longer used but is kept for backward
+// compatibility of the function signature.
 func ResultStorePath(workDir string) string {
-	if workDir == "" {
-		workDir = "."
+	return resultStorePath(workDir, os.Getenv, os.UserHomeDir)
+}
+
+// resultStorePath is the testable inner implementation of ResultStorePath.
+func resultStorePath(_ string, getenv func(string) string, homeDir func() (string, error)) string {
+	if dir := getenv(resultDirEnvVar); dir != "" {
+		return dir
 	}
-	return filepath.Join(workDir, DefaultResultDir)
+	if home, err := homeDir(); err == nil && home != "" {
+		return filepath.Join(home, defaultResultSubdir)
+	}
+	// Last resort: fall back to /tmp so we never write inside a workspace.
+	return filepath.Join(os.TempDir(), "klaus-results")
+}
+
+// resultStoreDir returns the result store directory for the given options.
+// It uses Options.ResultDir if set, otherwise falls back to ResultStorePath.
+func resultStoreDir(opts Options) string {
+	if opts.ResultDir != "" {
+		return opts.ResultDir
+	}
+	return ResultStorePath(opts.WorkDir)
 }
 
 // Save persists a result to disk. It creates the directory if needed.
