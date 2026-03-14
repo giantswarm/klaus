@@ -57,6 +57,10 @@ func (m *mockPrompter) Messages() claude.MessagesInfo {
 	return claude.MessagesInfo{Status: m.status.Status}
 }
 
+func (m *mockPrompter) RawMessages(_ int, _ []string) claude.RawMessagesInfo {
+	return claude.RawMessagesInfo{Status: m.status.Status}
+}
+
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {
 	return json.Marshal(m.status)
 }

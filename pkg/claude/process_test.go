@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -487,6 +488,196 @@ func TestSummarizeMessages(t *testing.T) {
 	}
 	if summaries[3].Role != "result" || summaries[3].Content != "done" {
 		t.Errorf("unexpected summary[3]: %+v", summaries[3])
+	}
+}
+
+func TestProcess_RawMessages_Idle(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	info := process.RawMessages(0, nil)
+	if info.Status != ProcessStatusIdle {
+		t.Errorf("expected status %q, got %q", ProcessStatusIdle, info.Status)
+	}
+	if info.Total != 0 {
+		t.Errorf("expected total 0, got %d", info.Total)
+	}
+	if len(info.Messages) != 0 {
+		t.Errorf("expected 0 messages, got %d", len(info.Messages))
+	}
+}
+
+func TestProcess_RawMessages_Busy(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	raw0 := json.RawMessage(`{"type":"system","session_id":"sess-1"}`)
+	raw1 := json.RawMessage(`{"type":"assistant","subtype":"text","text":"thinking..."}`)
+	raw2 := json.RawMessage(`{"type":"assistant","subtype":"tool_use","tool_name":"Bash"}`)
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, SessionID: "sess-1", Raw: raw0},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "thinking...", Raw: raw1},
+		{Type: MessageTypeAssistant, Subtype: SubtypeToolUse, ToolName: "Bash", Raw: raw2},
+	}
+	process.mu.Unlock()
+
+	info := process.RawMessages(0, nil)
+	if info.Status != ProcessStatusBusy {
+		t.Errorf("expected status %q, got %q", ProcessStatusBusy, info.Status)
+	}
+	if info.Total != 3 {
+		t.Errorf("expected total 3, got %d", info.Total)
+	}
+	if len(info.Messages) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(info.Messages))
+	}
+	if string(info.Messages[0]) != string(raw0) {
+		t.Errorf("expected raw message %s, got %s", raw0, info.Messages[0])
+	}
+}
+
+func TestProcess_RawMessages_WithOffset(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	raw0 := json.RawMessage(`{"type":"system","session_id":"sess-1"}`)
+	raw1 := json.RawMessage(`{"type":"assistant","subtype":"text","text":"hello"}`)
+	raw2 := json.RawMessage(`{"type":"result","result":"done"}`)
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, Raw: raw0},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Raw: raw1},
+		{Type: MessageTypeResult, Raw: raw2},
+	}
+	process.mu.Unlock()
+
+	info := process.RawMessages(2, nil)
+	if info.Total != 3 {
+		t.Errorf("expected total 3, got %d", info.Total)
+	}
+	if len(info.Messages) != 1 {
+		t.Fatalf("expected 1 message after offset 2, got %d", len(info.Messages))
+	}
+	if string(info.Messages[0]) != string(raw2) {
+		t.Errorf("expected last raw message, got %s", info.Messages[0])
+	}
+}
+
+func TestProcess_RawMessages_WithTypeFilter(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	raw0 := json.RawMessage(`{"type":"system","session_id":"sess-1"}`)
+	raw1 := json.RawMessage(`{"type":"assistant","subtype":"text","text":"hello"}`)
+	raw2 := json.RawMessage(`{"type":"user","message":{"content":[{"type":"tool_result"}]}}`)
+	raw3 := json.RawMessage(`{"type":"result","result":"done"}`)
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, Raw: raw0},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Raw: raw1},
+		{Type: "user", Raw: raw2},
+		{Type: MessageTypeResult, Raw: raw3},
+	}
+	process.mu.Unlock()
+
+	info := process.RawMessages(0, []string{"assistant", "result"})
+	if info.Total != 4 {
+		t.Errorf("expected total 4 (unfiltered), got %d", info.Total)
+	}
+	if len(info.Messages) != 2 {
+		t.Fatalf("expected 2 filtered messages, got %d", len(info.Messages))
+	}
+	if string(info.Messages[0]) != string(raw1) {
+		t.Errorf("expected assistant message, got %s", info.Messages[0])
+	}
+	if string(info.Messages[1]) != string(raw3) {
+		t.Errorf("expected result message, got %s", info.Messages[1])
+	}
+}
+
+func TestProcess_RawMessages_OffsetBeyondTotal(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, Raw: json.RawMessage(`{"type":"system"}`)},
+	}
+	process.mu.Unlock()
+
+	info := process.RawMessages(10, nil)
+	if info.Total != 1 {
+		t.Errorf("expected total 1, got %d", info.Total)
+	}
+	if len(info.Messages) != 0 {
+		t.Errorf("expected 0 messages when offset > total, got %d", len(info.Messages))
+	}
+	// Messages should be an empty slice (not nil) to serialize as [] in JSON.
+	if info.Messages == nil {
+		t.Error("expected non-nil empty Messages slice, got nil")
+	}
+}
+
+func TestProcess_RawMessages_OffsetAndTypeFilter(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	raws := make([]json.RawMessage, 5)
+	msgs := make([]StreamMessage, 5)
+	for i := range raws {
+		typ := MessageTypeAssistant
+		if i%2 == 0 {
+			typ = MessageTypeSystem
+		}
+		raws[i] = json.RawMessage(fmt.Sprintf(`{"type":"%s","idx":%d}`, typ, i))
+		msgs[i] = StreamMessage{Type: typ, Raw: raws[i]}
+	}
+
+	process.mu.Lock()
+	process.status = ProcessStatusBusy
+	process.liveMessages = msgs
+	process.mu.Unlock()
+
+	// Offset 2 skips msgs[0] and msgs[1], leaving msgs[2](system), msgs[3](assistant), msgs[4](system)
+	// Filter to "system" only: msgs[2] and msgs[4]
+	info := process.RawMessages(2, []string{"system"})
+	if info.Total != 5 {
+		t.Errorf("expected total 5, got %d", info.Total)
+	}
+	if len(info.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(info.Messages))
+	}
+}
+
+func TestProcess_RawMessages_Completed(t *testing.T) {
+	process := NewProcess(DefaultOptions())
+
+	raw0 := json.RawMessage(`{"type":"system","session_id":"sess-1"}`)
+	raw1 := json.RawMessage(`{"type":"result","result":"final answer"}`)
+
+	process.mu.Lock()
+	process.status = ProcessStatusCompleted
+	process.result = resultState{
+		text:      "done",
+		completed: true,
+		messages: []StreamMessage{
+			{Type: MessageTypeSystem, SessionID: "sess-1", Raw: raw0},
+			{Type: MessageTypeResult, Result: "final answer", Raw: raw1},
+		},
+	}
+	process.mu.Unlock()
+
+	info := process.RawMessages(0, nil)
+	if info.Status != ProcessStatusCompleted {
+		t.Errorf("expected status %q, got %q", ProcessStatusCompleted, info.Status)
+	}
+	if info.Total != 2 {
+		t.Errorf("expected total 2, got %d", info.Total)
+	}
+	if len(info.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(info.Messages))
 	}
 }
 

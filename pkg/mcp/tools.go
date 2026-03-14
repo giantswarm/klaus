@@ -14,6 +14,14 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// validMessageTypes is the set of accepted values for the types filter parameter.
+var validMessageTypes = map[string]bool{
+	"system":    true,
+	"assistant": true,
+	"user":      true,
+	"result":    true,
+}
+
 // RegisterTools registers all MCP tools on the given server. The serverCtx
 // controls the lifetime of background drain goroutines spawned by non-blocking
 // prompt submissions; it should be cancelled during server shutdown to ensure
@@ -355,13 +363,50 @@ func resultTool(process claudepkg.Prompter) server.ServerTool {
 
 func messagesTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("messages",
-		mcp.WithDescription("Get the conversation messages from the current or last completed run. "+
+		mcp.WithDescription("Get the raw stream-json conversation messages from the current or last completed run. "+
 			"Returns messages in real time while the agent is busy, or from the last completed run otherwise. "+
-			"Each message has a role (system/assistant/result) and content."),
+			"Each message is the original JSON object from the Claude CLI stream-json protocol. "+
+			"The total field reports the full unfiltered message count (useful with offset to detect new messages)."),
+		mcp.WithNumber("offset",
+			mcp.Description("Skip the first N messages and return from N onward. "+
+				"Enables efficient follow mode: set offset to the previous total to fetch only new messages. Default: 0."),
+		),
+		mcp.WithString("types",
+			mcp.Description("Comma-separated list of message types to include (e.g. \"assistant,result\"). "+
+				"Valid types: system, assistant, user, result. Default: all types."),
+		),
 	)
 
-	handler := func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		info := process.Messages()
+	handler := func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		offset, err := optionalFloat(request, "offset")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if offset < 0 || offset != float64(int(offset)) {
+			return mcp.NewToolResultError("parameter \"offset\" must be a non-negative integer"), nil
+		}
+
+		typesStr, err := optionalString(request, "types")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		var types []string
+		if typesStr != "" {
+			for _, t := range strings.Split(typesStr, ",") {
+				t = strings.TrimSpace(t)
+				if t == "" {
+					continue
+				}
+				if !validMessageTypes[t] {
+					return mcp.NewToolResultError(
+						fmt.Sprintf("invalid message type %q; valid types: system, assistant, user, result", t)), nil
+				}
+				types = append(types, t)
+			}
+		}
+
+		info := process.RawMessages(int(offset), types)
 		data, err := json.Marshal(info)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal messages: %v", err)), nil

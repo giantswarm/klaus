@@ -212,6 +212,15 @@ type MessagesInfo struct {
 	Messages []MessageSummary `json:"messages"`
 }
 
+// RawMessagesInfo holds raw stream-json messages along with the process
+// status and total message count. Used by the messages MCP tool to return
+// lossless message data for external consumers.
+type RawMessagesInfo struct {
+	Status   ProcessStatus     `json:"status"`
+	Total    int               `json:"total"`
+	Messages []json.RawMessage `json:"messages"`
+}
+
 // MessageSummary is a simplified representation of a StreamMessage
 // with only role and content, suitable for external consumers.
 type MessageSummary struct {
@@ -231,6 +240,46 @@ func SummarizeMessages(msgs []StreamMessage) []MessageSummary {
 		summaries = append(summaries, s)
 	}
 	return summaries
+}
+
+// collectRawMessages builds a RawMessagesInfo from a slice of StreamMessages,
+// applying offset and type filtering. Total always reflects the unfiltered
+// count so callers can detect whether more messages exist.
+func collectRawMessages(status ProcessStatus, msgs []StreamMessage, offset int, types []string) RawMessagesInfo {
+	total := len(msgs)
+
+	// Build type filter set.
+	var typeSet map[string]bool
+	if len(types) > 0 {
+		typeSet = make(map[string]bool, len(types))
+		for _, t := range types {
+			typeSet[t] = true
+		}
+	}
+
+	// Apply offset.
+	if offset >= len(msgs) {
+		return RawMessagesInfo{Status: status, Total: total, Messages: []json.RawMessage{}}
+	}
+	if offset > 0 {
+		msgs = msgs[offset:]
+	}
+
+	raw := make([]json.RawMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		if typeSet != nil && !typeSet[string(msg.Type)] {
+			continue
+		}
+		if len(msg.Raw) > 0 {
+			raw = append(raw, msg.Raw)
+		}
+	}
+
+	return RawMessagesInfo{
+		Status:   status,
+		Total:    total,
+		Messages: raw,
+	}
 }
 
 // summarizeMessage converts a single StreamMessage to a MessageSummary.
