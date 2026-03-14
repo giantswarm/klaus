@@ -742,6 +742,39 @@ func (p *PersistentProcess) Messages() MessagesInfo {
 	return MessagesInfo{Status: status}
 }
 
+// RawMessages returns the raw stream-json messages from the current or last
+// completed run. offset skips the first N messages; types filters by message
+// type (empty means all types). The Total field always reflects the full
+// unfiltered message count.
+func (p *PersistentProcess) RawMessages(offset int, types []string) RawMessagesInfo {
+	p.mu.RLock()
+	status := p.status
+	live := copyStreamMessages(p.liveMessages)
+	resMessages := copyStreamMessages(p.result.messages)
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	if status == ProcessStatusBusy || status == ProcessStatusStarting {
+		return collectRawMessages(status, live, offset, types)
+	}
+
+	if len(resMessages) > 0 {
+		return collectRawMessages(status, resMessages, offset, types)
+	}
+
+	if len(live) > 0 {
+		return collectRawMessages(status, live, offset, types)
+	}
+
+	if store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil && len(pr.Messages) > 0 {
+			return collectRawMessages(status, pr.Messages, offset, types)
+		}
+	}
+
+	return RawMessagesInfo{Status: status, Messages: []json.RawMessage{}}
+}
+
 // Done returns a channel closed when the current prompt response is complete.
 func (p *PersistentProcess) Done() <-chan struct{} {
 	p.mu.RLock()

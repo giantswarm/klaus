@@ -48,6 +48,12 @@ type Prompter interface {
 	// it falls back to the stored result messages or persisted state.
 	Messages() MessagesInfo
 
+	// RawMessages returns the raw stream-json messages from the current or
+	// last completed run. Unlike Messages(), it preserves the original JSON
+	// bytes without lossy summarization. offset skips the first N messages;
+	// types filters by message type (empty means all types).
+	RawMessages(offset int, types []string) RawMessagesInfo
+
 	// MarshalStatus returns the status as JSON.
 	MarshalStatus() ([]byte, error)
 }
