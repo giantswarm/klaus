@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
-	github.com/giantswarm/mcp-oauth v0.2.83
+	github.com/giantswarm/mcp-oauth v0.2.85
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
