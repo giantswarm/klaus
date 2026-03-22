@@ -892,3 +892,109 @@ func TestSubmitAsync(t *testing.T) {
 		}
 	})
 }
+
+func TestSummarizeMessages_DeduplicatesSystem(t *testing.T) {
+	msgs := []StreamMessage{
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "Hello"},
+	}
+
+	summaries := SummarizeMessages(msgs)
+	systemCount := 0
+	for _, s := range summaries {
+		if s.Role == "system" {
+			systemCount++
+		}
+	}
+	if systemCount != 1 {
+		t.Errorf("expected 1 system message after dedup, got %d", systemCount)
+	}
+	if len(summaries) != 2 {
+		t.Errorf("expected 2 summaries total, got %d", len(summaries))
+	}
+}
+
+func TestSummarizeMessages_IncludesUserToolResults(t *testing.T) {
+	msgs := []StreamMessage{
+		{
+			Type:    MessageTypeUser,
+			Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"toolu_abc","content":"output text","is_error":false}]}`),
+		},
+	}
+
+	summaries := SummarizeMessages(msgs)
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	if summaries[0].Role != "tool" {
+		t.Errorf("expected role 'tool', got %q", summaries[0].Role)
+	}
+	if summaries[0].Content != "output text" {
+		t.Errorf("expected content 'output text', got %q", summaries[0].Content)
+	}
+	if summaries[0].ToolCallID != "toolu_abc" {
+		t.Errorf("expected tool_call_id 'toolu_abc', got %q", summaries[0].ToolCallID)
+	}
+}
+
+func TestSummarizeMessages_ToolCallInfo(t *testing.T) {
+	msgs := []StreamMessage{
+		{
+			Type:     MessageTypeAssistant,
+			Subtype:  SubtypeToolUse,
+			ToolName: "Bash",
+			ToolID:   "toolu_xyz",
+			ToolArgs: json.RawMessage(`{"command":"echo hi"}`),
+		},
+	}
+
+	summaries := SummarizeMessages(msgs)
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	if len(summaries[0].ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(summaries[0].ToolCalls))
+	}
+	tc := summaries[0].ToolCalls[0]
+	if tc.ID != "toolu_xyz" {
+		t.Errorf("expected ID 'toolu_xyz', got %q", tc.ID)
+	}
+	if tc.Name != "Bash" {
+		t.Errorf("expected name 'Bash', got %q", tc.Name)
+	}
+	if string(tc.Args) != `{"command":"echo hi"}` {
+		t.Errorf("expected args, got %q", string(tc.Args))
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_ToolUseBlockID(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","id":"toolu_abc123","name":"Bash"}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.ToolUseName != "Bash" {
+		t.Errorf("expected ToolUseName %q, got %q", "Bash", msg.ToolUseName)
+	}
+	if msg.ToolUseBlockID != "toolu_abc123" {
+		t.Errorf("expected ToolUseBlockID %q, got %q", "toolu_abc123", msg.ToolUseBlockID)
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_InputJSONDelta(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"cmd\":\"ls\"}"}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.EventType != "content_block_delta" {
+		t.Errorf("expected EventType %q, got %q", "content_block_delta", msg.EventType)
+	}
+	if msg.InputJSONDelta != `{"cmd":"ls"}` {
+		t.Errorf("expected InputJSONDelta %q, got %q", `{"cmd":"ls"}`, msg.InputJSONDelta)
+	}
+}

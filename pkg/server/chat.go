@@ -20,8 +20,22 @@ type chatCompletionRequest struct {
 }
 
 type chatMessage struct {
-	Role    string `json:"role,omitempty"`
-	Content string `json:"content"`
+	Role       string         `json:"role,omitempty"`
+	Content    string         `json:"content"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+}
+
+type chatToolCall struct {
+	Index    int              `json:"index"`
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function chatToolFunction `json:"function"`
+}
+
+type chatToolFunction struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type chatCompletionResponse struct {
@@ -47,14 +61,27 @@ type chatCompletionUse struct {
 }
 
 type chatMessagesResponse struct {
-	Status   string        `json:"status"`
-	Messages []chatMessage `json:"messages"`
+	Status   string               `json:"status"`
+	Messages []chatMessageSummary `json:"messages"`
+}
+
+type chatMessageSummary struct {
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Timestamp  string         `json:"timestamp,omitempty"`
 }
 
 // handleChatCompletions returns an http.HandlerFunc that accepts an
 // OpenAI-compatible chat completion request and streams the response as SSE
 // (or returns a complete response for non-streaming requests).
+//
+// Conversation history accumulates across calls: the second and subsequent
+// requests use ContinueSession so that Claude sees the full conversation.
 func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
+	callCount := 0
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -73,7 +100,12 @@ func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
 			return
 		}
 
-		ch, err := process.RunWithOptions(r.Context(), prompt, nil)
+		var runOpts *claudepkg.RunOptions
+		if callCount > 0 {
+			runOpts = &claudepkg.RunOptions{ContinueSession: true}
+		}
+
+		ch, err := process.RunWithOptions(r.Context(), prompt, runOpts)
 		if err != nil {
 			if errors.Is(err, claudepkg.ErrBusy) {
 				http.Error(w, "agent is busy", http.StatusTooManyRequests)
@@ -82,6 +114,8 @@ func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
 			http.Error(w, "failed to start prompt: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		callCount++
 
 		model := req.Model
 		if model == "" {
@@ -119,6 +153,8 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
 	sentRole := false
+	var usage *chatCompletionUse
+	toolIndex := 0
 
 	for {
 		select {
@@ -129,12 +165,16 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 			return
 		case msg, ok := <-ch:
 			if !ok {
-				writeDoneChunk(w, flusher, id, model)
+				writeDoneChunk(w, flusher, id, model, usage)
 				return
 			}
 
-			delta := streamMessageToDelta(msg)
+			delta := streamMessageToDelta(msg, &toolIndex)
 			if delta == nil {
+				// Capture usage from result messages even though we don't emit a delta.
+				if msg.Type == claudepkg.MessageTypeResult {
+					usage = collectUsage(msg, usage)
+				}
 				continue
 			}
 
@@ -164,7 +204,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 }
 
 // writeDoneChunk sends the final SSE chunk with finish_reason "stop" and the [DONE] sentinel.
-func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model string) {
+func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model string, usage *chatCompletionUse) {
 	stop := "stop"
 	final := chatCompletionResponse{
 		ID:      id,
@@ -172,6 +212,7 @@ func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model strin
 		Created: time.Now().Unix(),
 		Model:   model,
 		Choices: []chatChoice{{Index: 0, Delta: &chatMessage{}, FinishReason: &stop}},
+		Usage:   usage,
 	}
 	data, err := json.Marshal(final)
 	if err != nil {
@@ -181,6 +222,20 @@ func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model strin
 	fmt.Fprintf(w, "data: %s\n\n", data)
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
+}
+
+// collectUsage extracts token usage from a result StreamMessage and merges it
+// with any previously accumulated usage.
+func collectUsage(msg claudepkg.StreamMessage, existing *chatCompletionUse) *chatCompletionUse {
+	if msg.Usage == nil {
+		return existing
+	}
+	u := &chatCompletionUse{
+		PromptTokens:     int(msg.Usage.InputTokens + msg.Usage.CacheReadInputTokens),
+		CompletionTokens: int(msg.Usage.OutputTokens),
+	}
+	u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	return u
 }
 
 // collectResponse drains the message channel and returns a single non-streaming response.
@@ -205,6 +260,14 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 		}},
 	}
 
+	// Include usage from the result message.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Type == claudepkg.MessageTypeResult {
+			resp.Usage = collectUsage(msgs[i], nil)
+			break
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("[chat] failed to encode response: %v", err)
@@ -217,16 +280,55 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 // With --include-partial-messages, content arrives token-by-token as
 // stream_event / content_block_delta messages. The full assistant message
 // that follows is redundant and must be skipped to avoid duplication.
-func streamMessageToDelta(msg claudepkg.StreamMessage) *chatMessage {
+//
+// Tool use events are emitted as delta.tool_calls per the OpenAI spec.
+// Tool results from user messages are emitted with role "tool" and tool_call_id.
+func streamMessageToDelta(msg claudepkg.StreamMessage, toolIndex *int) *chatMessage {
 	switch msg.Type {
 	case claudepkg.MessageTypeStreamEvent:
 		if msg.EventType == "content_block_delta" && msg.DeltaText != "" {
 			return &chatMessage{Role: "assistant", Content: msg.DeltaText}
 		}
+		if msg.EventType == "content_block_delta" && msg.InputJSONDelta != "" {
+			idx := *toolIndex
+			if idx > 0 {
+				idx-- // point to the current tool call
+			}
+			return &chatMessage{
+				Role: "assistant",
+				ToolCalls: []chatToolCall{{
+					Index:    idx,
+					Function: chatToolFunction{Arguments: msg.InputJSONDelta},
+				}},
+			}
+		}
 		if msg.EventType == "content_block_start" && msg.ToolUseName != "" {
-			return &chatMessage{Role: "assistant", Content: "[Using tool: " + msg.ToolUseName + "]"}
+			idx := *toolIndex
+			*toolIndex++
+			return &chatMessage{
+				Role: "assistant",
+				ToolCalls: []chatToolCall{{
+					Index: idx,
+					ID:    msg.ToolUseBlockID,
+					Type:  "function",
+					Function: chatToolFunction{
+						Name: msg.ToolUseName,
+					},
+				}},
+			}
 		}
 		return nil
+	case claudepkg.MessageTypeUser:
+		blocks := claudepkg.ExtractToolResults(msg)
+		if len(blocks) == 0 {
+			return nil
+		}
+		block := blocks[0]
+		return &chatMessage{
+			Role:       "tool",
+			Content:    block.Content,
+			ToolCallID: block.ToolUseID,
+		}
 	case claudepkg.MessageTypeAssistant:
 		return nil
 	case claudepkg.MessageTypeResult:
@@ -246,7 +348,7 @@ func extractLastUserMessage(messages []chatMessage) string {
 }
 
 // handleChatMessages returns an http.HandlerFunc that returns the conversation
-// history as a JSON array of {role, content} messages.
+// history with structured tool call data.
 func handleChatMessages(process claudepkg.Prompter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -256,15 +358,33 @@ func handleChatMessages(process claudepkg.Prompter) http.HandlerFunc {
 
 		info := process.Messages()
 
-		messages := make([]chatMessage, 0, len(info.Messages))
+		messages := make([]chatMessageSummary, 0, len(info.Messages))
 		for _, m := range info.Messages {
-			if m.Content == "" {
+			if m.Content == "" && m.Role == "" {
 				continue
 			}
-			messages = append(messages, chatMessage{
-				Role:    m.Role,
-				Content: m.Content,
-			})
+			msg := chatMessageSummary{
+				Role:       m.Role,
+				Content:    m.Content,
+				ToolCallID: m.ToolCallID,
+				Timestamp:  m.Timestamp,
+			}
+			for _, tc := range m.ToolCalls {
+				args := ""
+				if len(tc.Args) > 0 {
+					args = string(tc.Args)
+				}
+				msg.ToolCalls = append(msg.ToolCalls, chatToolCall{
+					Index: 0,
+					ID:    tc.ID,
+					Type:  "function",
+					Function: chatToolFunction{
+						Name:      tc.Name,
+						Arguments: args,
+					},
+				})
+			}
+			messages = append(messages, msg)
 		}
 
 		resp := chatMessagesResponse{
