@@ -11,12 +11,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG DATE=unknown
+ARG VERSION=
+ARG COMMIT=
+ARG DATE=
 ARG TARGETOS
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+RUN VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")} && \
+    COMMIT=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")} && \
+    DATE=${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)} && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
     -ldflags "-w -extldflags '-static' \
     -X 'main.version=${VERSION}' \
     -X 'main.commit=${COMMIT}' \
