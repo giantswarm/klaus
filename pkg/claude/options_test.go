@@ -180,6 +180,15 @@ func TestArgs_SessionManagement(t *testing.T) {
 	args = opts.args()
 	assertContainsSequence(t, args, "--resume", "sess-789")
 	assertContains(t, args, "--fork-session")
+
+	// Continue with NoSessionPersistence disabled via mergedOpts (#171).
+	// When ContinueSession is set via RunOptions, NoSessionPersistence must
+	// be false so that --no-session-persistence is not emitted alongside --continue.
+	p := NewProcess(Options{NoSessionPersistence: true})
+	merged := p.mergedOpts(&RunOptions{ContinueSession: true})
+	mArgs := merged.args()
+	assertContains(t, mArgs, "--continue")
+	assertNotContains(t, mArgs, "--no-session-persistence")
 }
 
 func TestValidatePermissionMode(t *testing.T) {

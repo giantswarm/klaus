@@ -753,6 +753,11 @@ func TestProcess_MergedOpts(t *testing.T) {
 		if !merged.ContinueSession {
 			t.Error("expected ContinueSession to be true")
 		}
+		// ContinueSession must disable NoSessionPersistence so that
+		// --continue can find the previous session on disk (#171).
+		if merged.NoSessionPersistence {
+			t.Error("expected NoSessionPersistence to be false when ContinueSession is true")
+		}
 	})
 
 	t.Run("ForkSession overrides base", func(t *testing.T) {

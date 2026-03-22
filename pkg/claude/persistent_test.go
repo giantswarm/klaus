@@ -375,4 +375,84 @@ func TestRunOptions_IgnoredFields(t *testing.T) {
 			t.Errorf("expected 3 fields, got %d: %v", len(fields), fields)
 		}
 	})
+
+	t.Run("ContinueSession excluded from ignored", func(t *testing.T) {
+		ro := &RunOptions{ContinueSession: true}
+		fields := ro.ignoredFields()
+		if len(fields) != 0 {
+			t.Errorf("ContinueSession should not appear in ignored fields, got %v", fields)
+		}
+	})
+}
+
+func TestPersistentProcess_MessagesAccumulateAcrossTurns(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	// Simulate first turn: 2 messages.
+	process.mu.Lock()
+	process.messageCount = 2
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeSystem, SessionID: "sess-1"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "Hello"},
+	}
+	process.status = ProcessStatusIdle
+	process.mu.Unlock()
+
+	msgs := process.Messages()
+	if len(msgs.Messages) < 1 {
+		t.Fatalf("expected messages from first turn, got %d", len(msgs.Messages))
+	}
+
+	// Simulate second turn: messages should accumulate (not reset).
+	process.mu.Lock()
+	process.messageCount += 2
+	process.liveMessages = append(process.liveMessages,
+		StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "World"},
+		StreamMessage{Type: MessageTypeResult, Result: "done"},
+	)
+	process.status = ProcessStatusIdle
+	process.mu.Unlock()
+
+	msgs = process.Messages()
+	// Should contain messages from both turns.
+	if process.messageCount != 4 {
+		t.Errorf("expected messageCount 4, got %d", process.messageCount)
+	}
+
+	// liveMessages should have all 4 entries.
+	process.mu.RLock()
+	liveCount := len(process.liveMessages)
+	process.mu.RUnlock()
+	if liveCount != 4 {
+		t.Errorf("expected 4 liveMessages, got %d", liveCount)
+	}
+}
+
+func TestPersistentProcess_LiveMessagesPreferredOverResult(t *testing.T) {
+	process := NewPersistentProcess(DefaultOptions())
+
+	// Set both liveMessages (multi-turn history) and result.messages (single turn).
+	process.mu.Lock()
+	process.liveMessages = []StreamMessage{
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "turn 1"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "turn 2"},
+	}
+	process.result = resultState{
+		messages:  []StreamMessage{{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "turn 2"}},
+		completed: true,
+	}
+	process.status = ProcessStatusCompleted
+	process.mu.Unlock()
+
+	msgs := process.Messages()
+	// Should prefer liveMessages (2 entries) over result.messages (1 entry).
+	found := 0
+	for _, m := range msgs.Messages {
+		if m.Content == "turn 1" || m.Content == "turn 2" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 messages from liveMessages, found %d in %v", found, msgs.Messages)
+	}
 }
