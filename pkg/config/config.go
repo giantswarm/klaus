@@ -90,8 +90,6 @@ type ClaudeConfig struct {
 	Agents string `yaml:"agents"`
 	// ActiveAgent selects which agent runs as the top-level agent.
 	ActiveAgent string `yaml:"activeAgent"`
-	// IncludePartialMessages emits partial message chunks during streaming.
-	IncludePartialMessages bool `yaml:"includePartialMessages"`
 	// NoSessionPersistence disables saving sessions to disk.
 	NoSessionPersistence bool `yaml:"noSessionPersistence"`
 	// PersistentMode uses persistent subprocess mode (bidirectional stream-json).
@@ -223,7 +221,6 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideCSV(&cfg.Claude.AddDirs, "CLAUDE_ADD_DIRS")
 	envOverrideString(&cfg.Claude.Agents, "CLAUDE_AGENTS")
 	envOverrideString(&cfg.Claude.ActiveAgent, "CLAUDE_ACTIVE_AGENT")
-	envOverrideBool(&cfg.Claude.IncludePartialMessages, "CLAUDE_INCLUDE_PARTIAL_MESSAGES")
 	envOverrideBool(&cfg.Claude.NoSessionPersistence, "CLAUDE_NO_SESSION_PERSISTENCE")
 	envOverrideBool(&cfg.Claude.PersistentMode, "CLAUDE_PERSISTENT_MODE")
 

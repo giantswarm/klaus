@@ -62,6 +62,97 @@ Returns 503 when the process is `starting`, `stopped`, or `error`. Returns 200 f
 
 See [Set Up Monitoring](../how-to/set-up-monitoring.md) for available metrics.
 
+## `/v1/chat/completions`
+
+**OpenAI-compatible chat completions endpoint.** Accepts a prompt and returns the agent's response, either streamed as SSE or as a single JSON response.
+
+- Method: `POST`
+- Content-Type: `application/json`
+- Protected by owner authentication (same as `/mcp`)
+
+Only the last user message in the `messages` array is used as the prompt -- the instance maintains its own conversation state.
+
+Returns `429 Too Many Requests` if the agent is already processing a prompt.
+
+### Request body
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Explain how kubernetes pods work"}
+  ],
+  "stream": true,
+  "model": "klaus"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `messages` | array | yes | Array of `{role, content}` messages. Only the last `user` message is sent as the prompt. |
+| `stream` | bool | no | When `true`, response is streamed as SSE in OpenAI delta format. Default `false`. |
+| `model` | string | no | Echoed in the response. Defaults to `"klaus"`. |
+
+### Streaming response (`stream: true`)
+
+Returns `text/event-stream` with SSE events in OpenAI delta format:
+
+```
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1711234567,"model":"klaus","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1711234567,"model":"klaus","choices":[{"index":0,"delta":{"role":"assistant","content":" world"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","created":1711234567,"model":"klaus","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+Tool use events appear as text deltas with `[Using tool: <name>]` content.
+
+### Non-streaming response (`stream: false`)
+
+Returns `application/json`:
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "created": 1711234567,
+  "model": "klaus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "Hello world"},
+      "finish_reason": "stop"
+    }
+  ]
+}
+```
+
+## `/v1/chat/messages`
+
+**Conversation history endpoint.** Returns the agent's conversation messages.
+
+- Method: `GET`
+- Response: `application/json`
+- Protected by owner authentication (same as `/mcp`)
+
+### Response
+
+```json
+{
+  "status": "idle",
+  "messages": [
+    {"role": "user", "content": "hello"},
+    {"role": "assistant", "content": "Hi there!"}
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | string | Current agent status (`idle`, `busy`, `completed`, etc.) |
+| `messages` | array | Array of `{role, content}` messages. Empty messages are filtered out. |
+
 ## `/`
 
 **Root endpoint.** Returns the server name and version.

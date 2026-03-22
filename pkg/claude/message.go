@@ -3,17 +3,23 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"time"
 )
+
+// ErrBusy is returned when a prompt is submitted while the process is already
+// handling another prompt.
+var ErrBusy = errors.New("claude process is already busy")
 
 // MessageType identifies the kind of message in the stream-json protocol.
 type MessageType string
 
 const (
-	MessageTypeSystem    MessageType = "system"
-	MessageTypeAssistant MessageType = "assistant"
-	MessageTypeResult    MessageType = "result"
+	MessageTypeSystem      MessageType = "system"
+	MessageTypeAssistant   MessageType = "assistant"
+	MessageTypeResult      MessageType = "result"
+	MessageTypeStreamEvent MessageType = "stream_event"
 )
 
 // MessageSubtype identifies the subtype of an assistant message.
@@ -63,6 +69,11 @@ type StreamMessage struct {
 	// TotalCost tracks the running total cost of the session.
 	TotalCost float64 `json:"total_cost_usd,omitempty"`
 
+	// Fields present on "stream_event" messages (--include-partial-messages).
+	EventType   string `json:"-"`
+	DeltaText   string `json:"-"`
+	ToolUseName string `json:"-"` // tool name from content_block_start with type "tool_use"
+
 	// Raw holds the original JSON for messages we don't fully parse.
 	Raw json.RawMessage `json:"-"`
 }
@@ -82,6 +93,19 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 	msg.Timestamp = time.Now().UTC().Format(time.RFC3339)
 	msg.Raw = make(json.RawMessage, len(data))
 	copy(msg.Raw, data)
+
+	if msg.Type == MessageTypeStreamEvent {
+		var env streamEventEnvelope
+		if err := json.Unmarshal(data, &env); err == nil {
+			msg.EventType = env.Event.Type
+			if env.Event.Delta.Type == "text_delta" {
+				msg.DeltaText = env.Event.Delta.Text
+			}
+			if env.Event.Type == "content_block_start" && env.Event.ContentBlock.Type == "tool_use" {
+				msg.ToolUseName = env.Event.ContentBlock.Name
+			}
+		}
+	}
 
 	// Extract nested content for assistant messages in the new format.
 	if msg.Type == MessageTypeAssistant && msg.Subtype == "" && len(msg.Message) > 0 {
@@ -338,6 +362,28 @@ type messageContentEnvelope struct {
 	Content []ToolResultBlock `json:"content"`
 }
 
+// streamEventEnvelope is used to extract the nested event payload from
+// stream_event messages emitted with --include-partial-messages.
+type streamEventEnvelope struct {
+	Event streamEventPayload `json:"event"`
+}
+
+type streamEventPayload struct {
+	Type         string                `json:"type"`
+	Delta        streamEventDelta      `json:"delta,omitempty"`
+	ContentBlock streamEventBlockStart `json:"content_block,omitempty"`
+}
+
+type streamEventBlockStart struct {
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type streamEventDelta struct {
+	Type string `json:"type,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
 // assistantContentBlock represents a single content block in message.content[]
 // for assistant messages (text or tool_use). Claude Code 2.1+ nests assistant
 // content here instead of using top-level fields.
@@ -563,6 +609,9 @@ func submitDrain(ctx context.Context, ch <-chan StreamMessage, storeFn func(stri
 				if !ok {
 					storeFn(CollectResultText(messages), messages)
 					return
+				}
+				if msg.Type == MessageTypeStreamEvent {
+					continue
 				}
 				messages = append(messages, msg)
 			}

@@ -60,7 +60,6 @@ claude:
     - "/skills/a"
   agents: '{"reviewer":{"description":"Reviews code","prompt":"You review"}}'
   activeAgent: "reviewer"
-  includePartialMessages: true
   noSessionPersistence: true
   persistentMode: true
 server:
@@ -111,7 +110,6 @@ oauth:
 	assertEqualFloat(t, "claude.maxBudgetUSD", 10.5, cfg.Claude.MaxBudgetUSD)
 	assertEqual(t, "claude.effort", "high", cfg.Claude.Effort)
 	assertEqual(t, "claude.fallbackModel", "sonnet", cfg.Claude.FallbackModel)
-	assertEqualBool(t, "claude.includePartialMessages", true, cfg.Claude.IncludePartialMessages)
 	assertEqualBool(t, "claude.noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
 	assertEqualBool(t, "claude.persistentMode", true, cfg.Claude.PersistentMode)
 	assertEqual(t, "claude.activeAgent", "reviewer", cfg.Claude.ActiveAgent)
@@ -386,7 +384,6 @@ func TestEnvOverride_CSVFields(t *testing.T) {
 
 func TestEnvOverride_BoolFields(t *testing.T) {
 	t.Setenv("CLAUDE_STRICT_MCP_CONFIG", "true")
-	t.Setenv("CLAUDE_INCLUDE_PARTIAL_MESSAGES", "1")
 	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "yes")
 	t.Setenv("CLAUDE_PERSISTENT_MODE", "TRUE")
 
@@ -396,7 +393,6 @@ func TestEnvOverride_BoolFields(t *testing.T) {
 	}
 
 	assertEqualBool(t, "strictMcpConfig", true, cfg.Claude.StrictMCPConfig)
-	assertEqualBool(t, "includePartialMessages", true, cfg.Claude.IncludePartialMessages)
 	assertEqualBool(t, "noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
 	assertEqualBool(t, "persistentMode", true, cfg.Claude.PersistentMode)
 }

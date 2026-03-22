@@ -208,6 +208,23 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 				if !ok {
 					break loop
 				}
+
+				if msg.Type == claudepkg.MessageTypeStreamEvent {
+					if progressToken != nil && mcpServer != nil && msg.EventType == "content_block_delta" && msg.DeltaText != "" {
+						progressCount++
+						_ = mcpServer.SendNotificationToClient(
+							ctx,
+							"notifications/progress",
+							map[string]any{
+								"progressToken": progressToken,
+								"progress":      progressCount,
+								"message":       msg.DeltaText,
+							},
+						)
+					}
+					continue
+				}
+
 				messages = append(messages, msg)
 
 				// Send progress notification if client requested it.

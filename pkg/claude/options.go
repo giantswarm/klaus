@@ -103,8 +103,6 @@ type Options struct {
 
 	// JSONSchema constrains the output to conform to a JSON Schema.
 	JSONSchema string
-	// IncludePartialMessages emits partial message chunks during streaming.
-	IncludePartialMessages bool
 
 	// SettingsFile is a path to a settings JSON file or inline JSON string.
 	SettingsFile string
@@ -290,10 +288,6 @@ func (o Options) baseArgs() []string {
 		args = append(args, "--json-schema", o.JSONSchema)
 	}
 
-	if o.IncludePartialMessages {
-		args = append(args, "--include-partial-messages")
-	}
-
 	// Settings.
 	if o.SettingsFile != "" {
 		args = append(args, "--settings", o.SettingsFile)
@@ -322,6 +316,7 @@ func (o Options) args() []string {
 		"--print",
 		"--output-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 	}
 	args = append(args, o.baseArgs()...)
 
@@ -356,6 +351,7 @@ func (o Options) PersistentArgs() []string {
 		"--output-format", "stream-json",
 		"--replay-user-messages",
 		"--verbose",
+		"--include-partial-messages",
 	}
 	args = append(args, o.baseArgs()...)
 	return args

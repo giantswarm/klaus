@@ -276,6 +276,22 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			continue
 		}
 
+		// stream_event messages are ephemeral deltas for real-time streaming.
+		// Forward to consumers but skip internal bookkeeping.
+		if msg.Type == MessageTypeStreamEvent {
+			p.mu.Lock()
+			ch := p.responseCh
+			p.mu.Unlock()
+			if ch != nil {
+				select {
+				case ch <- msg:
+				case <-ctx.Done():
+					return
+				}
+			}
+			continue
+		}
+
 		p.mu.Lock()
 		p.messageCount++
 		p.liveMessages = append(p.liveMessages, msg)
@@ -432,7 +448,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	if p.status == ProcessStatusBusy {
 		p.mu.Unlock()
-		return nil, fmt.Errorf("claude process is already busy")
+		return nil, ErrBusy
 	}
 
 	p.status = ProcessStatusBusy

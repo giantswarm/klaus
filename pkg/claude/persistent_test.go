@@ -267,9 +267,8 @@ func TestPersistentProcess_PersistentArgs(t *testing.T) {
 		Agents: map[string]AgentConfig{
 			"reviewer": {Description: "Reviews", Prompt: "Review"},
 		},
-		ActiveAgent:            "reviewer",
-		IncludePartialMessages: true,
-		NoSessionPersistence:   true,
+		ActiveAgent:          "reviewer",
+		NoSessionPersistence: true,
 	}
 
 	args := opts.PersistentArgs()
