@@ -55,8 +55,8 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 	mux.Handle("/mcp", ownerMW(mcpSrv))
 
 	// Chat endpoints -- owner-authenticated, OpenAI-compatible.
-	mux.Handle("/v1/chat/completions", ownerMW(http.HandlerFunc(handleChatCompletions(process))))
-	mux.Handle("/v1/chat/messages", ownerMW(http.HandlerFunc(handleChatMessages(process))))
+	mux.Handle("/v1/chat/completions", ownerMW(handleChatCompletions(process)))
+	mux.Handle("/v1/chat/messages", ownerMW(handleChatMessages(process)))
 
 	// Operational endpoints (bypass owner validation).
 	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject)

@@ -80,9 +80,8 @@ func TestArgs_AllOptions(t *testing.T) {
 		Agents: map[string]AgentConfig{
 			"reviewer": {Description: "Reviews code", Prompt: "You review"},
 		},
-		ActiveAgent:            "reviewer",
-		IncludePartialMessages: true,
-		NoSessionPersistence:   true,
+		ActiveAgent:          "reviewer",
+		NoSessionPersistence: true,
 	}
 	args := opts.args()
 

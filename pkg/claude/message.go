@@ -3,9 +3,14 @@ package claude
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"time"
 )
+
+// ErrBusy is returned when a prompt is submitted while the process is already
+// handling another prompt.
+var ErrBusy = errors.New("claude process is already busy")
 
 // MessageType identifies the kind of message in the stream-json protocol.
 type MessageType string
@@ -65,8 +70,9 @@ type StreamMessage struct {
 	TotalCost float64 `json:"total_cost_usd,omitempty"`
 
 	// Fields present on "stream_event" messages (--include-partial-messages).
-	EventType string `json:"-"`
-	DeltaText string `json:"-"`
+	EventType    string `json:"-"`
+	DeltaText    string `json:"-"`
+	ToolUseName  string `json:"-"` // tool name from content_block_start with type "tool_use"
 
 	// Raw holds the original JSON for messages we don't fully parse.
 	Raw json.RawMessage `json:"-"`
@@ -94,6 +100,9 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 			msg.EventType = env.Event.Type
 			if env.Event.Delta.Type == "text_delta" {
 				msg.DeltaText = env.Event.Delta.Text
+			}
+			if env.Event.Type == "content_block_start" && env.Event.ContentBlock.Type == "tool_use" {
+				msg.ToolUseName = env.Event.ContentBlock.Name
 			}
 		}
 	}
@@ -360,8 +369,14 @@ type streamEventEnvelope struct {
 }
 
 type streamEventPayload struct {
-	Type  string           `json:"type"`
-	Delta streamEventDelta `json:"delta,omitempty"`
+	Type         string                `json:"type"`
+	Delta        streamEventDelta      `json:"delta,omitempty"`
+	ContentBlock streamEventBlockStart `json:"content_block,omitempty"`
+}
+
+type streamEventBlockStart struct {
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 type streamEventDelta struct {

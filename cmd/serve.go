@@ -259,9 +259,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.ActiveAgent != "" {
 		opts.ActiveAgent = cfg.Claude.ActiveAgent
 	}
-	if cfg.Claude.IncludePartialMessages {
-		opts.IncludePartialMessages = true
-	}
 	if cfg.Claude.NoSessionPersistence {
 		opts.NoSessionPersistence = true
 	}

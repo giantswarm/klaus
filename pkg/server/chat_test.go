@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,8 +123,14 @@ func TestHandleChatCompletions_Streaming(t *testing.T) {
 	if chunks[0].Choices[0].Delta.Content != "Hello" {
 		t.Errorf("expected first delta content %q, got %q", "Hello", chunks[0].Choices[0].Delta.Content)
 	}
+	if chunks[0].Choices[0].Delta.Role != "assistant" {
+		t.Errorf("expected role on first chunk, got %q", chunks[0].Choices[0].Delta.Role)
+	}
 	if chunks[1].Choices[0].Delta.Content != " world" {
 		t.Errorf("expected second delta content %q, got %q", " world", chunks[1].Choices[0].Delta.Content)
+	}
+	if chunks[1].Choices[0].Delta.Role != "" {
+		t.Errorf("expected empty role on subsequent chunks, got %q", chunks[1].Choices[0].Delta.Role)
 	}
 
 	lastChunk := chunks[len(chunks)-1]
@@ -172,6 +177,45 @@ func TestHandleChatCompletions_StreamingSkipsAssistantMessages(t *testing.T) {
 
 	if chunks[0].Choices[0].Delta.Content != "answer" {
 		t.Errorf("expected delta content %q, got %q", "answer", chunks[0].Choices[0].Delta.Content)
+	}
+}
+
+func TestHandleChatCompletions_StreamingToolUseEvents(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 6)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "Let me check."}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read"}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "The file contains..."}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeAssistant, Subtype: claude.SubtypeText, Text: "Let me check. The file contains..."}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "done"}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"read it"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, _ := parseSSEChunks(t, w)
+
+	// 2 text deltas + 1 tool use + 1 final stop = 4 chunks.
+	if len(chunks) != 4 {
+		t.Fatalf("expected 4 chunks (2 deltas + 1 tool + 1 final), got %d", len(chunks))
+	}
+
+	if chunks[0].Choices[0].Delta.Content != "Let me check." {
+		t.Errorf("expected first delta %q, got %q", "Let me check.", chunks[0].Choices[0].Delta.Content)
+	}
+	if chunks[1].Choices[0].Delta.Content != "[Using tool: Read]" {
+		t.Errorf("expected tool use delta %q, got %q", "[Using tool: Read]", chunks[1].Choices[0].Delta.Content)
+	}
+	if chunks[2].Choices[0].Delta.Content != "The file contains..." {
+		t.Errorf("expected second delta %q, got %q", "The file contains...", chunks[2].Choices[0].Delta.Content)
 	}
 }
 
@@ -258,6 +302,16 @@ func TestStreamMessageToDelta(t *testing.T) {
 		{
 			name:    "message_start event",
 			msg:     claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "message_start"},
+			wantNil: true,
+		},
+		{
+			name:     "content_block_start tool_use",
+			msg:      claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read"},
+			wantText: "[Using tool: Read]",
+		},
+		{
+			name:    "content_block_start text (no tool)",
+			msg:     claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start"},
 			wantNil: true,
 		},
 		{
@@ -373,7 +427,7 @@ func TestHandleChatCompletions_BusyReturns429(t *testing.T) {
 	prompter := &chatTestPrompter{
 		status: claude.StatusInfo{Status: claude.ProcessStatusBusy},
 		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
-			return nil, fmt.Errorf("claude process is already busy")
+			return nil, claude.ErrBusy
 		},
 	}
 

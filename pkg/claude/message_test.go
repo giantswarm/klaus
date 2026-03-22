@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -368,6 +367,42 @@ func TestParseStreamMessage_StreamEvent_NonTextDelta(t *testing.T) {
 	}
 	if msg.DeltaText != "" {
 		t.Errorf("expected empty DeltaText for input_json_delta, got %q", msg.DeltaText)
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_ContentBlockStartToolUse(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"Read","input":{}}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeStreamEvent {
+		t.Errorf("expected type %q, got %q", MessageTypeStreamEvent, msg.Type)
+	}
+	if msg.EventType != "content_block_start" {
+		t.Errorf("expected EventType %q, got %q", "content_block_start", msg.EventType)
+	}
+	if msg.ToolUseName != "Read" {
+		t.Errorf("expected ToolUseName %q, got %q", "Read", msg.ToolUseName)
+	}
+	if msg.DeltaText != "" {
+		t.Errorf("expected empty DeltaText, got %q", msg.DeltaText)
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_ContentBlockStartText(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.EventType != "content_block_start" {
+		t.Errorf("expected EventType %q, got %q", "content_block_start", msg.EventType)
+	}
+	if msg.ToolUseName != "" {
+		t.Errorf("expected empty ToolUseName for text block, got %q", msg.ToolUseName)
 	}
 }
 
@@ -799,7 +834,7 @@ func TestSubmitAsync(t *testing.T) {
 		current := previousResult
 
 		failingRunFn := func(_ context.Context, _ string, _ *RunOptions) (<-chan StreamMessage, error) {
-			return nil, fmt.Errorf("claude process is already busy")
+			return nil, ErrBusy
 		}
 
 		err := submitAsync(context.Background(), "new prompt", nil, failingRunFn, func(rs resultState) {

@@ -164,7 +164,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.mu.Lock()
 	if p.status == ProcessStatusBusy {
 		p.mu.Unlock()
-		return nil, fmt.Errorf("claude process is already busy")
+		return nil, ErrBusy
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""

@@ -103,8 +103,6 @@ type Options struct {
 
 	// JSONSchema constrains the output to conform to a JSON Schema.
 	JSONSchema string
-	// IncludePartialMessages emits partial message chunks during streaming.
-	IncludePartialMessages bool
 
 	// SettingsFile is a path to a settings JSON file or inline JSON string.
 	SettingsFile string

@@ -2,10 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
@@ -20,7 +20,7 @@ type chatCompletionRequest struct {
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
+	Role    string `json:"role,omitempty"`
 	Content string `json:"content"`
 }
 
@@ -75,7 +75,7 @@ func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
 
 		ch, err := process.RunWithOptions(r.Context(), prompt, nil)
 		if err != nil {
-			if strings.Contains(err.Error(), "already busy") {
+			if errors.Is(err, claudepkg.ErrBusy) {
 				http.Error(w, "agent is busy", http.StatusTooManyRequests)
 				return
 			}
@@ -118,6 +118,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 	flusher.Flush()
 
 	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano())
+	sentRole := false
 
 	for {
 		select {
@@ -135,6 +136,12 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 			delta := streamMessageToDelta(msg)
 			if delta == nil {
 				continue
+			}
+
+			if sentRole {
+				delta.Role = ""
+			} else {
+				sentRole = true
 			}
 
 			chunk := chatCompletionResponse{
@@ -215,6 +222,9 @@ func streamMessageToDelta(msg claudepkg.StreamMessage) *chatMessage {
 	case claudepkg.MessageTypeStreamEvent:
 		if msg.EventType == "content_block_delta" && msg.DeltaText != "" {
 			return &chatMessage{Role: "assistant", Content: msg.DeltaText}
+		}
+		if msg.EventType == "content_block_start" && msg.ToolUseName != "" {
+			return &chatMessage{Role: "assistant", Content: "[Using tool: " + msg.ToolUseName + "]"}
 		}
 		return nil
 	case claudepkg.MessageTypeAssistant:

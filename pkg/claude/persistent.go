@@ -448,7 +448,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	if p.status == ProcessStatusBusy {
 		p.mu.Unlock()
-		return nil, fmt.Errorf("claude process is already busy")
+		return nil, ErrBusy
 	}
 
 	p.status = ProcessStatusBusy
