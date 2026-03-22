@@ -18,6 +18,7 @@ type MessageType string
 const (
 	MessageTypeSystem      MessageType = "system"
 	MessageTypeAssistant   MessageType = "assistant"
+	MessageTypeUser        MessageType = "user"
 	MessageTypeResult      MessageType = "result"
 	MessageTypeStreamEvent MessageType = "stream_event"
 )
@@ -70,9 +71,11 @@ type StreamMessage struct {
 	TotalCost float64 `json:"total_cost_usd,omitempty"`
 
 	// Fields present on "stream_event" messages (--include-partial-messages).
-	EventType   string `json:"-"`
-	DeltaText   string `json:"-"`
-	ToolUseName string `json:"-"` // tool name from content_block_start with type "tool_use"
+	EventType      string `json:"-"`
+	DeltaText      string `json:"-"`
+	ToolUseName    string `json:"-"` // tool name from content_block_start with type "tool_use"
+	ToolUseBlockID string `json:"-"` // tool use ID from content_block_start with type "tool_use"
+	InputJSONDelta string `json:"-"` // partial JSON from content_block_delta with input_json_delta
 
 	// Raw holds the original JSON for messages we don't fully parse.
 	Raw json.RawMessage `json:"-"`
@@ -101,8 +104,12 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 			if env.Event.Delta.Type == "text_delta" {
 				msg.DeltaText = env.Event.Delta.Text
 			}
+			if env.Event.Delta.Type == "input_json_delta" {
+				msg.InputJSONDelta = env.Event.Delta.PartialJSON
+			}
 			if env.Event.Type == "content_block_start" && env.Event.ContentBlock.Type == "tool_use" {
 				msg.ToolUseName = env.Event.ContentBlock.Name
+				msg.ToolUseBlockID = env.Event.ContentBlock.ID
 			}
 		}
 	}
@@ -248,18 +255,44 @@ type RawMessagesInfo struct {
 // MessageSummary is a simplified representation of a StreamMessage
 // with only role and content, suitable for external consumers.
 type MessageSummary struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string          `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  []ToolCallInfo  `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	Timestamp  string          `json:"timestamp,omitempty"`
+}
+
+// ToolCallInfo holds structured tool call data for external consumers.
+type ToolCallInfo struct {
+	ID   string          `json:"id"`
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args,omitempty"`
+}
+
+// ToolResultInfo holds structured tool result data for external consumers.
+type ToolResultInfo struct {
+	ToolCallID string `json:"tool_call_id"`
+	Content    string `json:"content"`
+	IsError    bool   `json:"is_error,omitempty"`
 }
 
 // SummarizeMessages converts a slice of StreamMessages to simplified
-// MessageSummary entries for external consumption.
+// MessageSummary entries for external consumption. System messages are
+// deduplicated by content.
 func SummarizeMessages(msgs []StreamMessage) []MessageSummary {
 	summaries := make([]MessageSummary, 0, len(msgs))
+	seenSystem := make(map[string]bool)
 	for _, msg := range msgs {
 		s := summarizeMessage(msg)
 		if s.Content == "" && s.Role == "" {
 			continue
+		}
+		// Deduplicate system messages by content.
+		if s.Role == "system" {
+			if seenSystem[s.Content] {
+				continue
+			}
+			seenSystem[s.Content] = true
 		}
 		summaries = append(summaries, s)
 	}
@@ -317,18 +350,42 @@ func summarizeMessage(msg StreamMessage) MessageSummary {
 		if content == "" {
 			return MessageSummary{}
 		}
-		return MessageSummary{Role: "system", Content: content}
+		return MessageSummary{Role: "system", Content: content, Timestamp: msg.Timestamp}
 	case MessageTypeAssistant:
 		if msg.Subtype == SubtypeToolUse {
-			return MessageSummary{Role: "assistant", Content: "Using tool: " + msg.ToolName}
+			tc := ToolCallInfo{
+				ID:   msg.ToolID,
+				Name: msg.ToolName,
+				Args: msg.ToolArgs,
+			}
+			return MessageSummary{
+				Role:      "assistant",
+				Content:   "Using tool: " + msg.ToolName,
+				ToolCalls: []ToolCallInfo{tc},
+				Timestamp: msg.Timestamp,
+			}
 		}
 		if msg.Subtype == SubtypeText && msg.Text != "" {
-			return MessageSummary{Role: "assistant", Content: msg.Text}
+			return MessageSummary{Role: "assistant", Content: msg.Text, Timestamp: msg.Timestamp}
 		}
 		return MessageSummary{}
+	case MessageTypeUser:
+		// User messages contain tool results.
+		blocks := ExtractToolResults(msg)
+		if len(blocks) == 0 {
+			return MessageSummary{}
+		}
+		// Return the first tool result as a "tool" role message.
+		block := blocks[0]
+		return MessageSummary{
+			Role:       "tool",
+			Content:    block.Content,
+			ToolCallID: block.ToolUseID,
+			Timestamp:  msg.Timestamp,
+		}
 	case MessageTypeResult:
 		if msg.Result != "" {
-			return MessageSummary{Role: "result", Content: msg.Result}
+			return MessageSummary{Role: "result", Content: msg.Result, Timestamp: msg.Timestamp}
 		}
 		return MessageSummary{}
 	default:
@@ -376,12 +433,14 @@ type streamEventPayload struct {
 
 type streamEventBlockStart struct {
 	Type string `json:"type,omitempty"`
+	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
 }
 
 type streamEventDelta struct {
-	Type string `json:"type,omitempty"`
-	Text string `json:"text,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Text        string `json:"text,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
 }
 
 // assistantContentBlock represents a single content block in message.content[]

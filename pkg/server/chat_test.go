@@ -186,7 +186,7 @@ func TestHandleChatCompletions_StreamingToolUseEvents(t *testing.T) {
 		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
 			ch := make(chan claude.StreamMessage, 6)
 			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "Let me check."}
-			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read"}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read", ToolUseBlockID: "toolu_123"}
 			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "The file contains..."}
 			ch <- claude.StreamMessage{Type: claude.MessageTypeAssistant, Subtype: claude.SubtypeText, Text: "Let me check. The file contains..."}
 			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "done"}
@@ -203,7 +203,7 @@ func TestHandleChatCompletions_StreamingToolUseEvents(t *testing.T) {
 
 	chunks, _ := parseSSEChunks(t, w)
 
-	// 2 text deltas + 1 tool use + 1 final stop = 4 chunks.
+	// 2 text deltas + 1 tool_calls + 1 final stop = 4 chunks.
 	if len(chunks) != 4 {
 		t.Fatalf("expected 4 chunks (2 deltas + 1 tool + 1 final), got %d", len(chunks))
 	}
@@ -211,11 +211,152 @@ func TestHandleChatCompletions_StreamingToolUseEvents(t *testing.T) {
 	if chunks[0].Choices[0].Delta.Content != "Let me check." {
 		t.Errorf("expected first delta %q, got %q", "Let me check.", chunks[0].Choices[0].Delta.Content)
 	}
-	if chunks[1].Choices[0].Delta.Content != "[Using tool: Read]" {
-		t.Errorf("expected tool use delta %q, got %q", "[Using tool: Read]", chunks[1].Choices[0].Delta.Content)
+
+	// Tool use event should emit structured tool_calls, not [Using tool: X] text.
+	toolDelta := chunks[1].Choices[0].Delta
+	if len(toolDelta.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolDelta.ToolCalls))
 	}
+	if toolDelta.ToolCalls[0].ID != "toolu_123" {
+		t.Errorf("expected tool call ID %q, got %q", "toolu_123", toolDelta.ToolCalls[0].ID)
+	}
+	if toolDelta.ToolCalls[0].Function.Name != "Read" {
+		t.Errorf("expected tool name %q, got %q", "Read", toolDelta.ToolCalls[0].Function.Name)
+	}
+	if toolDelta.ToolCalls[0].Type != "function" {
+		t.Errorf("expected tool type %q, got %q", "function", toolDelta.ToolCalls[0].Type)
+	}
+
 	if chunks[2].Choices[0].Delta.Content != "The file contains..." {
 		t.Errorf("expected second delta %q, got %q", "The file contains...", chunks[2].Choices[0].Delta.Content)
+	}
+}
+
+func TestHandleChatCompletions_StreamingToolInputDelta(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 5)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Bash", ToolUseBlockID: "toolu_456"}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", InputJSONDelta: `{"command":`}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", InputJSONDelta: `"echo hello"}`}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "done"}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"run echo"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, _ := parseSSEChunks(t, w)
+
+	// 1 tool_calls start + 2 input_json_delta + 1 final = 4 chunks.
+	if len(chunks) != 4 {
+		t.Fatalf("expected 4 chunks, got %d", len(chunks))
+	}
+
+	// First chunk: tool call start with name and ID.
+	if len(chunks[0].Choices[0].Delta.ToolCalls) != 1 {
+		t.Fatal("expected tool_calls in first chunk")
+	}
+	if chunks[0].Choices[0].Delta.ToolCalls[0].Function.Name != "Bash" {
+		t.Errorf("expected tool name Bash, got %q", chunks[0].Choices[0].Delta.ToolCalls[0].Function.Name)
+	}
+
+	// Second chunk: input JSON delta.
+	if len(chunks[1].Choices[0].Delta.ToolCalls) != 1 {
+		t.Fatal("expected tool_calls in second chunk")
+	}
+	if chunks[1].Choices[0].Delta.ToolCalls[0].Function.Arguments != `{"command":` {
+		t.Errorf("expected arguments chunk, got %q", chunks[1].Choices[0].Delta.ToolCalls[0].Function.Arguments)
+	}
+}
+
+func TestHandleChatCompletions_StreamingToolResult(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 3)
+			ch <- claude.StreamMessage{
+				Type:    claude.MessageTypeUser,
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"toolu_789","content":"hello","is_error":false}]}`),
+			}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "done"}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"test"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, _ := parseSSEChunks(t, w)
+
+	// 1 tool result + 1 final stop.
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(chunks))
+	}
+
+	delta := chunks[0].Choices[0].Delta
+	if delta.Role != "tool" {
+		t.Errorf("expected role 'tool', got %q", delta.Role)
+	}
+	if delta.ToolCallID != "toolu_789" {
+		t.Errorf("expected tool_call_id 'toolu_789', got %q", delta.ToolCallID)
+	}
+	if delta.Content != "hello" {
+		t.Errorf("expected content 'hello', got %q", delta.Content)
+	}
+}
+
+func TestHandleChatCompletions_StreamingUsage(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 3)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "hi"}
+			ch <- claude.StreamMessage{
+				Type:   claude.MessageTypeResult,
+				Result: "done",
+				Usage:  &claude.TokenUsage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 200},
+			}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"hi"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, _ := parseSSEChunks(t, w)
+
+	// 1 delta + 1 final with usage.
+	if len(chunks) < 2 {
+		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
+	}
+
+	lastChunk := chunks[len(chunks)-1]
+	if lastChunk.Usage == nil {
+		t.Fatal("expected usage in final chunk")
+	}
+	if lastChunk.Usage.PromptTokens != 300 { // 100 input + 200 cache_read
+		t.Errorf("expected prompt_tokens 300, got %d", lastChunk.Usage.PromptTokens)
+	}
+	if lastChunk.Usage.CompletionTokens != 50 {
+		t.Errorf("expected completion_tokens 50, got %d", lastChunk.Usage.CompletionTokens)
+	}
+	if lastChunk.Usage.TotalTokens != 350 {
+		t.Errorf("expected total_tokens 350, got %d", lastChunk.Usage.TotalTokens)
 	}
 }
 
@@ -284,10 +425,12 @@ func TestHandleChatCompletions_NonStreamingWithStreamEvents(t *testing.T) {
 
 func TestStreamMessageToDelta(t *testing.T) {
 	tests := []struct {
-		name     string
-		msg      claude.StreamMessage
-		wantNil  bool
-		wantText string
+		name          string
+		msg           claude.StreamMessage
+		wantNil       bool
+		wantText      string
+		wantToolCalls bool
+		wantToolRole  string
 	}{
 		{
 			name:     "content_block_delta with text",
@@ -305,9 +448,9 @@ func TestStreamMessageToDelta(t *testing.T) {
 			wantNil: true,
 		},
 		{
-			name:     "content_block_start tool_use",
-			msg:      claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read"},
-			wantText: "[Using tool: Read]",
+			name:          "content_block_start tool_use",
+			msg:           claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_start", ToolUseName: "Read", ToolUseBlockID: "toolu_abc"},
+			wantToolCalls: true,
 		},
 		{
 			name:    "content_block_start text (no tool)",
@@ -344,11 +487,25 @@ func TestStreamMessageToDelta(t *testing.T) {
 			msg:     claude.StreamMessage{Type: claude.MessageTypeSystem, SessionID: "sess-1"},
 			wantNil: true,
 		},
+		{
+			name:          "input_json_delta",
+			msg:           claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", InputJSONDelta: `{"cmd":"ls"}`},
+			wantToolCalls: true,
+		},
+		{
+			name: "user tool_result message",
+			msg: claude.StreamMessage{
+				Type:    claude.MessageTypeUser,
+				Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"toolu_xyz","content":"output","is_error":false}]}`),
+			},
+			wantToolRole: "tool",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := streamMessageToDelta(tt.msg)
+			toolIndex := 0
+			got := streamMessageToDelta(tt.msg, &toolIndex)
 			if tt.wantNil {
 				if got != nil {
 					t.Errorf("expected nil, got %+v", got)
@@ -357,6 +514,21 @@ func TestStreamMessageToDelta(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatal("expected non-nil result")
+			}
+			if tt.wantToolCalls {
+				if len(got.ToolCalls) == 0 {
+					t.Error("expected tool_calls to be present")
+				}
+				if got.Role != "assistant" {
+					t.Errorf("expected role 'assistant', got %q", got.Role)
+				}
+				return
+			}
+			if tt.wantToolRole != "" {
+				if got.Role != tt.wantToolRole {
+					t.Errorf("expected role %q, got %q", tt.wantToolRole, got.Role)
+				}
+				return
 			}
 			if got.Role != "assistant" {
 				t.Errorf("expected role %q, got %q", "assistant", got.Role)
@@ -420,6 +592,44 @@ func TestHandleChatCompletions_NonStreaming(t *testing.T) {
 	}
 	if choice.FinishReason == nil || *choice.FinishReason != "stop" {
 		t.Error("expected finish_reason 'stop'")
+	}
+}
+
+func TestHandleChatCompletions_NonStreamingUsage(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 2)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeAssistant, Subtype: claude.SubtypeText, Text: "hi"}
+			ch <- claude.StreamMessage{
+				Type:   claude.MessageTypeResult,
+				Result: "hi",
+				Usage:  &claude.TokenUsage{InputTokens: 10, OutputTokens: 5},
+			}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"hi"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	var chatResp chatCompletionResponse
+	if err := json.NewDecoder(w.Body).Decode(&chatResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if chatResp.Usage == nil {
+		t.Fatal("expected usage in response")
+	}
+	if chatResp.Usage.PromptTokens != 10 {
+		t.Errorf("expected prompt_tokens 10, got %d", chatResp.Usage.PromptTokens)
+	}
+	if chatResp.Usage.CompletionTokens != 5 {
+		t.Errorf("expected completion_tokens 5, got %d", chatResp.Usage.CompletionTokens)
 	}
 }
 
@@ -565,6 +775,42 @@ func TestHandleChatCompletions_UsesLastUserMessage(t *testing.T) {
 	}
 }
 
+func TestHandleChatCompletions_ContinueSessionOnSubsequentCalls(t *testing.T) {
+	var capturedOpts []*claude.RunOptions
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, opts *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			capturedOpts = append(capturedOpts, opts)
+			ch := make(chan claude.StreamMessage, 1)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "done"}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	handler := handleChatCompletions(prompter)
+
+	// First call: no ContinueSession.
+	body := `{"messages":[{"role":"user","content":"first"}],"stream":false}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	handler(w, req)
+
+	if capturedOpts[0] != nil {
+		t.Error("expected nil RunOptions on first call")
+	}
+
+	// Second call: should have ContinueSession.
+	body = `{"messages":[{"role":"user","content":"second"}],"stream":false}`
+	req = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	handler(w, req)
+
+	if capturedOpts[1] == nil || !capturedOpts[1].ContinueSession {
+		t.Error("expected ContinueSession=true on second call")
+	}
+}
+
 func TestHandleChatMessages(t *testing.T) {
 	prompter := &chatTestPrompter{
 		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
@@ -609,6 +855,69 @@ func TestHandleChatMessages(t *testing.T) {
 	}
 	if msgResp.Messages[1].Role != "assistant" || msgResp.Messages[1].Content != "Hi there!" {
 		t.Errorf("unexpected second message: %+v", msgResp.Messages[1])
+	}
+}
+
+func TestHandleChatMessages_StructuredToolCalls(t *testing.T) {
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		messagesInfo: claude.MessagesInfo{
+			Status: claude.ProcessStatusIdle,
+			Messages: []claude.MessageSummary{
+				{
+					Role:    "assistant",
+					Content: "Using tool: Bash",
+					ToolCalls: []claude.ToolCallInfo{{
+						ID:   "toolu_abc",
+						Name: "Bash",
+						Args: json.RawMessage(`{"command":"echo hi"}`),
+					}},
+				},
+				{
+					Role:       "tool",
+					Content:    "hi",
+					ToolCallID: "toolu_abc",
+				},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/chat/messages", nil)
+	w := httptest.NewRecorder()
+
+	handleChatMessages(prompter)(w, req)
+
+	var msgResp chatMessagesResponse
+	if err := json.NewDecoder(w.Body).Decode(&msgResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(msgResp.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgResp.Messages))
+	}
+
+	// First message: assistant with tool_calls.
+	msg0 := msgResp.Messages[0]
+	if len(msg0.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(msg0.ToolCalls))
+	}
+	if msg0.ToolCalls[0].ID != "toolu_abc" {
+		t.Errorf("expected tool call ID 'toolu_abc', got %q", msg0.ToolCalls[0].ID)
+	}
+	if msg0.ToolCalls[0].Function.Name != "Bash" {
+		t.Errorf("expected tool name 'Bash', got %q", msg0.ToolCalls[0].Function.Name)
+	}
+	if msg0.ToolCalls[0].Function.Arguments != `{"command":"echo hi"}` {
+		t.Errorf("expected tool arguments, got %q", msg0.ToolCalls[0].Function.Arguments)
+	}
+
+	// Second message: tool result with tool_call_id.
+	msg1 := msgResp.Messages[1]
+	if msg1.Role != "tool" {
+		t.Errorf("expected role 'tool', got %q", msg1.Role)
+	}
+	if msg1.ToolCallID != "toolu_abc" {
+		t.Errorf("expected tool_call_id 'toolu_abc', got %q", msg1.ToolCallID)
 	}
 }
 
