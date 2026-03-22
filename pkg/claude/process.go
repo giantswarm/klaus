@@ -37,7 +37,8 @@ type RunOptions struct {
 
 // ignoredFields returns the names of fields that have non-zero values.
 // This is used to log which per-invocation overrides cannot be applied
-// in persistent mode.
+// in persistent mode. ContinueSession is excluded because persistent mode
+// inherently continues the conversation -- the flag is expected, not ignored.
 func (ro *RunOptions) ignoredFields() []string {
 	if ro == nil {
 		return nil
@@ -48,9 +49,6 @@ func (ro *RunOptions) ignoredFields() []string {
 	}
 	if ro.Resume != "" {
 		fields = append(fields, "resume")
-	}
-	if ro.ContinueSession {
-		fields = append(fields, "continue")
 	}
 	if ro.ForkSession {
 		fields = append(fields, "fork_session")
@@ -134,6 +132,9 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.ContinueSession {
 		opts.ContinueSession = true
+		// --continue requires the previous session to exist on disk,
+		// so disable --no-session-persistence when continuing (#171).
+		opts.NoSessionPersistence = false
 	}
 	if ro.ForkSession {
 		opts.ForkSession = true
@@ -168,7 +169,9 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
-	p.messageCount = 0
+	// Preserve liveMessages and messageCount across turns so that
+	// /v1/chat/messages returns the full conversation history and
+	// message_count accumulates rather than resetting (#171).
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
@@ -181,7 +184,6 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
-	p.liveMessages = nil
 
 	// Create a new done channel for this run while holding the lock,
 	// ensuring no race between concurrent callers.
@@ -594,9 +596,9 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 	return detail
 }
 
-// Messages returns the current conversation messages. While the agent is
-// busy, it returns the live-accumulated messages. When completed, it falls
-// back to the stored result messages or persisted state on disk.
+// Messages returns the current conversation messages. liveMessages accumulates
+// across turns, so it is preferred over result.messages (which only contains
+// the last Submit run). Falls back to persisted state on disk when empty.
 func (p *Process) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status
@@ -605,27 +607,19 @@ func (p *Process) Messages() MessagesInfo {
 	store := p.resultStore
 	p.mu.RUnlock()
 
-	// While busy or starting, return live messages.
-	if status == ProcessStatusBusy || status == ProcessStatusStarting {
-		return MessagesInfo{
-			Status:   status,
-			Messages: SummarizeMessages(live),
-		}
-	}
-
-	// When completed, prefer in-memory result messages.
-	if len(resMessages) > 0 {
-		return MessagesInfo{
-			Status:   status,
-			Messages: SummarizeMessages(resMessages),
-		}
-	}
-
-	// If live messages are available (e.g. just finished), use those.
+	// Prefer liveMessages (accumulated across turns) over result.messages
+	// (single turn from Submit) for full conversation history (#171).
 	if len(live) > 0 {
 		return MessagesInfo{
 			Status:   status,
 			Messages: SummarizeMessages(live),
+		}
+	}
+
+	if len(resMessages) > 0 {
+		return MessagesInfo{
+			Status:   status,
+			Messages: SummarizeMessages(resMessages),
 		}
 	}
 
@@ -645,7 +639,8 @@ func (p *Process) Messages() MessagesInfo {
 // RawMessages returns the raw stream-json messages from the current or last
 // completed run. offset skips the first N messages; types filters by message
 // type (empty means all types). The Total field always reflects the full
-// unfiltered message count.
+// unfiltered message count. liveMessages is preferred as it accumulates
+// across turns (#171).
 func (p *Process) RawMessages(offset int, types []string) RawMessagesInfo {
 	p.mu.RLock()
 	status := p.status
@@ -654,19 +649,13 @@ func (p *Process) RawMessages(offset int, types []string) RawMessagesInfo {
 	store := p.resultStore
 	p.mu.RUnlock()
 
-	// While busy or starting, return live messages.
-	if status == ProcessStatusBusy || status == ProcessStatusStarting {
-		return collectRawMessages(status, live, offset, types)
-	}
-
-	// When completed, prefer in-memory result messages.
-	if len(resMessages) > 0 {
-		return collectRawMessages(status, resMessages, offset, types)
-	}
-
-	// If live messages are available (e.g. just finished), use those.
+	// Prefer liveMessages (accumulated across turns) for full history.
 	if len(live) > 0 {
 		return collectRawMessages(status, live, offset, types)
+	}
+
+	if len(resMessages) > 0 {
+		return collectRawMessages(status, resMessages, offset, types)
 	}
 
 	// Fall back to persisted result on disk.

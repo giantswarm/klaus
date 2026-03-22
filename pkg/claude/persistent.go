@@ -453,7 +453,9 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	p.status = ProcessStatusBusy
 	p.lastError = ""
-	p.messageCount = 0
+	// Preserve liveMessages and messageCount across turns so that
+	// /v1/chat/messages returns the full conversation history and
+	// message_count accumulates rather than resetting (#171).
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
@@ -466,7 +468,6 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
-	p.liveMessages = nil
 
 	// Create response channel and done channel for this prompt.
 	ch := make(chan StreamMessage, 100)
@@ -714,9 +715,9 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 	return detail
 }
 
-// Messages returns the current conversation messages. While the agent is
-// busy, it returns the live-accumulated messages. When completed, it falls
-// back to the stored result messages or persisted state on disk.
+// Messages returns the current conversation messages. liveMessages accumulates
+// across turns, so it is preferred over result.messages (which only contains
+// the last Submit run). Falls back to persisted state on disk when empty.
 func (p *PersistentProcess) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status
@@ -725,7 +726,9 @@ func (p *PersistentProcess) Messages() MessagesInfo {
 	store := p.resultStore
 	p.mu.RUnlock()
 
-	if status == ProcessStatusBusy || status == ProcessStatusStarting {
+	// Prefer liveMessages (accumulated across turns) over result.messages
+	// (single turn from Submit) for full conversation history (#171).
+	if len(live) > 0 {
 		return MessagesInfo{
 			Status:   status,
 			Messages: SummarizeMessages(live),
@@ -736,13 +739,6 @@ func (p *PersistentProcess) Messages() MessagesInfo {
 		return MessagesInfo{
 			Status:   status,
 			Messages: SummarizeMessages(resMessages),
-		}
-	}
-
-	if len(live) > 0 {
-		return MessagesInfo{
-			Status:   status,
-			Messages: SummarizeMessages(live),
 		}
 	}
 
@@ -761,7 +757,8 @@ func (p *PersistentProcess) Messages() MessagesInfo {
 // RawMessages returns the raw stream-json messages from the current or last
 // completed run. offset skips the first N messages; types filters by message
 // type (empty means all types). The Total field always reflects the full
-// unfiltered message count.
+// unfiltered message count. liveMessages is preferred as it accumulates
+// across turns (#171).
 func (p *PersistentProcess) RawMessages(offset int, types []string) RawMessagesInfo {
 	p.mu.RLock()
 	status := p.status
@@ -770,16 +767,13 @@ func (p *PersistentProcess) RawMessages(offset int, types []string) RawMessagesI
 	store := p.resultStore
 	p.mu.RUnlock()
 
-	if status == ProcessStatusBusy || status == ProcessStatusStarting {
+	// Prefer liveMessages (accumulated across turns) for full history.
+	if len(live) > 0 {
 		return collectRawMessages(status, live, offset, types)
 	}
 
 	if len(resMessages) > 0 {
 		return collectRawMessages(status, resMessages, offset, types)
-	}
-
-	if len(live) > 0 {
-		return collectRawMessages(status, live, offset, types)
 	}
 
 	if store != nil {
