@@ -113,6 +113,52 @@ workflows:
             ignore:
             - main
 
+    # Main branch: tag images as :latest
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-registries-latest
+        tag-latest-branch: main
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-registries-debian-latest
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        tag-latest-branch: main
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains-latest
+        image: giantswarm/klaus-toolchains/base
+        tag-latest-branch: main
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries-multiarch:
+        context: architect
+        name: push-to-toolchains-debian-latest
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        tag-latest-branch: main
+        requires:
+        - go-build-klaus
+        filters:
+          branches:
+            only: main
+
     # Tag builds: full multi-arch (amd64 + arm64)
     - architect/push-to-registries-multiarch:
         context: architect
