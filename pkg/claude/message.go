@@ -70,9 +70,9 @@ type StreamMessage struct {
 	TotalCost float64 `json:"total_cost_usd,omitempty"`
 
 	// Fields present on "stream_event" messages (--include-partial-messages).
-	EventType    string `json:"-"`
-	DeltaText    string `json:"-"`
-	ToolUseName  string `json:"-"` // tool name from content_block_start with type "tool_use"
+	EventType   string `json:"-"`
+	DeltaText   string `json:"-"`
+	ToolUseName string `json:"-"` // tool name from content_block_start with type "tool_use"
 
 	// Raw holds the original JSON for messages we don't fully parse.
 	Raw json.RawMessage `json:"-"`
