@@ -51,7 +51,12 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 
 	// MCP endpoint -- delegates to the StreamableHTTPServer handler.
 	// Owner middleware is applied when OwnerSubject is configured.
-	mux.Handle("/mcp", OwnerMiddleware(cfg.OwnerSubject, slog.Default())(mcpSrv))
+	ownerMW := OwnerMiddleware(cfg.OwnerSubject, slog.Default())
+	mux.Handle("/mcp", ownerMW(mcpSrv))
+
+	// Chat endpoints -- owner-authenticated, OpenAI-compatible.
+	mux.Handle("/v1/chat/completions", ownerMW(http.HandlerFunc(handleChatCompletions(process))))
+	mux.Handle("/v1/chat/messages", ownerMW(http.HandlerFunc(handleChatMessages(process))))
 
 	// Operational endpoints (bypass owner validation).
 	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject)

@@ -53,7 +53,7 @@ func TestArgs_Minimal(t *testing.T) {
 	assertNotContains(t, args, "--tools")
 	assertNotContains(t, args, "--plugin-dir")
 	assertNotContains(t, args, "--add-dir")
-	assertNotContains(t, args, "--include-partial-messages")
+	assertContains(t, args, "--include-partial-messages")
 }
 
 func TestArgs_AllOptions(t *testing.T) {
@@ -417,6 +417,40 @@ func assertContainsSequence(t *testing.T, args []string, key, value string) {
 		}
 	}
 	t.Errorf("expected args to contain %q %q, got %v", key, value, args)
+}
+
+func TestPersistentArgs_IncludePartialMessages(t *testing.T) {
+	opts := DefaultOptions()
+	args := opts.PersistentArgs()
+
+	assertContains(t, args, "--include-partial-messages")
+	assertContains(t, args, "--input-format")
+	assertContainsSequence(t, args, "--input-format", "stream-json")
+	assertContains(t, args, "--replay-user-messages")
+	assertContains(t, args, "--verbose")
+}
+
+func TestPersistentArgs_SharedBaseArgs(t *testing.T) {
+	opts := Options{
+		Model:          "claude-sonnet-4-20250514",
+		PermissionMode: "bypassPermissions",
+		MaxTurns:       10,
+		Effort:         "high",
+	}
+	args := opts.PersistentArgs()
+
+	assertContainsSequence(t, args, "--model", "claude-sonnet-4-20250514")
+	assertContainsSequence(t, args, "--permission-mode", "bypassPermissions")
+	assertContains(t, args, "--dangerously-skip-permissions")
+	assertContainsSequence(t, args, "--max-turns", "10")
+	assertContainsSequence(t, args, "--effort", "high")
+	assertContains(t, args, "--include-partial-messages")
+
+	// Session management flags should NOT appear in persistent mode.
+	assertNotContains(t, args, "--session-id")
+	assertNotContains(t, args, "--resume")
+	assertNotContains(t, args, "--continue")
+	assertNotContains(t, args, "--fork-session")
 }
 
 func findFlagValue(t *testing.T, args []string, flag string) string {

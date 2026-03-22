@@ -298,6 +298,116 @@ func TestCollectResultText_NestedFormat(t *testing.T) {
 	}
 }
 
+func TestParseStreamMessage_StreamEvent_ContentBlockDelta(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeStreamEvent {
+		t.Errorf("expected type %q, got %q", MessageTypeStreamEvent, msg.Type)
+	}
+	if msg.EventType != "content_block_delta" {
+		t.Errorf("expected EventType %q, got %q", "content_block_delta", msg.EventType)
+	}
+	if msg.DeltaText != "Hello" {
+		t.Errorf("expected DeltaText %q, got %q", "Hello", msg.DeltaText)
+	}
+	if msg.Raw == nil {
+		t.Error("expected Raw to be populated")
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_MessageStart(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-4-20250514"}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeStreamEvent {
+		t.Errorf("expected type %q, got %q", MessageTypeStreamEvent, msg.Type)
+	}
+	if msg.EventType != "message_start" {
+		t.Errorf("expected EventType %q, got %q", "message_start", msg.EventType)
+	}
+	if msg.DeltaText != "" {
+		t.Errorf("expected empty DeltaText for message_start, got %q", msg.DeltaText)
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_ContentBlockStop(t *testing.T) {
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.Type != MessageTypeStreamEvent {
+		t.Errorf("expected type %q, got %q", MessageTypeStreamEvent, msg.Type)
+	}
+	if msg.EventType != "content_block_stop" {
+		t.Errorf("expected EventType %q, got %q", "content_block_stop", msg.EventType)
+	}
+	if msg.DeltaText != "" {
+		t.Errorf("expected empty DeltaText for content_block_stop, got %q", msg.DeltaText)
+	}
+}
+
+func TestParseStreamMessage_StreamEvent_NonTextDelta(t *testing.T) {
+	// input_json_delta has type != "text_delta", so DeltaText should stay empty.
+	data := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}}`)
+	msg, err := ParseStreamMessage(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if msg.EventType != "content_block_delta" {
+		t.Errorf("expected EventType %q, got %q", "content_block_delta", msg.EventType)
+	}
+	if msg.DeltaText != "" {
+		t.Errorf("expected empty DeltaText for input_json_delta, got %q", msg.DeltaText)
+	}
+}
+
+func TestSummarizeMessages_SkipsStreamEvent(t *testing.T) {
+	msgs := []StreamMessage{
+		{Type: MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "token"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "Hello"},
+		{Type: MessageTypeStreamEvent, EventType: "message_stop"},
+		{Type: MessageTypeResult, Result: "done"},
+	}
+
+	summaries := SummarizeMessages(msgs)
+
+	// stream_event messages have no role/content, so summarizeMessage returns
+	// empty MessageSummary which SummarizeMessages filters out.
+	if len(summaries) != 2 {
+		t.Fatalf("expected 2 summaries (assistant + result), got %d", len(summaries))
+	}
+	if summaries[0].Role != "assistant" || summaries[0].Content != "Hello" {
+		t.Errorf("expected assistant summary, got %+v", summaries[0])
+	}
+	if summaries[1].Role != "result" || summaries[1].Content != "done" {
+		t.Errorf("expected result summary, got %+v", summaries[1])
+	}
+}
+
+func TestCollectResultText_IgnoresStreamEvent(t *testing.T) {
+	msgs := []StreamMessage{
+		{Type: MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "partial"},
+		{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "full response"},
+		{Type: MessageTypeStreamEvent, EventType: "message_stop"},
+		{Type: MessageTypeResult, Result: "final result"},
+	}
+
+	text := CollectResultText(msgs)
+	if text != "final result" {
+		t.Errorf("expected %q, got %q", "final result", text)
+	}
+}
+
 func TestParseStreamMessage_InvalidJSON(t *testing.T) {
 	data := []byte(`not json`)
 	_, err := ParseStreamMessage(data)
@@ -580,6 +690,45 @@ func TestSubmitDrain(t *testing.T) {
 		// Fallback to assistant text since no result message.
 		if gotText != "partial" {
 			t.Errorf("expected result text %q, got %q", "partial", gotText)
+		}
+	})
+
+	t.Run("filters out stream_event messages", func(t *testing.T) {
+		ch := make(chan StreamMessage, 5)
+		ch <- StreamMessage{Type: MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "He"}
+		ch <- StreamMessage{Type: MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "llo"}
+		ch <- StreamMessage{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "Hello"}
+		ch <- StreamMessage{Type: MessageTypeStreamEvent, EventType: "message_stop"}
+		ch <- StreamMessage{Type: MessageTypeResult, Result: "Hello"}
+		close(ch)
+
+		var gotText string
+		var gotMessages []StreamMessage
+		done := make(chan struct{})
+
+		submitDrain(context.Background(), ch, func(text string, messages []StreamMessage) {
+			gotText = text
+			gotMessages = messages
+			close(done)
+		})
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("submitDrain did not complete in time")
+		}
+
+		if gotText != "Hello" {
+			t.Errorf("expected result text %q, got %q", "Hello", gotText)
+		}
+		// Only assistant and result messages should be stored, not stream_event.
+		if len(gotMessages) != 2 {
+			t.Fatalf("expected 2 messages (stream_event filtered), got %d", len(gotMessages))
+		}
+		for _, msg := range gotMessages {
+			if msg.Type == MessageTypeStreamEvent {
+				t.Error("stream_event message should not be stored in drain results")
+			}
 		}
 	})
 

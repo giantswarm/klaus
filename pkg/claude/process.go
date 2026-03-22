@@ -287,6 +287,15 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 				continue
 			}
 
+			if msg.Type == MessageTypeStreamEvent {
+				select {
+				case out <- msg:
+				case <-runCtx.Done():
+					return
+				}
+				continue
+			}
+
 			p.mu.Lock()
 			p.messageCount++
 			p.liveMessages = append(p.liveMessages, msg)
