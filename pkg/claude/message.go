@@ -255,11 +255,11 @@ type RawMessagesInfo struct {
 // MessageSummary is a simplified representation of a StreamMessage
 // with only role and content, suitable for external consumers.
 type MessageSummary struct {
-	Role       string          `json:"role"`
-	Content    string          `json:"content"`
-	ToolCalls  []ToolCallInfo  `json:"tool_calls,omitempty"`
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Timestamp  string          `json:"timestamp,omitempty"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
+	ToolCalls  []ToolCallInfo `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Timestamp  string         `json:"timestamp,omitempty"`
 }
 
 // ToolCallInfo holds structured tool call data for external consumers.
