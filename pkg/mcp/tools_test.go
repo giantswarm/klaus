@@ -11,6 +11,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+func strPtr(s string) *string { return &s }
+
 // mockPrompter is a test double implementing claude.Prompter.
 type mockPrompter struct {
 	lastPrompt  string
@@ -33,6 +35,8 @@ type mockPrompter struct {
 	messagesInfo claudepkg.MessagesInfo
 	// rawMessagesInfo is returned by RawMessages.
 	rawMessagesInfo claudepkg.RawMessagesInfo
+	// openAIMessagesInfo is returned by OpenAIMessages.
+	openAIMessagesInfo claudepkg.OpenAIMessagesInfo
 	// lastRawOffset and lastRawTypes track the last RawMessages call args.
 	lastRawOffset int
 	lastRawTypes  []string
@@ -115,6 +119,11 @@ func (m *mockPrompter) RawMessages(offset int, types []string) claudepkg.RawMess
 	m.lastRawOffset = offset
 	m.lastRawTypes = types
 	return m.rawMessagesInfo
+}
+
+func (m *mockPrompter) OpenAIMessages(offset int) claudepkg.OpenAIMessagesInfo {
+	m.lastRawOffset = offset
+	return m.openAIMessagesInfo
 }
 
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {
@@ -837,17 +846,18 @@ func TestStopTool(t *testing.T) {
 // --- Messages tool tests ---
 
 func TestMessagesTool_WithMessages(t *testing.T) {
-	raw0 := json.RawMessage(`{"type":"system","session_id":"sess-001"}`)
-	raw1 := json.RawMessage(`{"type":"assistant","subtype":"text","text":"Working on it..."}`)
-	raw2 := json.RawMessage(`{"type":"assistant","subtype":"tool_use","tool_name":"Bash"}`)
-
+	content := "Working on it..."
 	mock := &mockPrompter{
-		rawMessagesInfo: claudepkg.RawMessagesInfo{
-			Status: claudepkg.ProcessStatusBusy,
-			Total:  3,
-			Messages: []json.RawMessage{
-				raw0, raw1, raw2,
+		openAIMessagesInfo: claudepkg.OpenAIMessagesInfo{
+			Messages: []claudepkg.OpenAIMessage{
+				{Role: "user", Content: strPtr("Fix the bug")},
+				{Role: "assistant", Content: &content},
 			},
+			Metadata: claudepkg.OpenAIMetadata{
+				SessionID: "sess-001",
+				Model:     "claude-opus-4-6",
+			},
+			Total: 2,
 		},
 	}
 
@@ -863,38 +873,31 @@ func TestMessagesTool_WithMessages(t *testing.T) {
 	}
 
 	text := extractText(t, result)
-	var info claudepkg.RawMessagesInfo
+	var info claudepkg.OpenAIMessagesInfo
 	if err := json.Unmarshal([]byte(text), &info); err != nil {
 		t.Fatalf("failed to parse messages JSON: %v (text: %s)", err, text)
 	}
 
-	if info.Status != claudepkg.ProcessStatusBusy {
-		t.Errorf("expected status %q, got %q", claudepkg.ProcessStatusBusy, info.Status)
+	if info.Total != 2 {
+		t.Errorf("expected total 2, got %d", info.Total)
 	}
-	if info.Total != 3 {
-		t.Errorf("expected total 3, got %d", info.Total)
+	if len(info.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(info.Messages))
 	}
-	if len(info.Messages) != 3 {
-		t.Fatalf("expected 3 messages, got %d", len(info.Messages))
+	if info.Messages[0].Role != "user" {
+		t.Errorf("expected first message role user, got %s", info.Messages[0].Role)
 	}
-
-	// Verify raw messages are preserved as JSON objects.
-	var first map[string]any
-	if err := json.Unmarshal(info.Messages[0], &first); err != nil {
-		t.Fatalf("failed to parse first message: %v", err)
-	}
-	if first["type"] != "system" {
-		t.Errorf("expected first message type %q, got %v", "system", first["type"])
-	}
-	if first["session_id"] != "sess-001" {
-		t.Errorf("expected session_id %q, got %v", "sess-001", first["session_id"])
+	if info.Metadata.SessionID != "sess-001" {
+		t.Errorf("expected session_id sess-001, got %s", info.Metadata.SessionID)
 	}
 }
 
 func TestMessagesTool_Empty(t *testing.T) {
 	mock := &mockPrompter{
-		rawMessagesInfo: claudepkg.RawMessagesInfo{
-			Status: claudepkg.ProcessStatusIdle,
+		openAIMessagesInfo: claudepkg.OpenAIMessagesInfo{
+			Messages: []claudepkg.OpenAIMessage{},
+			Metadata: claudepkg.OpenAIMetadata{},
+			Total:    0,
 		},
 	}
 
@@ -910,14 +913,11 @@ func TestMessagesTool_Empty(t *testing.T) {
 	}
 
 	text := extractText(t, result)
-	var info claudepkg.RawMessagesInfo
+	var info claudepkg.OpenAIMessagesInfo
 	if err := json.Unmarshal([]byte(text), &info); err != nil {
 		t.Fatalf("failed to parse messages JSON: %v (text: %s)", err, text)
 	}
 
-	if info.Status != claudepkg.ProcessStatusIdle {
-		t.Errorf("expected status %q, got %q", claudepkg.ProcessStatusIdle, info.Status)
-	}
 	if len(info.Messages) != 0 {
 		t.Errorf("expected 0 messages, got %d", len(info.Messages))
 	}
@@ -925,10 +925,11 @@ func TestMessagesTool_Empty(t *testing.T) {
 
 func TestMessagesTool_WithOffset(t *testing.T) {
 	mock := &mockPrompter{
-		rawMessagesInfo: claudepkg.RawMessagesInfo{
-			Status:   claudepkg.ProcessStatusBusy,
-			Total:    5,
-			Messages: []json.RawMessage{json.RawMessage(`{"type":"result","result":"done"}`)},
+		openAIMessagesInfo: claudepkg.OpenAIMessagesInfo{
+			Messages: []claudepkg.OpenAIMessage{
+				{Role: "assistant", Content: strPtr("reply")},
+			},
+			Total: 5,
 		},
 	}
 
@@ -949,78 +950,6 @@ func TestMessagesTool_WithOffset(t *testing.T) {
 
 	if mock.lastRawOffset != 4 {
 		t.Errorf("expected offset 4, got %d", mock.lastRawOffset)
-	}
-	if mock.lastRawTypes != nil {
-		t.Errorf("expected nil types, got %v", mock.lastRawTypes)
-	}
-}
-
-func TestMessagesTool_WithTypes(t *testing.T) {
-	mock := &mockPrompter{
-		rawMessagesInfo: claudepkg.RawMessagesInfo{
-			Status: claudepkg.ProcessStatusBusy,
-			Total:  10,
-			Messages: []json.RawMessage{
-				json.RawMessage(`{"type":"assistant","subtype":"text","text":"hello"}`),
-			},
-		},
-	}
-
-	tools := buildToolMap(mock)
-	handler := tools["messages"]
-
-	request := newCallToolRequest("messages", map[string]any{
-		"types": "assistant,result",
-	})
-
-	result, err := handler(context.Background(), request)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected tool error: %v", result.Content)
-	}
-
-	if mock.lastRawOffset != 0 {
-		t.Errorf("expected offset 0, got %d", mock.lastRawOffset)
-	}
-	if len(mock.lastRawTypes) != 2 {
-		t.Fatalf("expected 2 types, got %d", len(mock.lastRawTypes))
-	}
-	if mock.lastRawTypes[0] != "assistant" || mock.lastRawTypes[1] != "result" {
-		t.Errorf("expected types [assistant result], got %v", mock.lastRawTypes)
-	}
-}
-
-func TestMessagesTool_WithOffsetAndTypes(t *testing.T) {
-	mock := &mockPrompter{
-		rawMessagesInfo: claudepkg.RawMessagesInfo{
-			Status: claudepkg.ProcessStatusBusy,
-			Total:  20,
-		},
-	}
-
-	tools := buildToolMap(mock)
-	handler := tools["messages"]
-
-	request := newCallToolRequest("messages", map[string]any{
-		"offset": float64(10),
-		"types":  "system",
-	})
-
-	result, err := handler(context.Background(), request)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("unexpected tool error: %v", result.Content)
-	}
-
-	if mock.lastRawOffset != 10 {
-		t.Errorf("expected offset 10, got %d", mock.lastRawOffset)
-	}
-	if len(mock.lastRawTypes) != 1 || mock.lastRawTypes[0] != "system" {
-		t.Errorf("expected types [system], got %v", mock.lastRawTypes)
 	}
 }
 
@@ -1057,24 +986,6 @@ func TestMessagesTool_FractionalOffset(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected error for fractional offset")
-	}
-}
-
-func TestMessagesTool_InvalidType(t *testing.T) {
-	mock := &mockPrompter{}
-	tools := buildToolMap(mock)
-	handler := tools["messages"]
-
-	request := newCallToolRequest("messages", map[string]any{
-		"types": "assistant,bogus",
-	})
-
-	result, err := handler(context.Background(), request)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.IsError {
-		t.Error("expected error for invalid message type")
 	}
 }
 

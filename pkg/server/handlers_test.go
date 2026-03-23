@@ -61,6 +61,10 @@ func (m *mockPrompter) RawMessages(_ int, _ []string) claude.RawMessagesInfo {
 	return claude.RawMessagesInfo{Status: m.status.Status}
 }
 
+func (m *mockPrompter) OpenAIMessages(_ int) claude.OpenAIMessagesInfo {
+	return claude.OpenAIMessagesInfo{Messages: []claude.OpenAIMessage{}, Metadata: claude.OpenAIMetadata{}}
+}
+
 func (m *mockPrompter) MarshalStatus() ([]byte, error) {
 	return json.Marshal(m.status)
 }

@@ -469,6 +469,12 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.lastToolName = ""
 	p.subagents.reset()
 
+	// Inject a synthetic user message so the prompt appears in liveMessages.
+	// The Claude CLI only emits assistant/system/result on stdout; the user's
+	// input prompt is never echoed back, so we record it here (#179).
+	p.liveMessages = append(p.liveMessages, syntheticUserMessage(prompt))
+	p.messageCount++
+
 	// Create response channel and done channel for this prompt.
 	ch := make(chan StreamMessage, 100)
 	p.responseCh = ch
@@ -783,6 +789,31 @@ func (p *PersistentProcess) RawMessages(offset int, types []string) RawMessagesI
 	}
 
 	return RawMessagesInfo{Status: status, Messages: []json.RawMessage{}}
+}
+
+// OpenAIMessages returns conversation messages in OpenAI Chat Completions
+// compatible format. System and result messages are extracted into metadata.
+// offset skips the first N converted messages (after consolidation).
+func (p *PersistentProcess) OpenAIMessages(offset int) OpenAIMessagesInfo {
+	p.mu.RLock()
+	status := p.status
+	live := copyStreamMessages(p.liveMessages)
+	resMessages := copyStreamMessages(p.result.messages)
+	store := p.resultStore
+	p.mu.RUnlock()
+
+	if len(live) > 0 {
+		return collectOpenAIMessages(status, live, offset)
+	}
+	if len(resMessages) > 0 {
+		return collectOpenAIMessages(status, resMessages, offset)
+	}
+	if store != nil {
+		if pr, err := store.Load(); err == nil && pr != nil && len(pr.Messages) > 0 {
+			return collectOpenAIMessages(status, pr.Messages, offset)
+		}
+	}
+	return OpenAIMessagesInfo{Messages: []OpenAIMessage{}, Metadata: OpenAIMetadata{}}
 }
 
 // Done returns a channel closed when the current prompt response is complete.
