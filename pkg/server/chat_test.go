@@ -427,6 +427,150 @@ func TestHandleChatCompletions_NonStreamingWithStreamEvents(t *testing.T) {
 	}
 }
 
+func TestHandleChatCompletions_StreamingSyntheticAssistant(t *testing.T) {
+	// Slash commands like /cost emit synthetic assistant messages (model: "<synthetic>")
+	// without preceding stream_event deltas. These must be emitted as deltas.
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 3)
+			ch <- claude.StreamMessage{
+				Type:    claude.MessageTypeAssistant,
+				Subtype: claude.SubtypeText,
+				Text:    "Total cost: $1.23",
+				Message: json.RawMessage(`{"model":"<synthetic>","content":[{"type":"text","text":"Total cost: $1.23"}]}`),
+			}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"/cost"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, gotDone := parseSSEChunks(t, w)
+
+	if !gotDone {
+		t.Error("expected [DONE] sentinel")
+	}
+
+	// 1 synthetic assistant delta + 1 final stop chunk.
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks (1 synthetic + 1 final), got %d", len(chunks))
+	}
+
+	if chunks[0].Choices[0].Delta.Content != "Total cost: $1.23" {
+		t.Errorf("expected synthetic delta content %q, got %q", "Total cost: $1.23", chunks[0].Choices[0].Delta.Content)
+	}
+	if chunks[0].Choices[0].Delta.Role != "assistant" {
+		t.Errorf("expected role 'assistant', got %q", chunks[0].Choices[0].Delta.Role)
+	}
+}
+
+func TestHandleChatCompletions_StreamingNonSyntheticAssistantStillSkipped(t *testing.T) {
+	// Normal (non-synthetic) assistant messages must still be skipped to avoid
+	// duplication with stream_event deltas.
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 4)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "hello"}
+			ch <- claude.StreamMessage{
+				Type:    claude.MessageTypeAssistant,
+				Subtype: claude.SubtypeText,
+				Text:    "hello",
+				Message: json.RawMessage(`{"model":"claude-sonnet-4-20250514","content":[{"type":"text","text":"hello"}]}`),
+			}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "hello"}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"hi"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, _ := parseSSEChunks(t, w)
+
+	// Only 1 stream_event delta + 1 final stop chunk. Non-synthetic assistant is skipped.
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks (1 delta + 1 final), got %d", len(chunks))
+	}
+
+	if chunks[0].Choices[0].Delta.Content != "hello" {
+		t.Errorf("expected delta content %q, got %q", "hello", chunks[0].Choices[0].Delta.Content)
+	}
+}
+
+func TestHandleChatCompletions_StreamingMultiResult(t *testing.T) {
+	// LLM-invoking slash commands (e.g. /refine) emit an intermediate result
+	// (0 tokens) for the dispatch, then stream_events and a final result with
+	// actual token usage. All content must reach the client.
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 6)
+			// Intermediate result from slash command dispatch (0 tokens).
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult}
+			// LLM turn output.
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "Refined "}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeStreamEvent, EventType: "content_block_delta", DeltaText: "output"}
+			ch <- claude.StreamMessage{Type: claude.MessageTypeAssistant, Subtype: claude.SubtypeText, Text: "Refined output"}
+			ch <- claude.StreamMessage{
+				Type:   claude.MessageTypeResult,
+				Result: "Refined output",
+				Usage:  &claude.TokenUsage{InputTokens: 200, OutputTokens: 30},
+			}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"/refine topic"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, gotDone := parseSSEChunks(t, w)
+
+	if !gotDone {
+		t.Error("expected [DONE] sentinel")
+	}
+
+	// 2 stream_event deltas + 1 final stop chunk.
+	// The intermediate result and normal assistant message are skipped.
+	if len(chunks) != 3 {
+		t.Fatalf("expected 3 chunks (2 deltas + 1 final), got %d", len(chunks))
+	}
+
+	if chunks[0].Choices[0].Delta.Content != "Refined " {
+		t.Errorf("expected first delta %q, got %q", "Refined ", chunks[0].Choices[0].Delta.Content)
+	}
+	if chunks[1].Choices[0].Delta.Content != "output" {
+		t.Errorf("expected second delta %q, got %q", "output", chunks[1].Choices[0].Delta.Content)
+	}
+
+	// Final chunk should have usage from the real result.
+	lastChunk := chunks[len(chunks)-1]
+	if lastChunk.Usage == nil {
+		t.Fatal("expected usage in final chunk")
+	}
+	if lastChunk.Usage.PromptTokens != 200 {
+		t.Errorf("expected prompt_tokens 200, got %d", lastChunk.Usage.PromptTokens)
+	}
+	if lastChunk.Usage.CompletionTokens != 30 {
+		t.Errorf("expected completion_tokens 30, got %d", lastChunk.Usage.CompletionTokens)
+	}
+}
+
 func TestStreamMessageToDelta(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -479,6 +623,35 @@ func TestStreamMessageToDelta(t *testing.T) {
 		{
 			name:    "assistant tool_use message",
 			msg:     claude.StreamMessage{Type: claude.MessageTypeAssistant, Subtype: claude.SubtypeToolUse, ToolName: "Bash"},
+			wantNil: true,
+		},
+		{
+			name: "synthetic assistant text message",
+			msg: claude.StreamMessage{
+				Type:    claude.MessageTypeAssistant,
+				Subtype: claude.SubtypeText,
+				Text:    "cost info",
+				Message: json.RawMessage(`{"model":"<synthetic>","content":[{"type":"text","text":"cost info"}]}`),
+			},
+			wantText: "cost info",
+		},
+		{
+			name: "synthetic assistant empty text skipped",
+			msg: claude.StreamMessage{
+				Type:    claude.MessageTypeAssistant,
+				Subtype: claude.SubtypeText,
+				Text:    "",
+				Message: json.RawMessage(`{"model":"<synthetic>","content":[{"type":"text","text":""}]}`),
+			},
+			wantNil: true,
+		},
+		{
+			name: "synthetic assistant tool_use skipped",
+			msg: claude.StreamMessage{
+				Type:    claude.MessageTypeAssistant,
+				Subtype: claude.SubtypeToolUse,
+				Message: json.RawMessage(`{"model":"<synthetic>"}`),
+			},
 			wantNil: true,
 		},
 		{

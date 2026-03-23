@@ -317,6 +317,13 @@ func streamMessageToDelta(msg claudepkg.StreamMessage, toolIndex *int) *chatMess
 			ToolCallID: block.ToolUseID,
 		}
 	case claudepkg.MessageTypeAssistant:
+		// Synthetic assistant messages (from slash commands like /cost) have no
+		// preceding stream_event deltas, so their text must be emitted as a delta.
+		// Normal LLM assistant messages are redundant (content already delivered
+		// via stream_event deltas) and are still skipped.
+		if claudepkg.ExtractModel(msg) == "<synthetic>" && msg.Subtype == claudepkg.SubtypeText && msg.Text != "" {
+			return &chatMessage{Role: "assistant", Content: msg.Text}
+		}
 		return nil
 	case claudepkg.MessageTypeResult:
 		return nil

@@ -56,6 +56,12 @@ type PersistentProcess struct {
 	// It is set by Send and cleared when the response is complete.
 	responseCh chan StreamMessage
 
+	// sawContent tracks whether any content (stream_event or assistant)
+	// was forwarded in the current prompt cycle. Used to distinguish
+	// intermediate result messages (e.g. slash command dispatch) from
+	// final results.
+	sawContent bool
+
 	// done is closed when the current prompt response is complete.
 	done chan struct{}
 
@@ -281,6 +287,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		if msg.Type == MessageTypeStreamEvent {
 			p.mu.Lock()
 			ch := p.responseCh
+			if ch != nil {
+				p.sawContent = true
+			}
 			p.mu.Unlock()
 			if ch != nil {
 				select {
@@ -300,7 +309,8 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			p.sessionID = msg.SessionID
 		}
 		if msg.Type == MessageTypeAssistant {
-			if model := extractModel(msg); model != "" {
+			p.sawContent = true
+			if model := ExtractModel(msg); model != "" {
 				p.modelUsage[model]++
 			}
 			if msg.Subtype == SubtypeText && msg.Text != "" {
@@ -373,22 +383,33 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			}
 		}
 
-		// A result message marks the end of the current response cycle.
+		// A result message marks the end of the current response cycle,
+		// unless it's an intermediate result from a slash command dispatch.
+		// LLM-invoking slash commands (e.g. /refine) emit a result for the
+		// dispatch (0 tokens, no content seen) before starting a new LLM turn.
+		// We keep the channel open for intermediate results so the LLM output
+		// from the subsequent turn reaches the consumer.
 		if msg.Type == MessageTypeResult {
+			isFinal := p.sawContent || msg.IsError ||
+				msg.Result != "" ||
+				(msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0))
 			p.mu.Lock()
-			if p.responseCh != nil {
+			if p.responseCh != nil && isFinal {
 				close(p.responseCh)
 				p.responseCh = nil
+				p.sawContent = false
 			}
-			if p.status == ProcessStatusBusy {
-				p.status = ProcessStatusIdle
-			}
-			// Signal done for this prompt.
-			select {
-			case <-p.done:
-				// Already closed.
-			default:
-				close(p.done)
+			if isFinal {
+				if p.status == ProcessStatusBusy {
+					p.status = ProcessStatusIdle
+				}
+				// Signal done for this prompt.
+				select {
+				case <-p.done:
+					// Already closed.
+				default:
+					close(p.done)
+				}
 			}
 			status := p.status
 			p.mu.Unlock()
@@ -478,6 +499,7 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	// Create response channel and done channel for this prompt.
 	ch := make(chan StreamMessage, 100)
 	p.responseCh = ch
+	p.sawContent = false
 	done := make(chan struct{})
 	p.done = done
 

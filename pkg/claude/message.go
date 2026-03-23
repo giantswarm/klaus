@@ -475,9 +475,9 @@ var prURLPattern = regexp.MustCompile(`https://github\.com/[\w.\-]+/[\w.\-]+/pul
 // maxModelNameLen caps model name strings to prevent unbounded map key growth.
 const maxModelNameLen = 256
 
-// extractModel parses the model field from a StreamMessage's raw Message JSON.
+// ExtractModel parses the model field from a StreamMessage's raw Message JSON.
 // Returns an empty string if the message has no model field or cannot be parsed.
-func extractModel(msg StreamMessage) string {
+func ExtractModel(msg StreamMessage) string {
 	if len(msg.Message) == 0 {
 		return ""
 	}
@@ -566,7 +566,7 @@ func CollectModelUsage(messages []StreamMessage) map[string]int {
 	usage := make(map[string]int)
 	for _, msg := range messages {
 		if msg.Type == MessageTypeAssistant {
-			if model := extractModel(msg); model != "" {
+			if model := ExtractModel(msg); model != "" {
 				usage[model]++
 			}
 		}
