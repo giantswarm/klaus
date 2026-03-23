@@ -54,6 +54,11 @@ type Prompter interface {
 	// types filters by message type (empty means all types).
 	RawMessages(offset int, types []string) RawMessagesInfo
 
+	// OpenAIMessages returns conversation messages in OpenAI Chat Completions
+	// compatible format, with metadata extracted from system/result messages.
+	// offset skips the first N converted messages (after consolidation).
+	OpenAIMessages(offset int) OpenAIMessagesInfo
+
 	// MarshalStatus returns the status as JSON.
 	MarshalStatus() ([]byte, error)
 }

@@ -73,6 +73,10 @@ func (p *chatTestPrompter) RawMessages(_ int, _ []string) claude.RawMessagesInfo
 	return claude.RawMessagesInfo{Status: p.status.Status}
 }
 
+func (p *chatTestPrompter) OpenAIMessages(_ int) claude.OpenAIMessagesInfo {
+	return claude.OpenAIMessagesInfo{Messages: []claude.OpenAIMessage{}, Metadata: claude.OpenAIMetadata{}}
+}
+
 func (p *chatTestPrompter) MarshalStatus() ([]byte, error) {
 	return json.Marshal(p.status)
 }
