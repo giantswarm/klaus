@@ -397,6 +397,58 @@ func TestEnvOverride_BoolFields(t *testing.T) {
 	assertEqualBool(t, "persistentMode", true, cfg.Claude.PersistentMode)
 }
 
+func TestPersistentMode_EnvOverridesYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	yaml := `
+claude:
+  persistentMode: true
+  noSessionPersistence: false
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// Env var overrides YAML to disable persistent mode.
+	t.Setenv("CLAUDE_PERSISTENT_MODE", "false")
+	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "true")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	assertEqualBool(t, "persistentMode", false, cfg.Claude.PersistentMode)
+	assertEqualBool(t, "noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
+}
+
+func TestPersistentMode_YAMLConfig(t *testing.T) {
+	// Clear env vars that could interfere.
+	t.Setenv("CLAUDE_PERSISTENT_MODE", "")
+	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	yaml := `
+claude:
+  persistentMode: true
+  noSessionPersistence: false
+`
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	assertEqualBool(t, "persistentMode", true, cfg.Claude.PersistentMode)
+	assertEqualBool(t, "noSessionPersistence", false, cfg.Claude.NoSessionPersistence)
+}
+
 func TestEnvOverride_OAuthFields(t *testing.T) {
 	t.Setenv("GOOGLE_CLIENT_ID", "env-goog-id")
 	t.Setenv("DEX_ISSUER_URL", "https://dex.env.com")
