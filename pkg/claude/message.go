@@ -194,6 +194,7 @@ type StatusInfo struct {
 	Status        ProcessStatus  `json:"status"`
 	SessionID     string         `json:"session_id,omitempty"`
 	ErrorMessage  string         `json:"error,omitempty"`
+	PreviousError string         `json:"previous_error,omitempty"`
 	TotalCost     *float64       `json:"total_cost_usd"`
 	MessageCount  int            `json:"message_count,omitempty"`
 	ToolCallCount int            `json:"tool_call_count,omitempty"`
