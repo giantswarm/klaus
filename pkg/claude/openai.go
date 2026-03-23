@@ -382,11 +382,11 @@ func mergeAssistantMessage(dst *OpenAIMessage, src *OpenAIMessage) {
 // userContentBlock parses content blocks from user messages
 // (tool_result and text types).
 type userContentBlock struct {
-	Type      string `json:"type"`
-	Text      string `json:"text,omitempty"`
-	Content   string `json:"content,omitempty"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 type userMessageEnvelope struct {
@@ -426,7 +426,7 @@ func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 	for _, block := range blocks {
 		switch block.Type {
 		case "tool_result":
-			content := block.Content
+			content := extractToolResultContent(block.Content)
 			if content == "" {
 				content = block.Text
 			}
@@ -473,6 +473,46 @@ func syntheticUserMessage(prompt string) StreamMessage {
 }
 
 // --- Helpers ---
+
+// extractToolResultContent extracts text from a tool_result content field,
+// which can be either a JSON string or an array of content blocks
+// (e.g. [{"type":"text","text":"..."},{"type":"tool_reference","tool_name":"..."}]).
+func extractToolResultContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	// Try as a plain string first (built-in tools like Bash, Glob, Read).
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+
+	// Try as an array of content blocks (MCP tools, ToolSearch).
+	var blocks []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text,omitempty"`
+		ToolName string `json:"tool_name,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return ""
+	}
+
+	var parts []string
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		case "tool_reference":
+			if b.ToolName != "" {
+				parts = append(parts, b.ToolName)
+			}
+		}
+	}
+	return joinStrings(parts)
+}
 
 func strPtr(s string) *string {
 	return &s
