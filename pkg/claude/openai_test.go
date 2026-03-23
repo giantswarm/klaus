@@ -192,6 +192,119 @@ func TestToOpenAIMessages_ToolResult(t *testing.T) {
 	}
 }
 
+func TestToOpenAIMessages_ToolResultArrayContent(t *testing.T) {
+	// MCP tools return content as an array of content blocks, not a string.
+	msgs := []StreamMessage{
+		rawMsg(t, `{
+			"type": "user",
+			"message": {
+				"role": "user",
+				"content": [
+					{
+						"type": "tool_result",
+						"tool_use_id": "toolu_01NjuBT6ZoH9rk49V4tHqX1B",
+						"content": [
+							{"type": "text", "text": "{\"filtered_count\": 5, \"filters\": {\"pattern\": \"*pro*\"}}"}
+						]
+					}
+				]
+			}
+		}`),
+	}
+	result, _ := ToOpenAIMessages(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 tool message, got %d", len(result))
+	}
+	if result[0].Role != "tool" {
+		t.Errorf("expected role tool, got %s", result[0].Role)
+	}
+	if result[0].ToolCallID != "toolu_01NjuBT6ZoH9rk49V4tHqX1B" {
+		t.Errorf("expected tool_call_id, got %s", result[0].ToolCallID)
+	}
+	if result[0].Content == nil || *result[0].Content != `{"filtered_count": 5, "filters": {"pattern": "*pro*"}}` {
+		t.Errorf("expected MCP tool content, got %v", result[0].Content)
+	}
+}
+
+func TestToOpenAIMessages_ToolResultToolReference(t *testing.T) {
+	// ToolSearch returns tool_reference blocks in the content array.
+	msgs := []StreamMessage{
+		rawMsg(t, `{
+			"type": "user",
+			"message": {
+				"role": "user",
+				"content": [
+					{
+						"type": "tool_result",
+						"tool_use_id": "toolu_014i6TwewPcxFFMDd2bvT97Q",
+						"content": [
+							{"type": "tool_reference", "tool_name": "mcp__muster__filter_tools"},
+							{"type": "tool_reference", "tool_name": "mcp__muster__call_tool"}
+						]
+					}
+				]
+			}
+		}`),
+	}
+	result, _ := ToOpenAIMessages(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 tool message, got %d", len(result))
+	}
+	if result[0].Content == nil || *result[0].Content != "mcp__muster__filter_toolsmcp__muster__call_tool" {
+		t.Errorf("expected concatenated tool names, got %v", result[0].Content)
+	}
+}
+
+func TestToOpenAIMessages_MixedToolResultFormats(t *testing.T) {
+	// Mix of string content (built-in) and array content (MCP) in the same user message.
+	msgs := []StreamMessage{
+		rawMsg(t, `{
+			"type": "user",
+			"message": {
+				"role": "user",
+				"content": [
+					{
+						"type": "tool_result",
+						"tool_use_id": "toolu_builtin",
+						"content": "file contents here"
+					},
+					{
+						"type": "tool_result",
+						"tool_use_id": "toolu_mcp",
+						"content": [{"type": "text", "text": "mcp result data"}]
+					},
+					{
+						"type": "text",
+						"text": "Some user context"
+					}
+				]
+			}
+		}`),
+	}
+	result, _ := ToOpenAIMessages(msgs)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (user text + 2 tool results), got %d", len(result))
+	}
+	// Text blocks come first (prepended).
+	if result[0].Role != "user" || *result[0].Content != "Some user context" {
+		t.Errorf("expected user text message first, got %+v", result[0])
+	}
+	// Built-in tool result (string content).
+	if result[1].Role != "tool" || result[1].ToolCallID != "toolu_builtin" {
+		t.Errorf("expected built-in tool result, got %+v", result[1])
+	}
+	if *result[1].Content != "file contents here" {
+		t.Errorf("expected string content, got %s", *result[1].Content)
+	}
+	// MCP tool result (array content).
+	if result[2].Role != "tool" || result[2].ToolCallID != "toolu_mcp" {
+		t.Errorf("expected MCP tool result, got %+v", result[2])
+	}
+	if *result[2].Content != "mcp result data" {
+		t.Errorf("expected array content extracted, got %s", *result[2].Content)
+	}
+}
+
 func TestToOpenAIMessages_Thinking(t *testing.T) {
 	msgs := []StreamMessage{
 		rawMsg(t, `{

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,7 @@ type PersistentProcess struct {
 	status        ProcessStatus
 	sessionID     string
 	lastError     string
+	previousError string // preserved from prior prompt/crash for status queries
 	totalCost     float64
 	costSeen      bool
 	messageCount  int
@@ -43,6 +45,9 @@ type PersistentProcess struct {
 	lastToolName  string
 	subagents     *subagentTracker
 	liveMessages  []StreamMessage
+
+	// stderrTail captures the last few lines of stderr for crash diagnostics.
+	stderrTail *ringBuffer
 
 	// result stores the output of the last completed Submit run,
 	// allowing callers to retrieve results asynchronously.
@@ -96,6 +101,7 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
+		stderrTail:  newRingBuffer(20),
 		resultStore: NewResultStore(resultStoreDir(opts)),
 	}
 }
@@ -159,11 +165,15 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	readerCtx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
-	// Read stderr in background.
+	// Read stderr in background and capture recent lines for crash diagnostics.
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[claude persistent stderr] %s", scanner.Text())
+			line := scanner.Text()
+			log.Printf("[claude persistent stderr] %s", line)
+			p.mu.Lock()
+			p.stderrTail.add(line)
+			p.mu.Unlock()
 		}
 	}()
 
@@ -197,32 +207,39 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 	p.watchdogCancel = watchCancel
 
 	go func() {
+		log.Printf("[claude] watchdog started, waiting for subprocess exit")
 		select {
 		case <-watchCtx.Done():
+			log.Printf("[claude] watchdog cancelled before subprocess exit")
 			return
 		case <-processDone:
 		}
 
 		p.mu.RLock()
 		status := p.status
+		lastErr := p.lastError
 		p.mu.RUnlock()
 
 		// Only restart if the process exited unexpectedly (not via Stop).
 		if status == ProcessStatusStopped {
+			log.Printf("[claude] watchdog: subprocess stopped intentionally, not restarting")
 			return
 		}
 
-		log.Printf("[claude] persistent subprocess exited unexpectedly (status=%s), restarting in %v", status, restartBackoff)
+		log.Printf("[claude] watchdog: subprocess exited unexpectedly (status=%s, lastError=%s), restarting in %v", status, lastErr, restartBackoff)
 		metrics.ProcessRestartsTotal.Inc()
 
 		select {
 		case <-watchCtx.Done():
+			log.Printf("[claude] watchdog cancelled during restart backoff")
 			return
 		case <-time.After(restartBackoff):
 		}
 
 		if err := p.Start(watchCtx); err != nil {
-			log.Printf("[claude] failed to restart persistent subprocess: %v", err)
+			log.Printf("[claude] watchdog: failed to restart persistent subprocess: %v", err)
+		} else {
+			log.Printf("[claude] watchdog: persistent subprocess restarted successfully")
 		}
 	}()
 }
@@ -236,12 +253,43 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		p.mu.Lock()
 		p.cmd = nil
 		p.stdin = nil
+
+		var exitErrStr string
+		if waitErr != nil {
+			exitErrStr = waitErr.Error()
+		}
+
 		if waitErr != nil && p.status != ProcessStatusStopped {
 			p.status = ProcessStatusError
-			p.lastError = waitErr.Error()
+			p.lastError = exitErrStr
 		} else if p.status != ProcessStatusStopped {
 			p.status = ProcessStatusIdle
 		}
+
+		// If there's an active response channel, send a crash error message
+		// so the user sees something instead of silence.
+		if p.responseCh != nil && p.status != ProcessStatusStopped {
+			stderrLines := strings.Join(p.stderrTail.contents(), "\n")
+			crashText := fmt.Sprintf(
+				"The agent subprocess exited unexpectedly (exit code: %s). "+
+					"A new session will start on the next message, but conversation context has been lost.",
+				exitCodeFromError(waitErr),
+			)
+			if stderrLines != "" {
+				crashText += fmt.Sprintf("\n\nStderr:\n%s", stderrLines)
+			}
+			crashMsg := StreamMessage{
+				Type:    MessageTypeResult,
+				Result:  crashText,
+				IsError: true,
+			}
+			// Non-blocking send; drop if channel is full (unlikely with buffered channel).
+			select {
+			case p.responseCh <- crashMsg:
+			default:
+			}
+		}
+
 		// Close any pending response channel.
 		if p.responseCh != nil {
 			close(p.responseCh)
@@ -255,10 +303,11 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			close(p.done)
 		}
 		status := p.status
+		lastErr := p.lastError
 		close(processDone)
 		p.mu.Unlock()
 		metrics.SetProcessStatus(string(status))
-		log.Println("[claude] persistent subprocess exited")
+		log.Printf("[claude] persistent subprocess exited (waitErr=%v, lastError=%s, status=%s)", waitErr, lastErr, status)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -473,6 +522,9 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	}
 
 	p.status = ProcessStatusBusy
+	if p.lastError != "" {
+		p.previousError = p.lastError
+	}
 	p.lastError = ""
 	// Preserve liveMessages and messageCount across turns so that
 	// the MCP messages tool returns the full conversation history
@@ -649,6 +701,7 @@ func (p *PersistentProcess) Status() StatusInfo {
 		Status:        p.status,
 		SessionID:     p.sessionID,
 		ErrorMessage:  p.lastError,
+		PreviousError: p.previousError,
 		MessageCount:  p.messageCount,
 		ToolCallCount: p.toolCallCount,
 		ToolCalls:     copyToolCalls(p.toolCalls),
@@ -856,4 +909,46 @@ func (p *PersistentProcess) setError(msg string) {
 	p.status = ProcessStatusError
 	p.lastError = msg
 	metrics.SetProcessStatus(string(ProcessStatusError))
+}
+
+// exitCodeFromError extracts the exit code string from a cmd.Wait() error.
+func exitCodeFromError(err error) string {
+	if err == nil {
+		return "0"
+	}
+	var exitErr *exec.ExitError
+	if ok := errors.As(err, &exitErr); ok {
+		return fmt.Sprintf("%d", exitErr.ExitCode())
+	}
+	return err.Error()
+}
+
+// ringBuffer is a simple fixed-size circular buffer for strings.
+type ringBuffer struct {
+	lines []string
+	pos   int
+	full  bool
+}
+
+func newRingBuffer(size int) *ringBuffer {
+	return &ringBuffer{lines: make([]string, size)}
+}
+
+func (r *ringBuffer) add(line string) {
+	r.lines[r.pos] = line
+	r.pos++
+	if r.pos >= len(r.lines) {
+		r.pos = 0
+		r.full = true
+	}
+}
+
+func (r *ringBuffer) contents() []string {
+	if !r.full {
+		return append([]string(nil), r.lines[:r.pos]...)
+	}
+	result := make([]string, 0, len(r.lines))
+	result = append(result, r.lines[r.pos:]...)
+	result = append(result, r.lines[:r.pos]...)
+	return result
 }
