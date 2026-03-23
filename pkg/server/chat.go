@@ -60,18 +60,6 @@ type chatCompletionUse struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-type chatMessagesResponse struct {
-	Status   string               `json:"status"`
-	Messages []chatMessageSummary `json:"messages"`
-}
-
-type chatMessageSummary struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Timestamp  string         `json:"timestamp,omitempty"`
-}
 
 // handleChatCompletions returns an http.HandlerFunc that accepts an
 // OpenAI-compatible chat completion request and streams the response as SSE
@@ -347,54 +335,3 @@ func extractLastUserMessage(messages []chatMessage) string {
 	return ""
 }
 
-// handleChatMessages returns an http.HandlerFunc that returns the conversation
-// history with structured tool call data.
-func handleChatMessages(process claudepkg.Prompter) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		info := process.Messages()
-
-		messages := make([]chatMessageSummary, 0, len(info.Messages))
-		for _, m := range info.Messages {
-			if m.Content == "" && m.Role == "" {
-				continue
-			}
-			msg := chatMessageSummary{
-				Role:       m.Role,
-				Content:    m.Content,
-				ToolCallID: m.ToolCallID,
-				Timestamp:  m.Timestamp,
-			}
-			for _, tc := range m.ToolCalls {
-				args := ""
-				if len(tc.Args) > 0 {
-					args = string(tc.Args)
-				}
-				msg.ToolCalls = append(msg.ToolCalls, chatToolCall{
-					Index: 0,
-					ID:    tc.ID,
-					Type:  "function",
-					Function: chatToolFunction{
-						Name:      tc.Name,
-						Arguments: args,
-					},
-				})
-			}
-			messages = append(messages, msg)
-		}
-
-		resp := chatMessagesResponse{
-			Status:   string(info.Status),
-			Messages: messages,
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Printf("[chat] failed to encode messages response: %v", err)
-		}
-	}
-}
