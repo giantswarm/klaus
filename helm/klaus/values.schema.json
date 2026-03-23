@@ -345,13 +345,11 @@
           "type": "boolean",
           "description": "Emit partial message chunks during streaming"
         },
-        "persistentMode": {
-          "type": "boolean",
-          "description": "Enable bidirectional stream-json persistent subprocess mode. Required for multi-turn chat via /v1/chat/completions. Default: true."
-        },
-        "noSessionPersistence": {
-          "type": "boolean",
-          "description": "Disable saving sessions to disk. When persistentMode is true, session files are not needed (state is held in memory). Default: false."
+        "mode": {
+          "type": "string",
+          "description": "Operating mode: agent (single-shot, no session persistence) or chat (persistent subprocess, sessions saved to disk). Default: agent.",
+          "enum": ["agent", "chat"],
+          "default": "agent"
         }
       }
     },

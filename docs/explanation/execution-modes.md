@@ -4,9 +4,9 @@ Klaus supports two process modes for running the Claude Code subprocess, and thr
 
 ## Process modes
 
-### Single-shot (default)
+### Agent mode (`mode: agent`, default)
 
-Spawns a new `claude --print --output-format stream-json` subprocess for each prompt. The process runs to completion and exits.
+Spawns a new `claude --print --output-format stream-json` subprocess for each prompt with `--no-session-persistence`. The process runs to completion and exits.
 
 ```
 prompt 1 --> [spawn process] --> [run] --> [exit]
@@ -17,11 +17,11 @@ prompt 2 --> [spawn process] --> [run] --> [exit]
 - Clean isolation between prompts -- no state leaks
 - Supports per-invocation overrides (session, effort, agent, budget)
 - Higher latency (subprocess startup cost per prompt)
-- Session persistence optional via `--resume` with `session_id`
+- No sessions saved to disk (autonomous coding)
 
-### Persistent (`CLAUDE_PERSISTENT_MODE=true`)
+### Chat mode (`mode: chat`)
 
-Maintains a single long-running subprocess using `--input-format stream-json`. User messages are written to stdin, responses read from stdout.
+Maintains a single long-running subprocess using `--input-format stream-json`. User messages are written to stdin, responses read from stdout. Sessions are saved to disk.
 
 ```
 [spawn process] --> prompt 1 --> response 1
@@ -41,11 +41,11 @@ Maintains a single long-running subprocess using `--input-format stream-json`. U
 
 | Use case | Recommended mode |
 |----------|-----------------|
-| Isolated, one-off tasks | Single-shot |
-| Multi-turn conversations | Persistent |
-| Per-prompt overrides needed | Single-shot |
-| Low latency required | Persistent |
-| Cost-sensitive workloads | Persistent |
+| Isolated, one-off tasks | Agent |
+| Multi-turn conversations | Chat |
+| Per-prompt overrides needed | Agent |
+| Low latency required | Chat |
+| Cost-sensitive workloads | Chat |
 
 ## Async execution
 
@@ -60,8 +60,8 @@ Set `blocking: true` on the `prompt` tool for synchronous execution (waits for c
 
 Async is orthogonal to the process mode -- all four combinations are valid:
 
-| | Single-shot | Persistent |
-|---|-------------|-----------|
+| | Agent | Chat |
+|---|-------|------|
 | **Non-blocking** | Long tasks with per-invocation overrides | Long tasks with conversation memory |
 | **Blocking** | Short queries (current default) | Short queries with conversation memory |
 

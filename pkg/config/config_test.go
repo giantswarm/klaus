@@ -18,8 +18,8 @@ func TestLoad_FromYAMLFile(t *testing.T) {
 		"CLAUDE_SETTINGS_FILE", "CLAUDE_SETTING_SOURCES", "CLAUDE_TOOLS",
 		"CLAUDE_ALLOWED_TOOLS", "CLAUDE_DISALLOWED_TOOLS", "CLAUDE_PLUGIN_DIRS",
 		"CLAUDE_ADD_DIRS", "CLAUDE_AGENTS", "CLAUDE_ACTIVE_AGENT",
-		"CLAUDE_INCLUDE_PARTIAL_MESSAGES", "CLAUDE_NO_SESSION_PERSISTENCE",
-		"CLAUDE_PERSISTENT_MODE", "PORT", "KLAUS_OWNER_SUBJECT",
+		"CLAUDE_INCLUDE_PARTIAL_MESSAGES", "CLAUDE_MODE",
+		"PORT", "KLAUS_OWNER_SUBJECT",
 		"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DEX_ISSUER_URL",
 		"DEX_CLIENT_ID", "DEX_CLIENT_SECRET", "DEX_CONNECTOR_ID", "DEX_CA_FILE",
 		"OAUTH_ENCRYPTION_KEY", "TLS_CERT_FILE", "TLS_KEY_FILE",
@@ -60,8 +60,7 @@ claude:
     - "/skills/a"
   agents: '{"reviewer":{"description":"Reviews code","prompt":"You review"}}'
   activeAgent: "reviewer"
-  noSessionPersistence: true
-  persistentMode: true
+  mode: chat
 server:
   port: "9090"
   ownerSubject: "user@example.com"
@@ -110,8 +109,7 @@ oauth:
 	assertEqualFloat(t, "claude.maxBudgetUSD", 10.5, cfg.Claude.MaxBudgetUSD)
 	assertEqual(t, "claude.effort", "high", cfg.Claude.Effort)
 	assertEqual(t, "claude.fallbackModel", "sonnet", cfg.Claude.FallbackModel)
-	assertEqualBool(t, "claude.noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
-	assertEqualBool(t, "claude.persistentMode", true, cfg.Claude.PersistentMode)
+	assertEqual(t, "claude.mode", "chat", cfg.Claude.Mode)
 	assertEqual(t, "claude.activeAgent", "reviewer", cfg.Claude.ActiveAgent)
 	assertEqualSlice(t, "claude.tools", []string{"Bash", "Edit"}, cfg.Claude.Tools)
 	assertEqualSlice(t, "claude.allowedTools", []string{"Read", "Write"}, cfg.Claude.AllowedTools)
@@ -384,8 +382,6 @@ func TestEnvOverride_CSVFields(t *testing.T) {
 
 func TestEnvOverride_BoolFields(t *testing.T) {
 	t.Setenv("CLAUDE_STRICT_MCP_CONFIG", "true")
-	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "yes")
-	t.Setenv("CLAUDE_PERSISTENT_MODE", "TRUE")
 
 	cfg, err := Load("/nonexistent/config.yaml")
 	if err != nil {
@@ -393,48 +389,40 @@ func TestEnvOverride_BoolFields(t *testing.T) {
 	}
 
 	assertEqualBool(t, "strictMcpConfig", true, cfg.Claude.StrictMCPConfig)
-	assertEqualBool(t, "noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
-	assertEqualBool(t, "persistentMode", true, cfg.Claude.PersistentMode)
 }
 
-func TestPersistentMode_EnvOverridesYAML(t *testing.T) {
+func TestMode_EnvOverridesYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
 	yaml := `
 claude:
-  persistentMode: true
-  noSessionPersistence: false
+  mode: chat
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
-	// Env var overrides YAML to disable persistent mode.
-	t.Setenv("CLAUDE_PERSISTENT_MODE", "false")
-	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "true")
+	// Env var overrides YAML.
+	t.Setenv("CLAUDE_MODE", "agent")
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	assertEqualBool(t, "persistentMode", false, cfg.Claude.PersistentMode)
-	assertEqualBool(t, "noSessionPersistence", true, cfg.Claude.NoSessionPersistence)
+	assertEqual(t, "mode", "agent", cfg.Claude.Mode)
 }
 
-func TestPersistentMode_YAMLConfig(t *testing.T) {
-	// Clear env vars that could interfere.
-	t.Setenv("CLAUDE_PERSISTENT_MODE", "")
-	t.Setenv("CLAUDE_NO_SESSION_PERSISTENCE", "")
+func TestMode_YAMLConfig(t *testing.T) {
+	t.Setenv("CLAUDE_MODE", "")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 
 	yaml := `
 claude:
-  persistentMode: true
-  noSessionPersistence: false
+  mode: chat
 `
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -445,8 +433,34 @@ claude:
 		t.Fatalf("Load: %v", err)
 	}
 
-	assertEqualBool(t, "persistentMode", true, cfg.Claude.PersistentMode)
-	assertEqualBool(t, "noSessionPersistence", false, cfg.Claude.NoSessionPersistence)
+	assertEqual(t, "mode", "chat", cfg.Claude.Mode)
+}
+
+func TestMode_DefaultsToEmpty(t *testing.T) {
+	t.Setenv("CLAUDE_MODE", "")
+
+	cfg, err := Load("/nonexistent/config.yaml")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	assertEqual(t, "mode", "", cfg.Claude.Mode)
+}
+
+func TestMode_ValidationRejectsInvalid(t *testing.T) {
+	cfg := Config{Claude: ClaudeConfig{Mode: "invalid"}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for invalid mode")
+	}
+}
+
+func TestMode_ValidationAcceptsValid(t *testing.T) {
+	for _, mode := range []string{"", "agent", "chat"} {
+		cfg := Config{Claude: ClaudeConfig{Mode: mode}}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("unexpected validation error for mode %q: %v", mode, err)
+		}
+	}
 }
 
 func TestEnvOverride_OAuthFields(t *testing.T) {

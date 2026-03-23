@@ -273,25 +273,25 @@ docker run -d --name klaus-test -p 9090:9090 \
 | Simple prompt | Produces a response |
 | `CLAUDE_PERMISSION_MODE=invalid` | Fails at startup with validation error listing valid modes (see section 10) |
 
-### CLAUDE_PERSISTENT_MODE
+### CLAUDE_MODE
 
 See section 9 below.
 
-## 9. Persistent Mode
+## 9. Chat Mode
 
 ```bash
 docker rm -f klaus-test
 docker run -d --name klaus-test -p 9090:9090 \
   -e ANTHROPIC_API_KEY=<key> \
   -e PORT=9090 \
-  -e CLAUDE_PERSISTENT_MODE=true \
+  -e CLAUDE_MODE=chat \
   klaus:test serve
 ```
 
 | Check | Expected |
 |-------|----------|
-| `/status` endpoint | `mode: "persistent"` |
-| Startup logs (`docker logs klaus-test`) | `Starting in persistent mode (bidirectional stream-json)` |
+| `/status` endpoint | `mode: "chat"` |
+| Startup logs (`docker logs klaus-test`) | `Starting in chat mode (bidirectional stream-json)` |
 | First prompt | Auto-starts subprocess, returns response |
 | Second prompt recalls first | Conversation memory maintained (same session_id) |
 | Cost is cumulative | `total_cost_usd` increases across prompts |
