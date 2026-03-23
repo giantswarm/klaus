@@ -38,17 +38,17 @@ type ThinkingBlock struct {
 // OpenAIMetadata holds infrastructure metadata extracted from system and
 // result messages, excluded from the messages array.
 type OpenAIMetadata struct {
-	SessionID        string            `json:"session_id,omitempty"`
-	Model            string            `json:"model,omitempty"`
+	SessionID         string           `json:"session_id,omitempty"`
+	Model             string           `json:"model,omitempty"`
 	ClaudeCodeVersion string           `json:"claude_code_version,omitempty"`
-	Tools            []string          `json:"tools,omitempty"`
-	Plugins          []OpenAIPlugin    `json:"plugins,omitempty"`
-	Hooks            []OpenAIHook      `json:"hooks,omitempty"`
-	Subagents        []OpenAISubagent  `json:"subagents,omitempty"`
-	CostUSD          float64           `json:"cost_usd,omitempty"`
-	DurationMS       float64           `json:"duration_ms,omitempty"`
-	NumTurns         int               `json:"num_turns,omitempty"`
-	Usage            *TokenUsage       `json:"usage,omitempty"`
+	Tools             []string         `json:"tools,omitempty"`
+	Plugins           []OpenAIPlugin   `json:"plugins,omitempty"`
+	Hooks             []OpenAIHook     `json:"hooks,omitempty"`
+	Subagents         []OpenAISubagent `json:"subagents,omitempty"`
+	CostUSD           float64          `json:"cost_usd,omitempty"`
+	DurationMS        float64          `json:"duration_ms,omitempty"`
+	NumTurns          int              `json:"num_turns,omitempty"`
+	Usage             *TokenUsage      `json:"usage,omitempty"`
 }
 
 // OpenAIPlugin holds plugin metadata from system/init messages.
@@ -198,7 +198,7 @@ func extractSystemMetadata(msg StreamMessage, meta *OpenAIMetadata) {
 type resultEnvelope struct {
 	DurationMS   float64     `json:"duration_ms,omitempty"`
 	NumTurns     int         `json:"num_turns,omitempty"`
-	TotalCostUSD float64    `json:"total_cost_usd,omitempty"`
+	TotalCostUSD float64     `json:"total_cost_usd,omitempty"`
 	Usage        *TokenUsage `json:"usage,omitempty"`
 }
 
