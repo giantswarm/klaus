@@ -60,7 +60,6 @@ type chatCompletionUse struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-
 // handleChatCompletions returns an http.HandlerFunc that accepts an
 // OpenAI-compatible chat completion request and streams the response as SSE
 // (or returns a complete response for non-streaming requests).
@@ -334,4 +333,3 @@ func extractLastUserMessage(messages []chatMessage) string {
 	}
 	return ""
 }
-

@@ -128,31 +128,6 @@ Returns `application/json`:
 }
 ```
 
-## `/v1/chat/messages`
-
-**Conversation history endpoint.** Returns the agent's conversation messages.
-
-- Method: `GET`
-- Response: `application/json`
-- Protected by owner authentication (same as `/mcp`)
-
-### Response
-
-```json
-{
-  "status": "idle",
-  "messages": [
-    {"role": "user", "content": "hello"},
-    {"role": "assistant", "content": "Hi there!"}
-  ]
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `status` | string | Current agent status (`idle`, `busy`, `completed`, etc.) |
-| `messages` | array | Array of `{role, content}` messages. Empty messages are filtered out. |
-
 ## `/`
 
 **Root endpoint.** Returns the server name and version.
