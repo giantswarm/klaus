@@ -788,3 +788,51 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "workspace.gitSecretName requires workspace.gitRepo to be set"
+
+  # -- Persistent mode default tests --
+
+  - it: should default CLAUDE_PERSISTENT_MODE to true
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_PERSISTENT_MODE
+            value: "true"
+
+  - it: should default CLAUDE_NO_SESSION_PERSISTENCE to false
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_NO_SESSION_PERSISTENCE
+            value: "false"
+
+  - it: should allow overriding persistentMode to false
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        persistentMode: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_PERSISTENT_MODE
+            value: "false"
+
+  - it: should allow overriding noSessionPersistence to true
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claude:
+        noSessionPersistence: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: CLAUDE_NO_SESSION_PERSISTENCE
+            value: "true"

@@ -347,11 +347,11 @@
         },
         "persistentMode": {
           "type": "boolean",
-          "description": "Enable bidirectional stream-json persistent subprocess mode"
+          "description": "Enable bidirectional stream-json persistent subprocess mode. Required for multi-turn chat via /v1/chat/completions. Default: true."
         },
         "noSessionPersistence": {
           "type": "boolean",
-          "description": "Disable saving sessions to disk"
+          "description": "Disable saving sessions to disk. When persistentMode is true, session files are not needed (state is held in memory). Default: false."
         }
       }
     },
