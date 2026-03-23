@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`/v1/chat/messages` HTTP endpoint**: Conversation history is now available
+  via the MCP messages tool instead of a dedicated REST endpoint.
+
 ### Changed
 
 - Switch CI builds from `push-to-registries` to `push-to-registries-multiarch`

@@ -454,8 +454,8 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.status = ProcessStatusBusy
 	p.lastError = ""
 	// Preserve liveMessages and messageCount across turns so that
-	// /v1/chat/messages returns the full conversation history and
-	// message_count accumulates rather than resetting (#171).
+	// the MCP messages tool returns the full conversation history
+	// and message_count accumulates rather than resetting (#171).
 	p.toolCallCount = 0
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
