@@ -311,7 +311,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 				p.sessionID = msg.SessionID
 			}
 			if msg.Type == MessageTypeAssistant {
-				if model := extractModel(msg); model != "" {
+				if model := ExtractModel(msg); model != "" {
 					p.modelUsage[model]++
 				}
 				if msg.Subtype == SubtypeText && msg.Text != "" {

@@ -44,9 +44,9 @@ func TestExtractModel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractModel(tt.msg)
+			got := ExtractModel(tt.msg)
 			if got != tt.want {
-				t.Errorf("extractModel() = %q, want %q", got, tt.want)
+				t.Errorf("ExtractModel() = %q, want %q", got, tt.want)
 			}
 		})
 	}
