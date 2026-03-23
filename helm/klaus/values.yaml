@@ -213,22 +213,13 @@ claude:
   # Enables progress tracking with message count, tool call count, and last activity.
   includePartialMessages: false
 
-  # -- Process mode --
-  # persistentMode enables bidirectional stream-json mode where a single
-  # long-running Claude subprocess handles multiple prompts with conversation
-  # continuity. When false, a new subprocess is spawned per prompt.
-  # Persistent mode is required for multi-turn chat via /v1/chat/completions
-  # to work correctly, since single-shot mode relies on session persistence
-  # files for --continue, which are unavailable when noSessionPersistence is true.
-  persistentMode: true
-
-  # -- Session management --
-  # noSessionPersistence disables saving sessions to disk.
-  # When persistentMode is true, session persistence is not needed because
-  # the long-running subprocess maintains conversation state in memory.
-  # When persistentMode is false, set this to false to allow multi-turn chat
-  # via session files (at the cost of disk I/O in ephemeral containers).
-  noSessionPersistence: false
+  # -- Operating mode --
+  # mode selects the operating mode: "agent" or "chat".
+  # agent: spawns a new Process subprocess per prompt with --no-session-persistence
+  #        (autonomous coding, no disk I/O for sessions).
+  # chat: uses a PersistentProcess subprocess (bidirectional stream-json) with
+  #       sessions saved to disk (interactive multi-turn chat).
+  mode: agent
 
 # Owner-based access control.
 # When set, only the user whose JWT sub or email claim matches this value

@@ -2,4 +2,4 @@
 # Minimal configuration to verify the chart deploys successfully.
 claude:
   permissionMode: "bypassPermissions"
-  noSessionPersistence: true
+  mode: agent

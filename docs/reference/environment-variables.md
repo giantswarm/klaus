@@ -34,18 +34,12 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 | `delegate` | Delegate permission decisions |
 | `default` | Normal interactive permissions |
 
-## Process Mode
+## Operating Mode
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CLAUDE_PERSISTENT_MODE` | Use persistent subprocess mode | `false` |
+| `CLAUDE_MODE` | Operating mode: `agent` or `chat` | `agent` |
 | `CLAUDE_INCLUDE_PARTIAL_MESSAGES` | Emit partial message chunks during streaming | `false` |
-
-## Session Management
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `CLAUDE_NO_SESSION_PERSISTENCE` | Don't save sessions to disk | `true` |
 
 ## Tool Control
 
@@ -80,6 +74,7 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 
 The following variables are validated at startup:
 
+- `CLAUDE_MODE` must be `agent` or `chat`
 - `CLAUDE_EFFORT` must be `low`, `medium`, or `high`
 - `CLAUDE_PERMISSION_MODE` must be a valid mode
 - `CLAUDE_MAX_TURNS` must be >= 0

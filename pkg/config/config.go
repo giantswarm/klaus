@@ -90,10 +90,10 @@ type ClaudeConfig struct {
 	Agents string `yaml:"agents"`
 	// ActiveAgent selects which agent runs as the top-level agent.
 	ActiveAgent string `yaml:"activeAgent"`
-	// NoSessionPersistence disables saving sessions to disk.
-	NoSessionPersistence bool `yaml:"noSessionPersistence"`
-	// PersistentMode uses persistent subprocess mode (bidirectional stream-json).
-	PersistentMode bool `yaml:"persistentMode"`
+	// Mode selects the operating mode: "agent" (default) or "chat".
+	// agent: single-shot Process subprocess with --no-session-persistence.
+	// chat: PersistentProcess subprocess with sessions saved to disk.
+	Mode string `yaml:"mode"`
 }
 
 // ServerConfig holds settings consumed by the klaus server process itself
@@ -221,8 +221,7 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideCSV(&cfg.Claude.AddDirs, "CLAUDE_ADD_DIRS")
 	envOverrideString(&cfg.Claude.Agents, "CLAUDE_AGENTS")
 	envOverrideString(&cfg.Claude.ActiveAgent, "CLAUDE_ACTIVE_AGENT")
-	envOverrideBool(&cfg.Claude.NoSessionPersistence, "CLAUDE_NO_SESSION_PERSISTENCE")
-	envOverrideBool(&cfg.Claude.PersistentMode, "CLAUDE_PERSISTENT_MODE")
+	envOverrideString(&cfg.Claude.Mode, "CLAUDE_MODE")
 
 	// Server settings.
 	envOverrideString(&cfg.Server.Port, "PORT")
@@ -254,6 +253,12 @@ func (c *Config) Validate() error {
 	}
 	if err := claude.ValidateEffort(c.Claude.Effort); err != nil {
 		errs = append(errs, fmt.Errorf("claude.effort: %w", err))
+	}
+	switch c.Claude.Mode {
+	case "", "agent", "chat":
+		// valid
+	default:
+		errs = append(errs, fmt.Errorf("claude.mode: invalid value %q (must be \"agent\" or \"chat\")", c.Claude.Mode))
 	}
 	if c.Claude.MaxTurns < 0 {
 		errs = append(errs, fmt.Errorf("claude.maxTurns must be >= 0, got %d", c.Claude.MaxTurns))

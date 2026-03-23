@@ -26,8 +26,7 @@ claude:
   effort: ""                   # low, medium, high
   fallbackModel: ""
   jsonSchema: ""
-  persistentMode: false
-  noSessionPersistence: true
+  mode: agent                  # agent or chat
   includePartialMessages: false
 ```
 

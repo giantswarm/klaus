@@ -21,15 +21,15 @@ type Server struct {
 
 // ProcessMode describes the operating mode of the claude process.
 const (
-	ModeSingleShot = "single-shot"
-	ModePersistent = "persistent"
+	ModeAgent = "agent"
+	ModeChat  = "chat"
 )
 
 // Config holds non-OAuth server-level configuration.
 type Config struct {
 	// Port is the HTTP listen port (e.g. "8080").
 	Port string
-	// Mode is the operating mode (ModeSingleShot or ModePersistent).
+	// Mode is the operating mode (ModeAgent or ModeChat).
 	Mode string
 	// OwnerSubject restricts MCP access to the configured owner identity
 	// by matching the JWT sub or email claim. When empty, no owner

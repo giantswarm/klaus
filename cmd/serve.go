@@ -259,8 +259,11 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.ActiveAgent != "" {
 		opts.ActiveAgent = cfg.Claude.ActiveAgent
 	}
-	if cfg.Claude.NoSessionPersistence {
-		opts.NoSessionPersistence = true
+	// Derive NoSessionPersistence from mode: agent -> true, chat -> false.
+	// DefaultOptions() already sets NoSessionPersistence=true (agent default),
+	// so only override for chat mode.
+	if cfg.Claude.Mode == "chat" {
+		opts.NoSessionPersistence = false
 	}
 
 	// Load personality SOUL.md. The KLAUS_SOUL_FILE env var allows operators
@@ -283,8 +286,8 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// Note: permissionMode and effort are already validated by cfg.Validate()
 	// using the canonical validators from the claude package.
 	var process claude.Prompter
-	if cfg.Claude.PersistentMode {
-		log.Println("Starting in persistent mode (bidirectional stream-json)")
+	if cfg.Claude.Mode == "chat" {
+		log.Println("Starting in chat mode (bidirectional stream-json)")
 		process = claude.NewPersistentProcess(opts)
 	} else {
 		process = claude.NewProcess(opts)
@@ -305,9 +308,9 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	serverCtx, serverCancel := context.WithCancel(context.Background())
 	defer serverCancel()
 
-	mode := server.ModeSingleShot
-	if cfg.Claude.PersistentMode {
-		mode = server.ModePersistent
+	mode := server.ModeAgent
+	if cfg.Claude.Mode == "chat" {
+		mode = server.ModeChat
 	}
 
 	srvCfg := server.Config{
