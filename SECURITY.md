@@ -1,3 +1,5 @@
 # Security Policy
 
-Giant Swarm supports responsible disclosure of security vulnerabilities. Please refer to our [responsible disclosure policy](https://www.giantswarm.io/responsible-disclosure) for more details.
+## Reporting a Vulnerability
+
+Please visit <https://www.giantswarm.io/responsible-disclosure> for information on reporting security issues.
