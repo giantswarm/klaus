@@ -90,7 +90,7 @@ func ToOpenAIMessages(msgs []StreamMessage) ([]OpenAIMessage, OpenAIMetadata) {
 	// Track the current assistant message being consolidated.
 	// We merge consecutive assistant messages with the same message.id.
 	var currentAssistantID string
-	var currentAssistantIdx int = -1
+	currentAssistantIdx := -1
 
 	for _, msg := range msgs {
 		switch msg.Type {
@@ -265,11 +265,11 @@ func buildAssistantFromBlocks(blocks []openaiContentBlock) *OpenAIMessage {
 
 	for _, block := range blocks {
 		switch block.Type {
-		case "text":
+		case string(SubtypeText):
 			if block.Text != "" {
 				textParts = append(textParts, block.Text)
 			}
-		case "tool_use":
+		case string(SubtypeToolUse):
 			argsStr := "{}"
 			if len(block.Input) > 0 {
 				argsStr = string(block.Input)

@@ -184,7 +184,7 @@ func TestResultStore_LoadCorruptFile(t *testing.T) {
 
 	// Write corrupt data.
 	path := filepath.Join(dir, resultFileName)
-	if err := os.WriteFile(path, []byte("not json"), 0o640); err != nil {
+	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
 		t.Fatalf("failed to write corrupt file: %v", err)
 	}
 

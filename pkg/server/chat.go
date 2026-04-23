@@ -9,6 +9,7 @@ import (
 	"time"
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/project"
 )
 
 // OpenAI-compatible request/response types for the chat completions endpoint.
@@ -60,6 +61,10 @@ type chatCompletionUse struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// finishReasonStop is the OpenAI-compatible finish_reason value emitted
+// when a completion terminates normally.
+const finishReasonStop = "stop"
+
 // handleChatCompletions returns an http.HandlerFunc that accepts an
 // OpenAI-compatible chat completion request and streams the response as SSE
 // (or returns a complete response for non-streaming requests).
@@ -106,7 +111,7 @@ func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
 
 		model := req.Model
 		if model == "" {
-			model = "klaus"
+			model = project.Name
 		}
 
 		if req.Stream {
@@ -184,7 +189,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 				log.Printf("[chat] failed to marshal SSE chunk: %v", err)
 				continue
 			}
-			fmt.Fprintf(w, "data: %s\n\n", data)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
 	}
@@ -192,7 +197,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 
 // writeDoneChunk sends the final SSE chunk with finish_reason "stop" and the [DONE] sentinel.
 func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model string, usage *chatCompletionUse) {
-	stop := "stop"
+	stop := finishReasonStop
 	final := chatCompletionResponse{
 		ID:      id,
 		Object:  "chat.completion.chunk",
@@ -206,8 +211,8 @@ func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model strin
 		log.Printf("[chat] failed to marshal final SSE chunk: %v", err)
 		return
 	}
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	fmt.Fprint(w, "data: [DONE]\n\n")
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
 
@@ -234,7 +239,7 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 
 	resultText := claudepkg.CollectResultText(msgs)
 
-	stop := "stop"
+	stop := finishReasonStop
 	resp := chatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
