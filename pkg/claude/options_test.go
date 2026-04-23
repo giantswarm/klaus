@@ -316,13 +316,13 @@ func TestBaseArgs_MCPAllowedToolsPatterns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	mcpConfig := `{"mcpServers":{"muster":{"command":"muster"},"github":{"command":"gh"}}}`
 	if _, err := tmpFile.WriteString(mcpConfig); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	opts := Options{MCPConfigPath: tmpFile.Name()}
 	args := opts.baseArgs()
@@ -358,12 +358,12 @@ func TestBaseArgs_MCPAllowedToolsInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString("not valid json"); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	opts := Options{MCPConfigPath: tmpFile.Name()}
 	args := opts.baseArgs()
@@ -380,12 +380,12 @@ func TestBaseArgs_MCPAllowedToolsEmptyServers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
 
 	if _, err := tmpFile.WriteString(`{"mcpServers":{}}`); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
-	tmpFile.Close()
+	_ = tmpFile.Close()
 
 	opts := Options{MCPConfigPath: tmpFile.Name()}
 	args := opts.baseArgs()

@@ -1,0 +1,11 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # goconst flags repeated string literals; tests naturally repeat
+      # strings (JSON payloads, status values, message types) and should
+      # not be forced to hoist them to constants.
+      - path: _test\.go
+        linters:
+          - goconst

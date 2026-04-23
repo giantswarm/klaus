@@ -175,7 +175,7 @@ func Load(path string) (Config, error) {
 		}
 		// File doesn't exist -- env-only mode (backward compat).
 	} else {
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		limited := io.LimitReader(f, maxConfigFileSize+1)
 		data, readErr := io.ReadAll(limited)
 		if readErr != nil {
@@ -334,7 +334,7 @@ func envOverrideInt(target *int, key string) {
 	if v := os.Getenv(key); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			log.Printf("WARNING: ignoring invalid integer for %s=%q: %v", key, v, err)
+			log.Printf("WARNING: ignoring invalid integer for %s=%q: %v", key, v, err) // #nosec G706 -- value is safely quoted via %q
 			return
 		}
 		*target = n
@@ -345,7 +345,7 @@ func envOverrideFloat64(target *float64, key string) {
 	if v := os.Getenv(key); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			log.Printf("WARNING: ignoring invalid float for %s=%q: %v", key, v, err)
+			log.Printf("WARNING: ignoring invalid float for %s=%q: %v", key, v, err) // #nosec G706 -- value is safely quoted via %q
 			return
 		}
 		*target = f

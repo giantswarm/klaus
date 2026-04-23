@@ -31,6 +31,16 @@ const (
 	SubtypeToolUse MessageSubtype = "tool_use"
 )
 
+// Stream event type names emitted by the Claude CLI inside stream_event envelopes.
+const (
+	EventContentBlockStart = "content_block_start"
+	EventContentBlockDelta = "content_block_delta"
+	EventContentBlockStop  = "content_block_stop"
+)
+
+// Tool name for the bash command execution tool.
+const ToolNameBash = "Bash"
+
 // TokenUsage holds per-message token counts from the Claude API usage object.
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens,omitempty"`
@@ -107,7 +117,7 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 			if env.Event.Delta.Type == "input_json_delta" {
 				msg.InputJSONDelta = env.Event.Delta.PartialJSON
 			}
-			if env.Event.Type == "content_block_start" && env.Event.ContentBlock.Type == "tool_use" {
+			if env.Event.Type == EventContentBlockStart && env.Event.ContentBlock.Type == string(SubtypeToolUse) {
 				msg.ToolUseName = env.Event.ContentBlock.Name
 				msg.ToolUseBlockID = env.Event.ContentBlock.ID
 			}
@@ -126,7 +136,7 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 			textLen := 0
 			for _, block := range env.Content {
 				switch block.Type {
-				case "text":
+				case string(SubtypeText):
 					if msg.Subtype == "" {
 						msg.Subtype = SubtypeText
 					}
@@ -140,7 +150,7 @@ func ParseStreamMessage(data []byte) (StreamMessage, error) {
 					}
 					msg.Text += t
 					textLen += len(t)
-				case "tool_use":
+				case string(SubtypeToolUse):
 					if msg.Subtype == SubtypeToolUse {
 						continue // keep the first tool_use block
 					}
@@ -289,7 +299,7 @@ func SummarizeMessages(msgs []StreamMessage) []MessageSummary {
 			continue
 		}
 		// Deduplicate system messages by content.
-		if s.Role == "system" {
+		if s.Role == string(MessageTypeSystem) {
 			if seenSystem[s.Content] {
 				continue
 			}
@@ -398,6 +408,12 @@ func summarizeMessage(msg StreamMessage) MessageSummary {
 func Float64Ptr(f float64) *float64 {
 	return &f
 }
+
+// Subagent status values reported in SubagentCall.Status.
+const (
+	SubagentStatusRunning   = "running"
+	SubagentStatusCompleted = "completed"
+)
 
 // SubagentCall tracks a single subagent dispatch via the Task/Agent tool.
 type SubagentCall struct {
@@ -515,7 +531,7 @@ func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
 // whose output may contain real PR URLs (as opposed to file content tools like
 // Read/Write that may contain PR URLs embedded in source code or docs).
 func isBashTool(name string) bool {
-	return name == "Bash" || name == "bash"
+	return name == ToolNameBash || name == "bash"
 }
 
 // maxPRURLsPerBlock caps the number of PR URLs extracted from a single content block.

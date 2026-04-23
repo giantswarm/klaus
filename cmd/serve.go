@@ -262,7 +262,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// Derive NoSessionPersistence from mode: agent -> true, chat -> false.
 	// DefaultOptions() already sets NoSessionPersistence=true (agent default),
 	// so only override for chat mode.
-	if cfg.Claude.Mode == "chat" {
+	if cfg.Claude.Mode == server.ModeChat {
 		opts.NoSessionPersistence = false
 	}
 
@@ -286,7 +286,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// Note: permissionMode and effort are already validated by cfg.Validate()
 	// using the canonical validators from the claude package.
 	var process claude.Prompter
-	if cfg.Claude.Mode == "chat" {
+	if cfg.Claude.Mode == server.ModeChat {
 		log.Println("Starting in chat mode (bidirectional stream-json)")
 		process = claude.NewPersistentProcess(opts)
 	} else {
@@ -309,7 +309,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	defer serverCancel()
 
 	mode := server.ModeAgent
-	if cfg.Claude.Mode == "chat" {
+	if cfg.Claude.Mode == server.ModeChat {
 		mode = server.ModeChat
 	}
 
@@ -498,14 +498,14 @@ func soulFilePath() string {
 // nil error when the file does not exist. Returns an error if the file
 // exceeds maxSOULFileSize.
 func loadSOULFile(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is sourced from trusted config/env
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", nil
 		}
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	limited := io.LimitReader(f, maxSOULFileSize+1)
 	data, err := io.ReadAll(limited)

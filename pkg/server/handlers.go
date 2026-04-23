@@ -26,7 +26,7 @@ type statusResponse struct {
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
+	_, _ = fmt.Fprintln(w, "ok")
 }
 
 // handleReadyz reports whether the Claude process is ready to accept traffic.
@@ -37,11 +37,11 @@ func handleReadyz(process claudepkg.Prompter) http.HandlerFunc {
 		switch status {
 		case claudepkg.ProcessStatusStarting, claudepkg.ProcessStatusError, claudepkg.ProcessStatusStopped:
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintln(w, "not ready")
+			_, _ = fmt.Fprintln(w, "not ready")
 			return
 		default:
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, "ok")
+			_, _ = fmt.Fprintln(w, "ok")
 		}
 	}
 }
@@ -53,7 +53,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
+	_, _ = fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 
 func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) http.HandlerFunc {

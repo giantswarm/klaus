@@ -497,11 +497,11 @@ func main() {
 	tmpDir := t.TempDir()
 	srcPath := tmpDir + "/crash_helper.go"
 	binPath := tmpDir + "/crash_helper"
-	if err := os.WriteFile(srcPath, []byte(helperSrc), 0644); err != nil {
+	if err := os.WriteFile(srcPath, []byte(helperSrc), 0o600); err != nil {
 		t.Fatalf("failed to write helper source: %v", err)
 	}
 
-	buildCmd := exec.Command("go", "build", "-o", binPath, srcPath)
+	buildCmd := exec.Command("go", "build", "-o", binPath, srcPath) // #nosec G204 -- test helper with trusted paths
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to build helper: %v\n%s", err, out)
 	}
@@ -523,7 +523,7 @@ func main() {
 	}
 
 	// Launch the helper binary as the "claude" subprocess.
-	cmd := exec.Command(binPath)
+	cmd := exec.Command(binPath) // #nosec G204 -- test helper with trusted path
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)

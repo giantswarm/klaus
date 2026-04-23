@@ -73,7 +73,7 @@ func (st *subagentTracker) handleToolUse(msg StreamMessage) bool {
 
 	call := SubagentCall{
 		ToolID: msg.ToolID,
-		Status: "running",
+		Status: SubagentStatusRunning,
 	}
 
 	// Parse the tool arguments to extract subagent_type and description.
@@ -153,7 +153,7 @@ func (st *subagentTracker) completeSubagent(toolID string, inf inflightSubagent,
 	delete(st.inflight, toolID)
 
 	call := inf.call
-	call.Status = "completed"
+	call.Status = SubagentStatusCompleted
 	call.DurationMS = float64(time.Since(inf.start).Milliseconds())
 
 	// Try to parse the <usage> block from the result content.

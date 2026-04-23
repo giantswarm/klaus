@@ -88,7 +88,7 @@ oauth:
     keyFile: "/etc/tls/key.pem"
   disableStreaming: true
 `
-	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -161,7 +161,7 @@ claude:
 server:
   port: "9090"
 `
-	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -184,7 +184,7 @@ func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.yaml")
 
-	if err := os.WriteFile(path, []byte("{{not: valid: yaml:"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{{not: valid: yaml:"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -399,7 +399,7 @@ func TestMode_EnvOverridesYAML(t *testing.T) {
 claude:
   mode: chat
 `
-	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -424,7 +424,7 @@ func TestMode_YAMLConfig(t *testing.T) {
 claude:
   mode: chat
 `
-	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

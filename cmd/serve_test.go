@@ -12,7 +12,7 @@ func TestLoadSOULFile_Exists(t *testing.T) {
 	path := filepath.Join(dir, "SOUL.md")
 	content := "You are Klaus, a helpful AI assistant."
 
-	if err := os.WriteFile(path, []byte(content), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o400); err != nil {
 		t.Fatalf("failed to write temp SOUL.md: %v", err)
 	}
 
@@ -39,7 +39,7 @@ func TestLoadSOULFile_EmptyFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "SOUL.md")
 
-	if err := os.WriteFile(path, []byte(""), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(""), 0o400); err != nil {
 		t.Fatalf("failed to write temp SOUL.md: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func TestLoadSOULFile_WhitespaceOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "SOUL.md")
 
-	if err := os.WriteFile(path, []byte("  \n\n  \t  \n"), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte("  \n\n  \t  \n"), 0o400); err != nil {
 		t.Fatalf("failed to write temp SOUL.md: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestLoadSOULFile_TrimsWhitespace(t *testing.T) {
 	path := filepath.Join(dir, "SOUL.md")
 	content := "\n\n  You are a coding assistant.\n\n"
 
-	if err := os.WriteFile(path, []byte(content), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o400); err != nil {
 		t.Fatalf("failed to write temp SOUL.md: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestLoadSOULFile_MultilineContent(t *testing.T) {
 	path := filepath.Join(dir, "SOUL.md")
 	content := "# Klaus Personality\n\nYou are Klaus.\nYou help with code.\n\n## Traits\n- Helpful\n- Concise"
 
-	if err := os.WriteFile(path, []byte(content), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o400); err != nil {
 		t.Fatalf("failed to write temp SOUL.md: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestLoadSOULFile_ExceedsMaxSize(t *testing.T) {
 
 	// Create a file that is one byte over the limit.
 	data := strings.Repeat("A", maxSOULFileSize+1)
-	if err := os.WriteFile(path, []byte(data), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o400); err != nil {
 		t.Fatalf("failed to write oversized SOUL.md: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestLoadSOULFile_ExactlyMaxSize(t *testing.T) {
 
 	// Create a file at exactly the limit -- should succeed.
 	data := strings.Repeat("B", maxSOULFileSize)
-	if err := os.WriteFile(path, []byte(data), 0o444); err != nil {
+	if err := os.WriteFile(path, []byte(data), 0o400); err != nil {
 		t.Fatalf("failed to write SOUL.md: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestLoadSOULFile_ExactlyMaxSize(t *testing.T) {
 func TestSoulFilePath_Unset(t *testing.T) {
 	// Ensure the env var is saved/restored, then unset it.
 	t.Setenv("KLAUS_SOUL_FILE", "")
-	os.Unsetenv("KLAUS_SOUL_FILE")
+	_ = os.Unsetenv("KLAUS_SOUL_FILE")
 
 	got := soulFilePath()
 	if got != defaultSOULPath {

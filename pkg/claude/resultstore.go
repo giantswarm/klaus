@@ -153,12 +153,12 @@ func (s *ResultStore) Save(result PersistedResult) error {
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("writing result file: %w", err)
 	}
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("setting file permissions: %w", err)
 	}
@@ -180,7 +180,7 @@ func (s *ResultStore) Save(result PersistedResult) error {
 func (s *ResultStore) Load() (*PersistedResult, error) {
 	path := filepath.Join(s.dir, resultFileName)
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is confined to ResultStore.dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
