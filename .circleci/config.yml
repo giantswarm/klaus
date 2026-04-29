@@ -52,6 +52,7 @@ workflows:
   build:
     jobs:
     - architect/go-build:
+        context: architect
         name: go-build-klaus
         binary: klaus
         filters:
