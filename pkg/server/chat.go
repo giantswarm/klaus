@@ -12,6 +12,14 @@ import (
 	"github.com/giantswarm/klaus/pkg/project"
 )
 
+// OpenAI Chat Completions response object kinds and role names used by the
+// streaming and non-streaming code paths.
+const (
+	chatCompletionChunkObject = "chat.completion.chunk"
+	roleAssistant             = "assistant"
+	roleTool                  = "tool"
+)
+
 // OpenAI-compatible request/response types for the chat completions endpoint.
 
 type chatCompletionRequest struct {
@@ -178,7 +186,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 
 			chunk := chatCompletionResponse{
 				ID:      id,
-				Object:  "chat.completion.chunk",
+				Object:  chatCompletionChunkObject,
 				Created: time.Now().Unix(),
 				Model:   model,
 				Choices: []chatChoice{{Index: 0, Delta: delta}},
@@ -200,7 +208,7 @@ func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model strin
 	stop := finishReasonStop
 	final := chatCompletionResponse{
 		ID:      id,
-		Object:  "chat.completion.chunk",
+		Object:  chatCompletionChunkObject,
 		Created: time.Now().Unix(),
 		Model:   model,
 		Choices: []chatChoice{{Index: 0, Delta: &chatMessage{}, FinishReason: &stop}},
@@ -247,7 +255,7 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 		Model:   model,
 		Choices: []chatChoice{{
 			Index:        0,
-			Message:      &chatMessage{Role: "assistant", Content: resultText},
+			Message:      &chatMessage{Role: roleAssistant, Content: resultText},
 			FinishReason: &stop,
 		}},
 	}
@@ -278,27 +286,27 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 func streamMessageToDelta(msg claudepkg.StreamMessage, toolIndex *int) *chatMessage {
 	switch msg.Type {
 	case claudepkg.MessageTypeStreamEvent:
-		if msg.EventType == "content_block_delta" && msg.DeltaText != "" {
-			return &chatMessage{Role: "assistant", Content: msg.DeltaText}
+		if msg.EventType == claudepkg.EventContentBlockDelta && msg.DeltaText != "" {
+			return &chatMessage{Role: roleAssistant, Content: msg.DeltaText}
 		}
-		if msg.EventType == "content_block_delta" && msg.InputJSONDelta != "" {
+		if msg.EventType == claudepkg.EventContentBlockDelta && msg.InputJSONDelta != "" {
 			idx := *toolIndex
 			if idx > 0 {
 				idx-- // point to the current tool call
 			}
 			return &chatMessage{
-				Role: "assistant",
+				Role: roleAssistant,
 				ToolCalls: []chatToolCall{{
 					Index:    idx,
 					Function: chatToolFunction{Arguments: msg.InputJSONDelta},
 				}},
 			}
 		}
-		if msg.EventType == "content_block_start" && msg.ToolUseName != "" {
+		if msg.EventType == claudepkg.EventContentBlockStart && msg.ToolUseName != "" {
 			idx := *toolIndex
 			*toolIndex++
 			return &chatMessage{
-				Role: "assistant",
+				Role: roleAssistant,
 				ToolCalls: []chatToolCall{{
 					Index: idx,
 					ID:    msg.ToolUseBlockID,
@@ -317,7 +325,7 @@ func streamMessageToDelta(msg claudepkg.StreamMessage, toolIndex *int) *chatMess
 		}
 		block := blocks[0]
 		return &chatMessage{
-			Role:       "tool",
+			Role:       roleTool,
 			Content:    block.Content,
 			ToolCallID: block.ToolUseID,
 		}
@@ -327,7 +335,7 @@ func streamMessageToDelta(msg claudepkg.StreamMessage, toolIndex *int) *chatMess
 		// Normal LLM assistant messages are redundant (content already delivered
 		// via stream_event deltas) and are still skipped.
 		if claudepkg.ExtractModel(msg) == "<synthetic>" && msg.Subtype == claudepkg.SubtypeText && msg.Text != "" {
-			return &chatMessage{Role: "assistant", Content: msg.Text}
+			return &chatMessage{Role: roleAssistant, Content: msg.Text}
 		}
 		return nil
 	case claudepkg.MessageTypeResult:

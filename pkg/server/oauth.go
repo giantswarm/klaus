@@ -58,8 +58,15 @@ const (
 	DefaultShutdownTimeout = 30 * time.Second
 )
 
+// oauthEmailScope is the OAuth scope name requesting access to the user's
+// email address; reused across scope lists and ID-token claim keys.
+const oauthEmailScope = "email"
+
+// serviceNameKlaus identifies this service in OAuth/cookie/session metadata.
+const serviceNameKlaus = "klaus"
+
 var (
-	dexOAuthScopes    = []string{"openid", "profile", "email", "groups", "offline_access"}
+	dexOAuthScopes    = []string{"openid", "profile", oauthEmailScope, "groups", "offline_access"}
 	googleOAuthScopes = []string{
 		"https://www.googleapis.com/auth/userinfo.email",
 		"https://www.googleapis.com/auth/userinfo.profile",
@@ -392,7 +399,7 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		// Instrumentation.
 		Instrumentation: oauthserver.InstrumentationConfig{
 			Enabled:        true,
-			ServiceName:    "klaus",
+			ServiceName:    serviceNameKlaus,
 			ServiceVersion: project.Version(),
 		},
 	}

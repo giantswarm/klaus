@@ -41,6 +41,14 @@ const (
 // Tool name for the bash command execution tool.
 const ToolNameBash = "Bash"
 
+// Aggregated message role and content-block type values used when converting
+// stream-json messages into MessageSummary or OpenAI-compatible payloads.
+const (
+	roleTool               = "tool"
+	contentBlockToolResult = "tool_result"
+	openAIToolTypeFunction = "function"
+)
+
 // TokenUsage holds per-message token counts from the Claude API usage object.
 type TokenUsage struct {
 	InputTokens              int64 `json:"input_tokens,omitempty"`
@@ -361,7 +369,7 @@ func summarizeMessage(msg StreamMessage) MessageSummary {
 		if content == "" {
 			return MessageSummary{}
 		}
-		return MessageSummary{Role: "system", Content: content, Timestamp: msg.Timestamp}
+		return MessageSummary{Role: string(MessageTypeSystem), Content: content, Timestamp: msg.Timestamp}
 	case MessageTypeAssistant:
 		if msg.Subtype == SubtypeToolUse {
 			tc := ToolCallInfo{
@@ -370,14 +378,14 @@ func summarizeMessage(msg StreamMessage) MessageSummary {
 				Args: msg.ToolArgs,
 			}
 			return MessageSummary{
-				Role:      "assistant",
+				Role:      string(MessageTypeAssistant),
 				Content:   "Using tool: " + msg.ToolName,
 				ToolCalls: []ToolCallInfo{tc},
 				Timestamp: msg.Timestamp,
 			}
 		}
 		if msg.Subtype == SubtypeText && msg.Text != "" {
-			return MessageSummary{Role: "assistant", Content: msg.Text, Timestamp: msg.Timestamp}
+			return MessageSummary{Role: string(MessageTypeAssistant), Content: msg.Text, Timestamp: msg.Timestamp}
 		}
 		return MessageSummary{}
 	case MessageTypeUser:
@@ -389,14 +397,14 @@ func summarizeMessage(msg StreamMessage) MessageSummary {
 		// Return the first tool result as a "tool" role message.
 		block := blocks[0]
 		return MessageSummary{
-			Role:       "tool",
+			Role:       roleTool,
 			Content:    block.Content,
 			ToolCallID: block.ToolUseID,
 			Timestamp:  msg.Timestamp,
 		}
 	case MessageTypeResult:
 		if msg.Result != "" {
-			return MessageSummary{Role: "result", Content: msg.Result, Timestamp: msg.Timestamp}
+			return MessageSummary{Role: string(MessageTypeResult), Content: msg.Result, Timestamp: msg.Timestamp}
 		}
 		return MessageSummary{}
 	default:
@@ -520,7 +528,7 @@ func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
 	}
 	var results []ToolResultBlock
 	for _, block := range env.Content {
-		if block.Type == "tool_result" {
+		if block.Type == contentBlockToolResult {
 			results = append(results, block)
 		}
 	}

@@ -134,7 +134,7 @@ func collectErrorTexts(messages []claude.StreamMessage) []string {
 func checkPluginCompliance(calls []claude.SubagentCall) PluginCompliance {
 	completed := make(map[string]bool)
 	for _, call := range calls {
-		if call.Status == "completed" {
+		if call.Status == claude.SubagentStatusCompleted {
 			completed[call.Type] = true
 		}
 	}
