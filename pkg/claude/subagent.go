@@ -8,11 +8,18 @@ import (
 	"time"
 )
 
+// Tool names used by Claude Code to dispatch subagents.
+// "Task" is the older name, "Agent" the newer one.
+const (
+	ToolNameTask  = "Task"
+	ToolNameAgent = "Agent"
+)
+
 // taskToolNames is the set of tool names that represent subagent dispatches.
 // Claude Code uses "Task" in older versions and "Agent" in newer ones.
 var taskToolNames = map[string]bool{
-	"Task":  true,
-	"Agent": true,
+	ToolNameTask:  true,
+	ToolNameAgent: true,
 }
 
 // isSubagentTool returns true if the given tool name is a subagent dispatch tool.

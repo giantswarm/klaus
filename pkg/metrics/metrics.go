@@ -28,12 +28,27 @@ const (
 // are bucketed under the "other" label to prevent unbounded cardinality.
 const maxToolNameLabels = 50
 
+// labelStatus is the Prometheus label name for process status values. It is
+// shared by PromptsTotal, PromptDurationSeconds, and ProcessStatusGauge.
+const labelStatus = "status"
+
+// Process status label values exposed via ProcessStatusGauge. They mirror
+// claude.AllProcessStatuses (verified by sync_test.go).
+const (
+	StatusStarting  = "starting"
+	StatusIdle      = "idle"
+	StatusBusy      = "busy"
+	StatusCompleted = "completed"
+	StatusStopped   = "stopped"
+	StatusError     = "error"
+)
+
 // PromptsTotal counts the number of prompt invocations.
 var PromptsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Namespace: namespace,
 	Name:      "prompts_total",
 	Help:      "Total number of prompt invocations.",
-}, []string{"status", "mode"})
+}, []string{labelStatus, "mode"})
 
 // PromptDurationSeconds tracks the end-to-end duration of prompt execution.
 var PromptDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -41,7 +56,7 @@ var PromptDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 	Name:      "prompt_duration_seconds",
 	Help:      "Duration of prompt execution in seconds.",
 	Buckets:   prometheus.ExponentialBuckets(1, 2, 12), // 1s to ~68m
-}, []string{"status", "mode"})
+}, []string{labelStatus, "mode"})
 
 // ProcessStatusGauge is a gauge indicating the current process state.
 // Only the label matching the active status is set to 1; all others are 0.
@@ -49,7 +64,7 @@ var ProcessStatusGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Namespace: namespace,
 	Name:      "process_status",
 	Help:      "Current process status (1 for active status, 0 for others).",
-}, []string{"status"})
+}, []string{labelStatus})
 
 // SessionCostUSDTotal tracks cumulative cost from stream-json total_cost_usd.
 var SessionCostUSDTotal = promauto.NewCounter(prometheus.CounterOpts{
@@ -86,7 +101,7 @@ var ProcessRestartsTotal = promauto.NewCounter(prometheus.CounterOpts{
 // AllStatuses is the complete list of process status labels used by the
 // ProcessStatusGauge. It must match claude.AllProcessStatuses -- a cross-
 // package test in sync_test.go enforces this at test time.
-var AllStatuses = []string{"starting", "idle", "busy", "completed", "stopped", "error"}
+var AllStatuses = []string{StatusStarting, StatusIdle, StatusBusy, StatusCompleted, StatusStopped, StatusError}
 
 // statusMu serialises SetProcessStatus calls so that a concurrent scrape
 // never observes a partially-updated gauge (e.g. two statuses at 1 or all

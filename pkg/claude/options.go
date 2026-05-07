@@ -123,10 +123,30 @@ type Options struct {
 	AddDirs []string
 }
 
+// Permission modes recognised by the Claude Code CLI.
+const (
+	PermissionModeDefault  = "default"
+	PermissionModeAccept   = "acceptEdits"
+	PermissionModeBypass   = "bypassPermissions"
+	PermissionModeDontAsk  = "dontAsk"
+	PermissionModePlan     = "plan"
+	PermissionModeDelegate = "delegate"
+)
+
+// Effort level values recognised by the Claude Code CLI.
+const (
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+)
+
+// streamJSONFormat is the CLI value for stream-json input/output formatting.
+const streamJSONFormat = "stream-json"
+
 // DefaultOptions returns sensible defaults for headless operation.
 func DefaultOptions() Options {
 	return Options{
-		PermissionMode:       "bypassPermissions",
+		PermissionMode:       PermissionModeBypass,
 		NoSessionPersistence: true,
 		MaxTurns:             0,
 	}
@@ -159,12 +179,12 @@ func (o Options) mcpServerNames() []string {
 
 // ValidPermissionModes lists all valid permission mode values for Claude Code.
 var ValidPermissionModes = []string{
-	"default",
-	"acceptEdits",
-	"bypassPermissions",
-	"dontAsk",
-	"plan",
-	"delegate",
+	PermissionModeDefault,
+	PermissionModeAccept,
+	PermissionModeBypass,
+	PermissionModeDontAsk,
+	PermissionModePlan,
+	PermissionModeDelegate,
 }
 
 // ValidatePermissionMode checks whether the given mode is a valid Claude Code permission mode.
@@ -179,9 +199,9 @@ func ValidatePermissionMode(mode string) error {
 
 // ValidEffortLevels lists all valid effort level values for Claude Code.
 var ValidEffortLevels = []string{
-	"low",
-	"medium",
-	"high",
+	EffortLow,
+	EffortMedium,
+	EffortHigh,
 }
 
 // ValidateEffort checks whether the given effort level is valid.
@@ -230,7 +250,7 @@ func (o Options) baseArgs() []string {
 	}
 
 	// When using bypassPermissions, the --dangerously-skip-permissions flag is required.
-	if o.PermissionMode == "bypassPermissions" {
+	if o.PermissionMode == PermissionModeBypass {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 
@@ -314,7 +334,7 @@ func (o Options) baseArgs() []string {
 func (o Options) args() []string {
 	args := []string{
 		"--print",
-		"--output-format", "stream-json",
+		"--output-format", streamJSONFormat,
 		"--verbose",
 		"--include-partial-messages",
 	}
@@ -347,8 +367,8 @@ func (o Options) args() []string {
 func (o Options) PersistentArgs() []string {
 	args := []string{
 		"--print",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
+		"--input-format", streamJSONFormat,
+		"--output-format", streamJSONFormat,
 		"--replay-user-messages",
 		"--verbose",
 		"--include-partial-messages",

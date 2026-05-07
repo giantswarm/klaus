@@ -561,9 +561,9 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	// Write the user message to stdin as stream-json.
 	msg := stdinMessage{
-		Type: "user",
+		Type: string(MessageTypeUser),
 		Message: stdinMessageContent{
-			Role:    "user",
+			Role:    string(MessageTypeUser),
 			Content: prompt,
 		},
 	}

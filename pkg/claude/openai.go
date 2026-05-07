@@ -258,7 +258,7 @@ func convertAssistantMessage(msg StreamMessage) *OpenAIMessage {
 }
 
 func buildAssistantFromBlocks(blocks []openaiContentBlock) *OpenAIMessage {
-	m := &OpenAIMessage{Role: "assistant"}
+	m := &OpenAIMessage{Role: string(MessageTypeAssistant)}
 
 	var textParts []string
 	var thinkingParts []string
@@ -276,7 +276,7 @@ func buildAssistantFromBlocks(blocks []openaiContentBlock) *OpenAIMessage {
 			}
 			m.ToolCalls = append(m.ToolCalls, OpenAIToolCall{
 				ID:   block.ID,
-				Type: "function",
+				Type: openAIToolTypeFunction,
 				Function: OpenAIFunction{
 					Name:      block.Name,
 					Arguments: argsStr,
@@ -311,7 +311,7 @@ func buildAssistantFromBlocks(blocks []openaiContentBlock) *OpenAIMessage {
 }
 
 func buildAssistantFromFlat(msg StreamMessage) *OpenAIMessage {
-	m := &OpenAIMessage{Role: "assistant"}
+	m := &OpenAIMessage{Role: string(MessageTypeAssistant)}
 
 	switch msg.Subtype {
 	case SubtypeText:
@@ -325,7 +325,7 @@ func buildAssistantFromFlat(msg StreamMessage) *OpenAIMessage {
 		}
 		m.ToolCalls = append(m.ToolCalls, OpenAIToolCall{
 			ID:   msg.ToolID,
-			Type: "function",
+			Type: openAIToolTypeFunction,
 			Function: OpenAIFunction{
 				Name:      msg.ToolName,
 				Arguments: argsStr,
@@ -396,7 +396,7 @@ type userMessageEnvelope struct {
 func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 	// If it's a synthetic user message with Text set directly (injected prompt).
 	if msg.Text != "" && len(msg.Message) == 0 {
-		return []OpenAIMessage{{Role: "user", Content: strPtr(msg.Text)}}
+		return []OpenAIMessage{{Role: string(MessageTypeUser), Content: strPtr(msg.Text)}}
 	}
 
 	if len(msg.Message) == 0 {
@@ -415,7 +415,7 @@ func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 		// Try as a plain string.
 		var s string
 		if err := json.Unmarshal(env.Content, &s); err == nil && s != "" {
-			return []OpenAIMessage{{Role: "user", Content: &s}}
+			return []OpenAIMessage{{Role: string(MessageTypeUser), Content: &s}}
 		}
 		return nil
 	}
@@ -425,17 +425,17 @@ func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 
 	for _, block := range blocks {
 		switch block.Type {
-		case "tool_result":
+		case contentBlockToolResult:
 			content := extractToolResultContent(block.Content)
 			if content == "" {
 				content = block.Text
 			}
 			result = append(result, OpenAIMessage{
-				Role:       "tool",
+				Role:       roleTool,
 				Content:    &content,
 				ToolCallID: block.ToolUseID,
 			})
-		case "text":
+		case string(SubtypeText):
 			if block.Text != "" {
 				textParts = append(textParts, block.Text)
 			}
@@ -445,7 +445,7 @@ func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 	// If there were text blocks (no tool results mixed), emit a single user message.
 	if len(textParts) > 0 {
 		joined := joinStrings(textParts)
-		result = append([]OpenAIMessage{{Role: "user", Content: &joined}}, result...)
+		result = append([]OpenAIMessage{{Role: string(MessageTypeUser), Content: &joined}}, result...)
 	}
 
 	return result
@@ -457,11 +457,11 @@ func convertUserMessage(msg StreamMessage) []OpenAIMessage {
 // prompt. The Claude CLI does not echo user input on stdout, so this must be
 // injected into liveMessages before writing the prompt to stdin.
 func syntheticUserMessage(prompt string) StreamMessage {
-	userContent := []map[string]string{{"type": "text", "text": prompt}}
+	userContent := []map[string]string{{"type": string(SubtypeText), "text": prompt}}
 	raw, _ := json.Marshal(map[string]interface{}{
-		"type": "user",
+		"type": string(MessageTypeUser),
 		"message": map[string]interface{}{
-			"role":    "user",
+			"role":    string(MessageTypeUser),
 			"content": userContent,
 		},
 	})

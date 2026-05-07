@@ -14,6 +14,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// argMessage is the name of the prompt argument shared between the prompt tool
+// definition, request parsing, and progress notification payloads.
+const argMessage = "message"
+
 // RegisterTools registers all MCP tools on the given server. The serverCtx
 // controls the lifetime of background drain goroutines spawned by non-blocking
 // prompt submissions; it should be cancelled during server shutdown to ensure
@@ -33,7 +37,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 		mcp.WithDescription("Send a prompt to the Claude Code agent. "+
 			"By default, the task runs asynchronously -- use the status tool to check progress and get the result. "+
 			"Set blocking=true to wait for the task to complete and return the full result inline."),
-		mcp.WithString("message",
+		mcp.WithString(argMessage,
 			mcp.Required(),
 			mcp.Description("The prompt or task description to send to the Claude agent"),
 		),
@@ -71,7 +75,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		message, err := request.RequireString("message")
+		message, err := request.RequireString(argMessage)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -210,7 +214,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 							map[string]any{
 								"progressToken": progressToken,
 								"progress":      progressCount,
-								"message":       msg.DeltaText,
+								argMessage:      msg.DeltaText,
 							},
 						)
 					}
@@ -230,7 +234,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 							map[string]any{
 								"progressToken": progressToken,
 								"progress":      progressCount,
-								"message":       progressMsg,
+								argMessage:      progressMsg,
 							},
 						)
 					}
