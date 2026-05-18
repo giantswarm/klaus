@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Bump `giantswarm/architect` orb to `8.1.0` and migrate all 12 image pushes from the deprecated `push-to-registries-multiarch` job to `push-to-registries` with `multiarch: true`. Picks up the v8.1.0 QEMU/binfmt auto-registration, hardened buildx bootstrap, and standard OCI image labels.
+
 ### Security
 
 - Bump Go to `1.26.3` (in `go.mod` and the `golang:` builder image in `Dockerfile`/`Dockerfile.debian`) and `golang.org/x/net` to `v0.53.0`, clearing four standard-library vulnerabilities (GO-2026-4971, GO-2026-4918, and two related entries affecting `net` / `net/http`) and two `golang.org/x/net` vulnerabilities flagged by `govulncheck` in CI.
