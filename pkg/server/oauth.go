@@ -14,6 +14,8 @@ import (
 	"time"
 
 	oauth "github.com/giantswarm/mcp-oauth"
+	"github.com/giantswarm/mcp-oauth/handler"
+	"github.com/giantswarm/mcp-oauth/instrumentation"
 	"github.com/giantswarm/mcp-oauth/providers"
 	"github.com/giantswarm/mcp-oauth/providers/dex"
 	"github.com/giantswarm/mcp-oauth/providers/google"
@@ -202,7 +204,7 @@ type OAuthServer struct {
 	serverCtx    context.Context
 	process      claudepkg.Prompter
 	oauthServer  *oauth.Server
-	oauthHandler *oauth.Handler
+	oauthHandler *handler.Handler
 	httpServer   *http.Server
 	ownerSubject string
 }
@@ -217,7 +219,7 @@ func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, confi
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
 	}
 
-	oauthHandler := oauth.NewHandler(oauthSrv, oauthSrv.Logger)
+	oauthHandler := handler.New(oauthSrv, oauthSrv.Logger)
 
 	return &OAuthServer{
 		serverCtx:    serverCtx,
@@ -395,14 +397,49 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		// Trusted scheme registration.
 		TrustedPublicRegistrationSchemes: config.Security.TrustedPublicRegistrationSchemes,
 		DisableStrictSchemeMatching:      config.Security.DisableStrictSchemeMatching,
-
-		// Instrumentation.
-		Instrumentation: oauthserver.InstrumentationConfig{
-			Enabled:        true,
-			ServiceName:    serviceNameKlaus,
-			ServiceVersion: project.Version(),
-		},
 	}
+
+	var opts []oauth.ServerOption
+
+	// Instrumentation.
+	inst, err := instrumentation.New(instrumentation.Config{
+		Enabled:        true,
+		ServiceName:    serviceNameKlaus,
+		ServiceVersion: project.Version(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create instrumentation: %w", err)
+	}
+	opts = append(opts, oauth.WithInstrumentation(inst))
+
+	// Set up encryption if key provided.
+	if len(config.Security.EncryptionKey) > 0 {
+		encryptor, err := security.NewEncryptor(config.Security.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create encryptor: %w", err)
+		}
+		opts = append(opts, oauth.WithEncryptor(encryptor))
+		logger.Info("Token encryption at rest enabled (AES-256-GCM)")
+	}
+
+	// Set up audit logging.
+	auditor := security.NewAuditor(logger, true)
+	opts = append(opts, oauth.WithAuditor(auditor))
+
+	// Set up rate limiting.
+	ipRateLimiter := security.NewRateLimiter(DefaultIPRateLimit, DefaultIPBurst, logger)
+	opts = append(opts, oauth.WithRateLimiter(ipRateLimiter))
+
+	userRateLimiter := security.NewRateLimiter(DefaultUserRateLimit, DefaultUserBurst, logger)
+	opts = append(opts, oauth.WithUserRateLimiter(userRateLimiter))
+
+	clientRegRL := security.NewClientRegistrationRateLimiterWithConfig(
+		maxClientsPerIP,
+		security.DefaultRegistrationWindow,
+		security.DefaultMaxRegistrationEntries,
+		logger,
+	)
+	opts = append(opts, oauth.WithClientRegistrationRateLimiter(clientRegRL))
 
 	srv, err := oauth.NewServer(
 		provider,
@@ -411,39 +448,11 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		flowStore,
 		serverConfig,
 		logger,
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
 	}
-
-	// Set up encryption if key provided.
-	if len(config.Security.EncryptionKey) > 0 {
-		encryptor, err := security.NewEncryptor(config.Security.EncryptionKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create encryptor: %w", err)
-		}
-		srv.SetEncryptor(encryptor)
-		logger.Info("Token encryption at rest enabled (AES-256-GCM)")
-	}
-
-	// Set up audit logging.
-	auditor := security.NewAuditor(logger, true)
-	srv.SetAuditor(auditor)
-
-	// Set up rate limiting.
-	ipRateLimiter := security.NewRateLimiter(DefaultIPRateLimit, DefaultIPBurst, logger)
-	srv.SetRateLimiter(ipRateLimiter)
-
-	userRateLimiter := security.NewRateLimiter(DefaultUserRateLimit, DefaultUserBurst, logger)
-	srv.SetUserRateLimiter(userRateLimiter)
-
-	clientRegRL := security.NewClientRegistrationRateLimiterWithConfig(
-		maxClientsPerIP,
-		security.DefaultRegistrationWindow,
-		security.DefaultMaxRegistrationEntries,
-		logger,
-	)
-	srv.SetClientRegistrationRateLimiter(clientRegRL)
 
 	return srv, nil
 }
