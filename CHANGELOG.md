@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Enable `split-china-push: true` on the four tag-build `push-to-registries-release` jobs (klaus, klaus-debian, klaus-toolchains/base, klaus-toolchains/base-debian) and add four companion `sync-china-registry` jobs. The cross-Pacific `docker buildx` push to the Aliyun mirror (which timed out for ~10 minutes per image and failed the tag job) is replaced with `regctl image copy` from gsoci to Aliyun executed on the in-China `giantswarm/galaxy-runner` self-hosted CircleCI runner. The chart-catalog publish and downstream notify chains no longer wait on Aliyun.
 - Bump `giantswarm/architect` orb to `8.1.0` and migrate all 12 image pushes from the deprecated `push-to-registries-multiarch` job to `push-to-registries` with `multiarch: true`. Picks up the v8.1.0 QEMU/binfmt auto-registration, hardened buildx bootstrap, and standard OCI image labels.
 
 ### Security

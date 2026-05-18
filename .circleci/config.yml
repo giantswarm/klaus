@@ -168,11 +168,14 @@ workflows:
           branches:
             only: main
 
-    # Tag builds: full multi-arch (amd64 + arm64)
+    # Tag builds: full multi-arch (amd64 + arm64). split-china-push skips the
+    # Aliyun mirror on the buildx push; sync-china-registry jobs below mirror
+    # each image variant gsoci -> Aliyun via the in-China galaxy-runner.
     - architect/push-to-registries:
         context: architect
         multiarch: true
         name: push-to-registries-release
+        split-china-push: true
         requires:
         - go-build-klaus
         filters:
@@ -187,6 +190,7 @@ workflows:
         name: push-to-registries-debian-release
         image: giantswarm/klaus-debian
         dockerfile: ./Dockerfile.debian
+        split-china-push: true
         requires:
         - go-build-klaus
         filters:
@@ -201,6 +205,7 @@ workflows:
         multiarch: true
         name: push-to-toolchains-release
         image: giantswarm/klaus-toolchains/base
+        split-china-push: true
         requires:
         - go-build-klaus
         filters:
@@ -215,8 +220,59 @@ workflows:
         name: push-to-toolchains-debian-release
         image: giantswarm/klaus-toolchains/base-debian
         dockerfile: ./Dockerfile.debian
+        split-china-push: true
         requires:
         - go-build-klaus
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # Mirror each image variant gsoci -> Aliyun via the in-China
+    # giantswarm/galaxy-runner. Runs in parallel with notify-downstream and
+    # the chart catalog push; an Aliyun mirror failure does NOT block them.
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-klaus
+        requires:
+        - push-to-registries-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-klaus-debian
+        image: giantswarm/klaus-debian
+        requires:
+        - push-to-registries-debian-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-toolchains-base
+        image: giantswarm/klaus-toolchains/base
+        requires:
+        - push-to-toolchains-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-toolchains-base-debian
+        image: giantswarm/klaus-toolchains/base-debian
+        requires:
+        - push-to-toolchains-debian-release
         filters:
           tags:
             only: /^v.*/
