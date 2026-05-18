@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/creativeprojects/go-selfupdate v1.5.2
-	github.com/giantswarm/mcp-oauth v0.2.119
+	github.com/giantswarm/mcp-oauth v0.2.140
 	github.com/mark3labs/mcp-go v0.54.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
@@ -22,9 +22,9 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/go-fed/httpsig v1.1.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-github/v74 v74.0.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
