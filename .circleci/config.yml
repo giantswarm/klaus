@@ -1,6 +1,6 @@
 version: 2.1
 orbs:
-  architect: giantswarm/architect@8.2.1
+  architect: giantswarm/architect@8.2.2
 
 jobs:
   notify-downstream:
@@ -295,7 +295,6 @@ workflows:
 
     - architect/push-to-app-catalog:
         executor: app-build-suite
-        sign: false
         context: architect
         name: build-klaus-chart
         app_catalog: giantswarm-catalog
@@ -327,7 +326,6 @@ workflows:
     # Branch: push chart after tests + amd64 images
     - architect/push-to-app-catalog:
         executor: app-build-suite
-        sign: false
         context: architect
         name: push-klaus-to-giantswarm-app-catalog
         app_catalog: giantswarm-catalog
@@ -347,7 +345,6 @@ workflows:
     # Tag: push chart after tests + multi-arch images
     - architect/push-to-app-catalog:
         executor: app-build-suite
-        sign: false
         context: architect
         name: push-klaus-to-giantswarm-app-catalog-release
         app_catalog: giantswarm-catalog
