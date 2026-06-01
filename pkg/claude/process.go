@@ -126,6 +126,8 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.SessionID != "" {
 		opts.SessionID = ro.SessionID
+		// A named session must be persisted so --continue can resume it on the next turn.
+		opts.NoSessionPersistence = false
 	}
 	if ro.Resume != "" {
 		opts.Resume = ro.Resume

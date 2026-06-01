@@ -760,6 +760,18 @@ func TestProcess_MergedOpts(t *testing.T) {
 		}
 	})
 
+	t.Run("SessionID disables NoSessionPersistence", func(t *testing.T) {
+		runOpts := &RunOptions{SessionID: "test-session-uuid"}
+		merged := process.mergedOpts(runOpts)
+		if merged.SessionID != "test-session-uuid" {
+			t.Errorf("expected session id %q, got %q", "test-session-uuid", merged.SessionID)
+		}
+		// A named session must be persisted so --continue can resume it on the next turn.
+		if merged.NoSessionPersistence {
+			t.Error("expected NoSessionPersistence to be false when SessionID is set")
+		}
+	})
+
 	t.Run("ForkSession overrides base", func(t *testing.T) {
 		runOpts := &RunOptions{ForkSession: true}
 		merged := process.mergedOpts(runOpts)
