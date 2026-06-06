@@ -12,12 +12,15 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
+	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
+	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
 const (
@@ -186,6 +189,20 @@ pkg/config for the full Config struct and supported fields.`,
 
 // runServe contains the main server logic, now driven by the structured Config.
 func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig server.OAuthConfig) error {
+	// Set up OTel tracing. No-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+	_, telShutdown, err := telemetry.Setup(context.Background(), project.Name, project.Version())
+	if err != nil {
+		log.Printf("WARNING: OTel setup failed, tracing disabled: %v", err)
+		telShutdown = func(_ context.Context) error { return nil }
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := telShutdown(ctx); shutdownErr != nil {
+			log.Printf("WARNING: OTel shutdown error: %v", shutdownErr)
+		}
+	}()
+
 	// Build Claude options from config struct.
 	opts := claude.DefaultOptions()
 
