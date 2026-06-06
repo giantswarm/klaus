@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,7 +115,7 @@ func makeReqCtx(contextID string, text string) *a2asrv.RequestContext {
 func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	prompter := &fakePrompter{result: "done"}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-1", "/clear please clear the context")
@@ -140,7 +141,7 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 func TestExecutor_EmptyText(t *testing.T) {
 	prompter := &fakePrompter{}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-2", "")
@@ -158,7 +159,7 @@ func TestExecutor_EmptyText(t *testing.T) {
 func TestExecutor_BusyReturnsRejected(t *testing.T) {
 	prompter := &fakePrompter{runErr: claude.ErrBusy}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-3", "hello")
@@ -185,7 +186,7 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 		},
 	}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-4", "What is the answer?")
@@ -207,6 +208,18 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 	sessID, err := store.SessionID(t.Context(), "ctx-4")
 	require.NoError(t, err)
 	assert.Equal(t, "sess-abc", sessID)
+
+	// Conversation turns are recorded asynchronously; give them time to land.
+	require.Eventually(t, func() bool {
+		turns, histErr := store.History(t.Context(), "ctx-4")
+		return histErr == nil && len(turns) >= 2
+	}, 2*time.Second, 5*time.Millisecond)
+
+	turns, err := store.History(t.Context(), "ctx-4")
+	require.NoError(t, err)
+	require.Len(t, turns, 2)
+	assert.Equal(t, "user", turns[0].Role)
+	assert.Equal(t, "assistant", turns[1].Role)
 }
 
 func TestExecutor_ConcurrentContextRejected(t *testing.T) {
@@ -218,7 +231,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 	blocker := &blockingPrompter{fakePrompter: prompter, block: blocked}
 
 	store := session.NewMemoryStore()
-	exec := a2a.New(blocker, store, a2a.ModeChat)
+	exec := a2a.New(blocker, store, a2a.ModeChat, nil)
 
 	// First request: holds the lock.
 	ctx1, cancel1 := context.WithCancel(t.Context())
@@ -256,7 +269,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 func TestExecutor_Cancel(t *testing.T) {
 	prompter := &fakePrompter{}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-cancel", "")
@@ -306,7 +319,7 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 		},
 	}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeAgent)
+	exec := a2a.New(prompter, store, a2a.ModeAgent, nil)
 
 	// First turn — no prior session.
 	q1 := &captureQueue{}

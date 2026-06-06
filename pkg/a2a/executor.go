@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"github.com/a2aproject/a2a-go/a2asrv/eventqueue"
 
 	"github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/kagentapi"
 	"github.com/giantswarm/klaus/pkg/session"
 	"github.com/giantswarm/klaus/pkg/telemetry"
 )
@@ -38,6 +40,7 @@ const (
 type Executor struct {
 	prompter claude.Prompter
 	store    session.Store
+	kagent   *kagentapi.Client
 	mode     Mode
 
 	// mu protects contextMu.
@@ -52,11 +55,13 @@ var _ a2asrv.AgentExecutor = (*Executor)(nil)
 
 // New returns an Executor. prompter may be either a *claude.Process (agent
 // mode) or a *claude.PersistentProcess (chat mode). store persists
-// contextID→sessionID bindings across turns.
-func New(prompter claude.Prompter, store session.Store, mode Mode) *Executor {
+// contextID→sessionID bindings across turns. kagentClient may be nil; when
+// non-nil and enabled, completed turns are pushed to the kagent UI.
+func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient *kagentapi.Client) *Executor {
 	return &Executor{
 		prompter:  prompter,
 		store:     store,
+		kagent:    kagentClient,
 		mode:      mode,
 		contextMu: make(map[string]*sync.Mutex),
 	}
@@ -165,6 +170,10 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		}
 	}
 
+	// Record user prompt and assistant reply as conversation turns. Both
+	// writes are async and best-effort so they never block the response path.
+	e.recordTurns(contextID, sessionID, text, result)
+
 	if status.Status == claude.ProcessStatusError {
 		errMsg := status.ErrorMessage
 		if errMsg == "" {
@@ -227,6 +236,48 @@ func (e *Executor) runOptions(ctx context.Context, contextID string) (*claude.Ru
 		Resume:      sessionID,
 		SaveSession: true,
 	}, nil
+}
+
+// recordTurns persists the user prompt and assistant reply as conversation
+// turns in the store, then pushes them to the kagent UI. Both operations are
+// async and best-effort: failures are logged only, never returned.
+func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if userText != "" {
+			userContent, _ := json.Marshal(userText)
+			if err := e.store.AppendTurn(ctx, session.Turn{
+				ContextID: contextID,
+				SessionID: sessionID,
+				Role:      "user",
+				Content:   userContent,
+				TS:        time.Now(),
+			}); err != nil {
+				log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
+			}
+			if e.kagent != nil && sessionID != "" {
+				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "user", Content: userText})
+			}
+		}
+
+		if assistantText != "" {
+			assistantContent, _ := json.Marshal(assistantText)
+			if err := e.store.AppendTurn(ctx, session.Turn{
+				ContextID: contextID,
+				SessionID: sessionID,
+				Role:      "assistant",
+				Content:   assistantContent,
+				TS:        time.Now(),
+			}); err != nil {
+				log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
+			}
+			if e.kagent != nil && sessionID != "" {
+				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "assistant", Content: assistantText})
+			}
+		}
+	}()
 }
 
 // lockForContext returns (and lazily creates) the per-contextID mutex. The

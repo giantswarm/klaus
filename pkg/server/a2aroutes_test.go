@@ -21,6 +21,7 @@ func newTestExecutor() *a2a.Executor {
 		&mockPrompter{status: claude.StatusInfo{Status: claude.ProcessStatusIdle}},
 		session.NewMemoryStore(),
 		a2a.ModeChat,
+		nil,
 	)
 }
 

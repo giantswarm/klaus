@@ -19,8 +19,10 @@ import (
 	"github.com/giantswarm/mcp-toolkit/logging"
 	"github.com/giantswarm/mcp-toolkit/tracing"
 
+	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
+	"github.com/giantswarm/klaus/pkg/kagentapi"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
 	"github.com/giantswarm/klaus/pkg/session"
@@ -365,10 +367,24 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		mode = server.ModeChat
 	}
 
+	// Build kagent client (no-op when KAGENT_API_ENDPOINT is unset).
+	kagentClient := kagentapi.New(os.Getenv("KAGENT_API_ENDPOINT"))
+	if kagentClient.Enabled() {
+		log.Printf("kagent session-events push enabled (endpoint: %s)", os.Getenv("KAGENT_API_ENDPOINT")) //nolint:gosec
+	}
+
+	// Build the A2A executor.
+	a2aMode := a2apkg.ModeChat
+	if cfg.Claude.Mode != server.ModeChat {
+		a2aMode = a2apkg.ModeAgent
+	}
+	executor := a2apkg.New(process, sessionStore, a2aMode, kagentClient)
+
 	srvCfg := server.Config{
 		Port:         listenPort,
 		Mode:         mode,
 		OwnerSubject: cfg.Server.OwnerSubject,
+		Executor:     executor,
 	}
 
 	if enableOAuth {
@@ -393,7 +409,7 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server
 		slog.Warn("OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(serverCtx, process, nil, config, cfg.OwnerSubject)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, cfg.Executor, config, cfg.OwnerSubject)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}
