@@ -23,6 +23,7 @@ import (
 	"github.com/giantswarm/klaus/pkg/config"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
+	"github.com/giantswarm/klaus/pkg/session"
 )
 
 const (
@@ -317,6 +318,21 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	} else if os.Getenv("KLAUS_SOUL_FILE") != "" {
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
+
+	// Build the session store. Defaults to local backend; Postgres is used when
+	// KLAUS_RESULT_BACKEND=postgres and KLAUS_PG_DSN is set.
+	sessionStore, err := session.NewStore(context.Background())
+	if err != nil {
+		return fmt.Errorf("initialising session store: %w", err)
+	}
+	if closer, ok := sessionStore.(interface{ Close() error }); ok {
+		defer func() {
+			if cerr := closer.Close(); cerr != nil {
+				slog.Warn("session store close error", "error", cerr)
+			}
+		}()
+	}
+	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore), "backend", os.Getenv("KLAUS_RESULT_BACKEND"))
 
 	// Create the Claude process manager.
 	// Note: permissionMode and effort are already validated by cfg.Validate()
