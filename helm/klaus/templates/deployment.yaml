@@ -256,6 +256,15 @@ spec:
             # Operating mode
             - name: CLAUDE_MODE
               value: {{ .Values.claude.mode | quote }}
+            # Subprocess watchdog retry
+            {{- if .Values.claude.retryMaxAttempts }}
+            - name: KLAUS_RETRY_MAX_ATTEMPTS
+              value: {{ .Values.claude.retryMaxAttempts | quote }}
+            {{- end }}
+            {{- if .Values.claude.retryBaseBackoff }}
+            - name: KLAUS_RETRY_BASE_BACKOFF
+              value: {{ .Values.claude.retryBaseBackoff | quote }}
+            {{- end }}
             # OpenTelemetry monitoring (Claude Code native telemetry)
             {{- if .Values.telemetry.enabled }}
             - name: CLAUDE_CODE_ENABLE_TELEMETRY
@@ -302,6 +311,63 @@ spec:
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: {{ .Values.telemetry.resourceAttributes | quote }}
             {{- end }}
+            {{- end }}
+            # Session store
+            {{- if .Values.session.backend }}
+            - name: KLAUS_RESULT_BACKEND
+              value: {{ .Values.session.backend | quote }}
+            {{- end }}
+            {{- if .Values.session.postgresSecretName }}
+            - name: KLAUS_PG_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.session.postgresSecretName }}
+                  key: {{ .Values.session.postgresSecretKey }}
+            {{- end }}
+            {{- if .Values.session.dir }}
+            - name: KLAUS_SESSION_DIR
+              value: {{ .Values.session.dir | quote }}
+            {{- end }}
+            {{- if .Values.session.contextID }}
+            - name: CLAUDE_CONTEXT_ID
+              value: {{ .Values.session.contextID | quote }}
+            {{- end }}
+            {{- if .Values.session.sessionID }}
+            - name: CLAUDE_SESSION_ID
+              value: {{ .Values.session.sessionID | quote }}
+            {{- end }}
+            # kagent integration
+            {{- if .Values.kagent.endpoint }}
+            - name: KAGENT_API_ENDPOINT
+              value: {{ .Values.kagent.endpoint | quote }}
+            {{- end }}
+            # Memory augmentation
+            {{- if .Values.memory.kagentEndpoint }}
+            - name: KAGENT_MEMORY_ENDPOINT
+              value: {{ .Values.memory.kagentEndpoint | quote }}
+            {{- end }}
+            {{- if .Values.memory.agentName }}
+            - name: KAGENT_MEMORY_AGENT_NAME
+              value: {{ .Values.memory.agentName | quote }}
+            {{- end }}
+            {{- if .Values.memory.userID }}
+            - name: KAGENT_MEMORY_USER_ID
+              value: {{ .Values.memory.userID | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.endpoint }}
+            - name: KLAUD_EMBEDDING_ENDPOINT
+              value: {{ .Values.memory.embedding.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.model }}
+            - name: KLAUD_EMBEDDING_MODEL
+              value: {{ .Values.memory.embedding.model | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.secretName }}
+            - name: KLAUD_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.memory.embedding.secretName }}
+                  key: {{ .Values.memory.embedding.secretKey }}
             {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}

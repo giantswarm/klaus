@@ -94,6 +94,13 @@ type ClaudeConfig struct {
 	// agent: single-shot Process subprocess with --no-session-persistence.
 	// chat: PersistentProcess subprocess with sessions saved to disk.
 	Mode string `yaml:"mode"`
+
+	// RetryMaxAttempts is the maximum subprocess restart attempts by the watchdog.
+	// 0 means use the default (3).
+	RetryMaxAttempts int `yaml:"retryMaxAttempts"`
+	// RetryBaseBackoff is the initial backoff before the first restart (e.g. "2s").
+	// Each subsequent attempt doubles the duration. Empty means use the default (2s).
+	RetryBaseBackoff string `yaml:"retryBaseBackoff"`
 }
 
 // ServerConfig holds settings consumed by the klaus server process itself
@@ -226,6 +233,8 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideString(&cfg.Claude.Agents, "CLAUDE_AGENTS")
 	envOverrideString(&cfg.Claude.ActiveAgent, "CLAUDE_ACTIVE_AGENT")
 	envOverrideString(&cfg.Claude.Mode, "CLAUDE_MODE")
+	envOverrideInt(&cfg.Claude.RetryMaxAttempts, "KLAUS_RETRY_MAX_ATTEMPTS")
+	envOverrideString(&cfg.Claude.RetryBaseBackoff, "KLAUS_RETRY_BASE_BACKOFF")
 
 	// Server settings.
 	envOverrideString(&cfg.Server.Port, "PORT")

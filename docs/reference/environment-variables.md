@@ -63,6 +63,50 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 | `CLAUDE_SETTING_SOURCES` | Setting sources to load (comma-separated) | -- |
 | `CLAUDE_PLUGIN_DIRS` | Plugin directories (comma-separated) | -- |
 
+## Subprocess retry
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KLAUS_RETRY_MAX_ATTEMPTS` | Maximum subprocess restart attempts by the watchdog | `3` |
+| `KLAUS_RETRY_BASE_BACKOFF` | Initial backoff before first restart (e.g. `2s`); doubles each attempt | `2s` |
+
+## Session store
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KLAUS_RESULT_BACKEND` | Session backend: `local`, `postgres`, or `memory` | `local` |
+| `KLAUS_PG_DSN` | PostgreSQL DSN; required when `KLAUS_RESULT_BACKEND=postgres` | -- |
+| `KLAUS_SESSION_DIR` | Override directory for the local backend | -- |
+| `CLAUDE_CONTEXT_ID` | Pre-seed context ID at startup | -- |
+| `CLAUDE_SESSION_ID` | Pre-seed session ID at startup; also passed as `--resume` in chat mode | -- |
+
+## kagent
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KAGENT_API_ENDPOINT` | kagent controller base URL; enables A2A turn push to the kagent UI | -- |
+
+## Memory augmentation
+
+Requires `KAGENT_MEMORY_ENDPOINT` and `KLAUD_EMBEDDING_MODEL` to be set. When either is absent, memory is silently disabled.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KAGENT_MEMORY_ENDPOINT` | kagent controller base URL for memory storage/retrieval | -- |
+| `KAGENT_MEMORY_AGENT_NAME` | Agent identifier for memory attribution | `klaus` |
+| `KAGENT_MEMORY_USER_ID` | User identifier for memory attribution | `default` |
+| `KLAUD_EMBEDDING_ENDPOINT` | OpenAI-compatible embedding base URL | `https://api.openai.com/v1` |
+| `KLAUD_EMBEDDING_MODEL` | Embedding model name (e.g. `text-embedding-3-small`); required to enable memory | -- |
+| `KLAUD_EMBEDDING_API_KEY` | API key for the embedding endpoint; omit for unauthenticated endpoints | -- |
+
+## OTel tracing (server-side)
+
+Klaus exports its own traces (A2A task lifecycle, subprocess restarts) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. The Claude Code subprocess has its own OTel env vars (see [Telemetry](../telemetry.md)).
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint; leave unset to disable | -- |
+
 ## Server
 
 | Variable | Description | Default |
@@ -79,3 +123,4 @@ The following variables are validated at startup:
 - `CLAUDE_PERMISSION_MODE` must be a valid mode
 - `CLAUDE_MAX_TURNS` must be >= 0
 - `CLAUDE_MAX_BUDGET_USD` must be >= 0
+- `KLAUS_RETRY_BASE_BACKOFF` must be a valid Go duration (e.g. `2s`, `500ms`)

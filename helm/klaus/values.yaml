@@ -221,6 +221,14 @@ claude:
   #       sessions saved to disk (interactive multi-turn chat).
   mode: agent
 
+  # -- Subprocess watchdog retry --
+  # retryMaxAttempts is the maximum number of subprocess restarts by the watchdog.
+  # 0 means use the default (3).
+  retryMaxAttempts: 0
+  # retryBaseBackoff is the initial backoff before the first restart (e.g. "2s").
+  # Each subsequent attempt doubles the duration. Empty means use the default (2s).
+  retryBaseBackoff: ""
+
 # Owner-based access control.
 # When set, only the user whose JWT sub or email claim matches this value
 # can access the /mcp endpoint. Other authenticated users receive HTTP 403.
@@ -275,6 +283,61 @@ workspace:
   #       cpu: 500m
   #       memory: 512Mi
   gitResources: {}
+
+# Session store configuration.
+# Maps A2A context IDs to Claude session IDs and stores conversation turn history.
+session:
+  # backend selects the session store: "local" (filesystem), "postgres", or "memory".
+  # "memory" is for testing only — all state is lost on pod restart.
+  backend: "local"
+  # postgresSecretName references a Kubernetes Secret containing the Postgres DSN
+  # (key specified by postgresSecretKey). Required when backend=postgres.
+  postgresSecretName: ""
+  postgresSecretKey: "dsn"
+  # dir overrides the directory used by the local backend.
+  # Defaults to $HOME/.claude/projects when empty.
+  dir: ""
+  # contextID and sessionID pre-seed the session store at startup.
+  # Set these when the pod should resume a specific conversation without
+  # requiring a first-turn round-trip. In chat mode, sessionID is also passed
+  # as --resume to the Claude subprocess.
+  contextID: ""
+  sessionID: ""
+
+# kagent integration.
+# When endpoint is set, completed A2A turns are pushed to the kagent
+# session-events API so that conversations appear in the kagent UI.
+kagent:
+  # endpoint is the kagent controller base URL (e.g. http://kagent.kagent.svc).
+  endpoint: ""
+
+# Memory augmentation.
+# Before each A2A turn, relevant chunks from previous sessions are retrieved
+# and prepended to the user prompt. Turns are stored after each round.
+# Requires both kagentEndpoint and embedding.model to be set.
+memory:
+  # kagentEndpoint is the kagent controller base URL for memory storage/retrieval.
+  # Uses the pgvector-backed memory API. Leave empty to disable memory augmentation.
+  kagentEndpoint: ""
+  # agentName is the agent identifier used when storing memory entries.
+  agentName: "klaus"
+  # userID is the user identifier for memory attribution.
+  userID: "default"
+  # embedding configures the OpenAI-compatible embedding endpoint used to generate
+  # 768-dim vectors for similarity search. model is required; endpoint defaults
+  # to the OpenAI API.
+  embedding:
+    # endpoint is the OpenAI-compatible base URL.
+    # Defaults to https://api.openai.com/v1 when empty.
+    endpoint: ""
+    # model is the embedding model name (e.g. "text-embedding-3-small").
+    # Required to enable memory augmentation; leaving this empty disables memory
+    # even when kagentEndpoint is set.
+    model: ""
+    # secretName references a Kubernetes Secret containing the embedding API key.
+    # Leave empty for unauthenticated endpoints (e.g. a local vLLM instance).
+    secretName: ""
+    secretKey: "api-key"
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its

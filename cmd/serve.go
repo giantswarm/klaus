@@ -299,6 +299,16 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.ActiveAgent != "" {
 		opts.ActiveAgent = cfg.Claude.ActiveAgent
 	}
+	if cfg.Claude.RetryMaxAttempts > 0 {
+		opts.RetryMaxAttempts = cfg.Claude.RetryMaxAttempts
+	}
+	if cfg.Claude.RetryBaseBackoff != "" {
+		if d, parseErr := time.ParseDuration(cfg.Claude.RetryBaseBackoff); parseErr == nil {
+			opts.RetryBaseBackoff = d
+		} else {
+			log.Printf("WARNING: ignoring invalid KLAUS_RETRY_BASE_BACKOFF %q: %v", cfg.Claude.RetryBaseBackoff, parseErr)
+		}
+	}
 	// Derive NoSessionPersistence from mode: agent -> true, chat -> false.
 	// DefaultOptions() already sets NoSessionPersistence=true (agent default),
 	// so only override for chat mode.

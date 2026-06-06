@@ -79,6 +79,47 @@ claude:
   settingSources: ""          # comma-separated: "user,project,local"
 ```
 
+## Subprocess retry
+
+```yaml
+claude:
+  retryMaxAttempts: 0     # 0 = use default (3)
+  retryBaseBackoff: ""    # empty = use default (2s); e.g. "5s"
+```
+
+## Session store
+
+```yaml
+session:
+  backend: "local"          # local, postgres, or memory
+  postgresSecretName: ""    # Kubernetes Secret with Postgres DSN
+  postgresSecretKey: "dsn"
+  dir: ""                   # override for local backend
+  contextID: ""             # pre-seed context ID at startup
+  sessionID: ""             # pre-seed session ID; --resume in chat mode
+```
+
+## kagent
+
+```yaml
+kagent:
+  endpoint: ""              # kagent controller URL; enables turn push to kagent UI
+```
+
+## Memory augmentation
+
+```yaml
+memory:
+  kagentEndpoint: ""        # kagent controller URL for memory storage/retrieval
+  agentName: "klaus"
+  userID: "default"
+  embedding:
+    endpoint: ""            # OpenAI-compatible base URL (default: api.openai.com/v1)
+    model: ""               # required to enable memory (e.g. text-embedding-3-small)
+    secretName: ""          # Kubernetes Secret with embedding API key
+    secretKey: "api-key"
+```
+
 ## Workspace
 
 ```yaml
