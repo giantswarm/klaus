@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // AgentConfig defines a custom subagent for Claude Code.
@@ -121,6 +122,15 @@ type Options struct {
 	// Subagents found via AddDirs have lower priority than those in Agents (--agents).
 	// See https://code.claude.com/docs/en/sub-agents#choose-the-subagent-scope
 	AddDirs []string
+
+	// RetryMaxAttempts is the maximum number of times the persistent subprocess
+	// watchdog will restart with --resume on unexpected exit. 0 means unlimited
+	// (not recommended in production). Defaults to 3.
+	RetryMaxAttempts int
+	// RetryBaseBackoff is the initial backoff duration before the first restart
+	// attempt. Each subsequent attempt doubles the duration.
+	// Defaults to 2s.
+	RetryBaseBackoff time.Duration
 }
 
 // Permission modes recognised by the Claude Code CLI.
@@ -376,3 +386,33 @@ func (o Options) PersistentArgs() []string {
 	args = append(args, o.baseArgs()...)
 	return args
 }
+
+// persistentRestartArgs returns the CLI argument list for restarting a persistent
+// subprocess after an unexpected exit. It is identical to PersistentArgs but
+// appends --resume <sessionID> so the CLI continues the existing session rather
+// than starting a fresh one. Callers must only invoke this when sessionID is
+// non-empty; a cold start must use PersistentArgs instead.
+func (o Options) persistentRestartArgs(sessionID string) []string {
+	args := o.PersistentArgs()
+	args = append(args, "--resume", sessionID)
+	return args
+}
+
+// retryConfig returns the effective retry settings, applying defaults when the
+// Options fields are zero.
+func (o Options) retryConfig() (maxAttempts int, baseBackoff time.Duration) {
+	maxAttempts = o.RetryMaxAttempts
+	if maxAttempts == 0 {
+		maxAttempts = defaultRetryMaxAttempts
+	}
+	baseBackoff = o.RetryBaseBackoff
+	if baseBackoff == 0 {
+		baseBackoff = defaultRetryBaseBackoff
+	}
+	return maxAttempts, baseBackoff
+}
+
+const (
+	defaultRetryMaxAttempts = 3
+	defaultRetryBaseBackoff = 2 * time.Second
+)

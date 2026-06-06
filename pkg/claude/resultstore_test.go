@@ -336,20 +336,24 @@ func Test_resultStoreDir(t *testing.T) {
 
 func TestStopReasonFromStatus(t *testing.T) {
 	tests := []struct {
-		status   ProcessStatus
-		expected StopReason
+		status    ProcessStatus
+		lastError string
+		expected  StopReason
 	}{
-		{ProcessStatusCompleted, StopReasonCompleted},
-		{ProcessStatusIdle, StopReasonCompleted},
-		{ProcessStatusStopped, StopReasonStopped},
-		{ProcessStatusError, StopReasonError},
-		{ProcessStatusBusy, StopReasonCompleted},
+		{ProcessStatusCompleted, "", StopReasonCompleted},
+		{ProcessStatusIdle, "", StopReasonCompleted},
+		{ProcessStatusStopped, "", StopReasonStopped},
+		{ProcessStatusError, "", StopReasonError},
+		{ProcessStatusBusy, "", StopReasonCompleted},
+		// Budget exhaustion detected from error text.
+		{ProcessStatusError, "exceeded budget limit", StopReasonBudget},
+		{ProcessStatusError, "Budget exceeded: $5.00 limit reached", StopReasonBudget},
 	}
 
 	for _, tt := range tests {
-		got := stopReasonFromStatus(tt.status)
+		got := stopReasonFromStatus(tt.status, tt.lastError)
 		if got != tt.expected {
-			t.Errorf("stopReasonFromStatus(%q) = %q, want %q", tt.status, got, tt.expected)
+			t.Errorf("stopReasonFromStatus(%q, %q) = %q, want %q", tt.status, tt.lastError, got, tt.expected)
 		}
 	}
 }

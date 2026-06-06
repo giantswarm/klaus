@@ -234,6 +234,10 @@ type StatusInfo struct {
 	// acknowledgement; callers should track whether they have already
 	// processed a given result.
 	Result string `json:"result,omitempty"`
+	// RetryCount is the number of times the persistent subprocess has been
+	// restarted with --resume since the last successful turn completion.
+	// Non-zero only while a restart is in progress.
+	RetryCount int `json:"retry_count,omitempty"`
 }
 
 // ResultDetailInfo contains the full untruncated result and detailed metadata
