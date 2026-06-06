@@ -75,8 +75,25 @@ func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) 
 	}
 }
 
+// handleBusy reports whether the Claude subprocess is currently busy.
+// Returns 200 OK when idle/completed, 409 Conflict when busy.
+// This is the operator contract used by the A2A layer to signal to callers
+// that the process cannot accept new requests at this time.
+func handleBusy(process claudepkg.Prompter) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if process.Status().Status == claudepkg.ProcessStatusBusy {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = fmt.Fprintln(w, "busy")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, "idle")
+	}
+}
+
 func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string) {
 	mux.HandleFunc("/healthz", handleHealthz)
+	mux.HandleFunc("/healthz/busy", handleBusy(process))
 	mux.HandleFunc("/readyz", handleReadyz(process))
 	mux.HandleFunc("/status", handleStatus(process, mode, ownerSubject))
 	mux.Handle("/metrics", promhttp.Handler())

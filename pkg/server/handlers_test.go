@@ -242,13 +242,37 @@ func TestHandleStatus_WithOwner(t *testing.T) {
 	}
 }
 
+func TestHandleBusy_Idle(t *testing.T) {
+	process := &mockPrompter{status: claude.StatusInfo{Status: claude.ProcessStatusIdle}}
+	req := httptest.NewRequest(http.MethodGet, "/healthz/busy", nil)
+	w := httptest.NewRecorder()
+
+	handleBusy(process)(w, req)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Errorf("expected 200 when idle, got %d", w.Result().StatusCode)
+	}
+}
+
+func TestHandleBusy_Busy(t *testing.T) {
+	process := &mockPrompter{status: claude.StatusInfo{Status: claude.ProcessStatusBusy}}
+	req := httptest.NewRequest(http.MethodGet, "/healthz/busy", nil)
+	w := httptest.NewRecorder()
+
+	handleBusy(process)(w, req)
+
+	if w.Result().StatusCode != http.StatusConflict {
+		t.Errorf("expected 409 when busy, got %d", w.Result().StatusCode)
+	}
+}
+
 func TestRegisterOperationalRoutes(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
 	registerOperationalRoutes(mux, process, ModeAgent, "")
 
-	paths := []string{"/healthz", "/readyz", "/status", "/", "/metrics"}
+	paths := []string{"/healthz", "/readyz", "/status", "/", "/metrics", "/healthz/busy"}
 	for _, path := range paths {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()

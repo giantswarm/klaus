@@ -393,7 +393,7 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server
 		slog.Warn("OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config, cfg.OwnerSubject)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, nil, config, cfg.OwnerSubject)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}
