@@ -131,6 +131,12 @@ type Options struct {
 	// attempt. Each subsequent attempt doubles the duration.
 	// Defaults to 2s.
 	RetryBaseBackoff time.Duration
+
+	// ResumeSessionID, when set, passes --resume <id> at PersistentProcess
+	// startup. Use this to continue a named session after a pod restart without
+	// requiring a first-turn warm-up. Only applied via PersistentArgs; the
+	// single-shot Process uses RunOptions.Resume instead.
+	ResumeSessionID string
 }
 
 // Permission modes recognised by the Claude Code CLI.
@@ -374,6 +380,9 @@ func (o Options) args() []string {
 // It shares the base arguments with single-shot mode but adds --input-format stream-json
 // and --replay-user-messages, and omits session management flags since the persistent
 // subprocess maintains a single long-running session.
+//
+// When ResumeSessionID is set, --resume <id> is appended so the subprocess
+// continues an existing session from startup (e.g. after a pod restart).
 func (o Options) PersistentArgs() []string {
 	args := []string{
 		"--print",
@@ -384,6 +393,9 @@ func (o Options) PersistentArgs() []string {
 		"--include-partial-messages",
 	}
 	args = append(args, o.baseArgs()...)
+	if o.ResumeSessionID != "" {
+		args = append(args, "--resume", o.ResumeSessionID)
+	}
 	return args
 }
 

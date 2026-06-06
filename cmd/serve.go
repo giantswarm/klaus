@@ -23,6 +23,7 @@ import (
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
 	"github.com/giantswarm/klaus/pkg/kagentapi"
+	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
 	"github.com/giantswarm/klaus/pkg/session"
@@ -336,6 +337,27 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	}
 	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore), "backend", os.Getenv("KLAUS_RESULT_BACKEND"))
 
+	// Seed the session store when CLAUDE_CONTEXT_ID and CLAUDE_SESSION_ID are
+	// set. This lets an operator pre-bind a context → session mapping at pod
+	// start, enabling agent-mode resume across restarts without a first-turn
+	// warm-up call. For chat mode the ResumeSessionID option handles this.
+	seedContextID := os.Getenv("CLAUDE_CONTEXT_ID")
+	seedSessionID := os.Getenv("CLAUDE_SESSION_ID")
+	if seedContextID != "" && seedSessionID != "" {
+		if bindErr := sessionStore.BindSession(context.Background(), seedContextID, seedSessionID); bindErr != nil {
+			log.Printf("WARNING: failed to seed session store (context=%s session=%s): %v", seedContextID, seedSessionID, bindErr) //nolint:gosec
+		} else {
+			log.Printf("Pre-seeded session store: context=%s session=%s", seedContextID, seedSessionID) //nolint:gosec
+		}
+	}
+
+	// In chat mode, propagate CLAUDE_SESSION_ID as the startup resume session
+	// so the persistent subprocess continues an existing conversation after a
+	// pod restart. In agent mode the store binding (above) handles this.
+	if cfg.Claude.Mode == server.ModeChat && seedSessionID != "" {
+		opts.ResumeSessionID = seedSessionID
+	}
+
 	// Create the Claude process manager.
 	// Note: permissionMode and effort are already validated by cfg.Validate()
 	// using the canonical validators from the claude package.
@@ -378,12 +400,19 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		}
 	}
 
+	// Build memory client. No-op when KAGENT_MEMORY_ENDPOINT or
+	// KLAUD_EMBEDDING_MODEL is unset.
+	memClient := memory.New()
+	if _, ok := memClient.(memory.NoOp); !ok {
+		log.Printf("memory augmentation enabled (kagent endpoint: %s)", os.Getenv("KAGENT_MEMORY_ENDPOINT")) //nolint:gosec
+	}
+
 	// Build the A2A executor.
 	a2aMode := a2apkg.ModeChat
 	if cfg.Claude.Mode != server.ModeChat {
 		a2aMode = a2apkg.ModeAgent
 	}
-	executor := a2apkg.New(process, sessionStore, a2aMode, kagentClient)
+	executor := a2apkg.New(process, sessionStore, a2aMode, kagentClient, memClient)
 
 	srvCfg := server.Config{
 		Port:         listenPort,

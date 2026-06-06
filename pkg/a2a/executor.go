@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/kagentapi"
+	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/session"
 	"github.com/giantswarm/klaus/pkg/telemetry"
 )
@@ -41,6 +43,7 @@ type Executor struct {
 	prompter claude.Prompter
 	store    session.Store
 	kagent   *kagentapi.Client
+	mem      memory.Client
 	mode     Mode
 
 	// mu protects contextMu.
@@ -57,11 +60,17 @@ var _ a2asrv.AgentExecutor = (*Executor)(nil)
 // mode) or a *claude.PersistentProcess (chat mode). store persists
 // contextID→sessionID bindings across turns. kagentClient may be nil; when
 // non-nil and enabled, completed turns are pushed to the kagent UI.
-func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient *kagentapi.Client) *Executor {
+// memClient handles semantic memory retrieval and storage; pass memory.NoOp{}
+// to disable memory augmentation.
+func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient *kagentapi.Client, memClient memory.Client) *Executor {
+	if memClient == nil {
+		memClient = memory.NoOp{}
+	}
 	return &Executor{
 		prompter:  prompter,
 		store:     store,
 		kagent:    kagentClient,
+		mem:       memClient,
 		mode:      mode,
 		contextMu: make(map[string]*sync.Mutex),
 	}
@@ -126,8 +135,11 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		// Non-fatal: proceed without resume.
 	}
 
+	// Retrieve semantic memory and prepend relevant past context to the prompt.
+	augmented := e.augmentWithMemory(ctx, contextID, text)
+
 	// Run the prompt.
-	ch, err := e.prompter.RunWithOptions(ctx, text, runOpts)
+	ch, err := e.prompter.RunWithOptions(ctx, augmented, runOpts)
 	if err != nil {
 		if errors.Is(err, claude.ErrBusy) {
 			return queue.Write(ctx, rejectedEvent(reqCtx, "agent subprocess is busy"))
@@ -238,6 +250,29 @@ func (e *Executor) runOptions(ctx context.Context, contextID string) (*claude.Ru
 	}, nil
 }
 
+// augmentWithMemory retrieves relevant memory chunks and prepends them to
+// the prompt text. Returns text unchanged when memory is unavailable or empty.
+func (e *Executor) augmentWithMemory(ctx context.Context, contextID, text string) string {
+	chunks, err := e.mem.Retrieve(ctx, contextID, text, 5)
+	if err != nil {
+		log.Printf("[a2a] memory retrieve failed contextID=%q: %v", contextID, err)
+		return text
+	}
+	if len(chunks) == 0 {
+		return text
+	}
+	var sb strings.Builder
+	sb.WriteString("[Relevant memory from previous sessions]\n")
+	for _, c := range chunks {
+		sb.WriteString("- ")
+		sb.WriteString(c.Content)
+		sb.WriteByte('\n')
+	}
+	sb.WriteString("\n")
+	sb.WriteString(text)
+	return sb.String()
+}
+
 // recordTurns persists the user prompt and assistant reply as conversation
 // turns in the store, then pushes them to the kagent UI. Both operations are
 // async and best-effort: failures are logged only, never returned.
@@ -260,6 +295,9 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 			if e.kagent != nil && sessionID != "" {
 				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "user", Content: userText})
 			}
+			if err := e.mem.Store(ctx, contextID, "user", userText); err != nil {
+				log.Printf("[a2a] memory store user failed contextID=%q: %v", contextID, err)
+			}
 		}
 
 		if assistantText != "" {
@@ -275,6 +313,9 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 			}
 			if e.kagent != nil && sessionID != "" {
 				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "assistant", Content: assistantText})
+			}
+			if err := e.mem.Store(ctx, contextID, "assistant", assistantText); err != nil {
+				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
 			}
 		}
 	}()

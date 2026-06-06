@@ -1,15 +1,19 @@
 // Package memory defines the interface for retrieving and storing conversation
-// memory chunks. The memory layer injects relevant past context into the system
-// prompt before each claude invocation and persists new turns for future recall.
+// memory chunks across sessions. Before each turn, relevant chunks are prepended
+// to the user prompt; after each turn, user and assistant text are stored for
+// future recall.
 //
-// The default implementation is a no-op; the kagent-backed implementation
-// (using POST /api/memories/sessions and POST /api/memories/search) is a
-// separate follow-up once the embedding model used by kagent is confirmed.
+// Implementations:
+//   - NoOp: discard all writes, return empty results (default when env unset)
+//   - KagentClient: kagent pgvector API (POST /api/memories/sessions and
+//     POST /api/memories/search). Caller generates 768-dim float32 vectors
+//     via an OpenAI-compatible embedding endpoint (see pkg/memory/embedding.go).
 //
-// Open item: kagent requires exactly 768-dimensional float32 embeddings.
-// The embedding model must match what kagent's ADK uses, otherwise cosine
-// search returns garbage. Do not implement the kagent client until the
-// embedding model is verified (check kagent source or klausctl embed helper).
+// Required env for kagent backend:
+//   - KAGENT_MEMORY_ENDPOINT — kagent controller base URL
+//   - KLAUD_EMBEDDING_ENDPOINT — OpenAI-compatible embedding base URL (default: https://api.openai.com/v1)
+//   - KLAUD_EMBEDDING_MODEL — embedding model name (e.g. text-embedding-3-small)
+//   - KLAUD_EMBEDDING_API_KEY — API key (omit for unauthenticated vLLM endpoints)
 package memory
 
 import (

@@ -12,6 +12,7 @@ import (
 
 	"github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/session"
 )
 
@@ -22,6 +23,7 @@ func newTestExecutor() *a2a.Executor {
 		session.NewMemoryStore(),
 		a2a.ModeChat,
 		nil,
+		memory.NoOp{},
 	)
 }
 

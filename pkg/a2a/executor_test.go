@@ -15,6 +15,7 @@ import (
 
 	"github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/session"
 )
 
@@ -115,7 +116,7 @@ func makeReqCtx(contextID string, text string) *a2asrv.RequestContext {
 func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	prompter := &fakePrompter{result: "done"}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-1", "/clear please clear the context")
@@ -141,7 +142,7 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 func TestExecutor_EmptyText(t *testing.T) {
 	prompter := &fakePrompter{}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-2", "")
@@ -159,7 +160,7 @@ func TestExecutor_EmptyText(t *testing.T) {
 func TestExecutor_BusyReturnsRejected(t *testing.T) {
 	prompter := &fakePrompter{runErr: claude.ErrBusy}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-3", "hello")
@@ -186,7 +187,7 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 		},
 	}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-4", "What is the answer?")
@@ -231,7 +232,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 	blocker := &blockingPrompter{fakePrompter: prompter, block: blocked}
 
 	store := session.NewMemoryStore()
-	exec := a2a.New(blocker, store, a2a.ModeChat, nil)
+	exec := a2a.New(blocker, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	// First request: holds the lock.
 	ctx1, cancel1 := context.WithCancel(t.Context())
@@ -269,7 +270,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 func TestExecutor_Cancel(t *testing.T) {
 	prompter := &fakePrompter{}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
 	reqCtx := makeReqCtx("ctx-cancel", "")
@@ -319,7 +320,7 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 		},
 	}
 	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeAgent, nil)
+	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
 	// First turn — no prior session.
 	q1 := &captureQueue{}
