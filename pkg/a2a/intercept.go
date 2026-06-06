@@ -6,8 +6,8 @@ import "strings"
 // terminal and don't work headless. Intercepted early so they never reach the
 // subprocess.
 var unsupportedCommands = []string{
-	"/config", "/clear", "/compact", "/help", "/cost",
-	"/doctor", "/login", "/logout", "/status",
+	"/config", "/clear", "/compact", "/help", "/cost", //nolint:goconst
+	"/doctor", "/login", "/logout", "/status", //nolint:goconst
 }
 
 // interceptSlashCommand returns the matched command and true when the text

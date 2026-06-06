@@ -24,8 +24,8 @@ import (
 	"github.com/giantswarm/mcp-oauth/storage/memory"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
+	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	mcppkg "github.com/giantswarm/klaus/pkg/mcp"
 	"github.com/giantswarm/klaus/pkg/project"
 )

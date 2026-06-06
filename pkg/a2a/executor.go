@@ -224,8 +224,8 @@ func (e *Executor) runOptions(ctx context.Context, contextID string) (*claude.Ru
 	}
 
 	return &claude.RunOptions{
-		SessionID: sessionID,
-		Resume:    sessionID,
+		Resume:      sessionID,
+		SaveSession: true,
 	}, nil
 }
 

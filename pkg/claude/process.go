@@ -25,6 +25,10 @@ type RunOptions struct {
 	ContinueSession bool
 	// ForkSession overrides Options.ForkSession for this run.
 	ForkSession bool
+	// SaveSession forces session persistence for this run even when
+	// Options.NoSessionPersistence is true. Required when the caller needs
+	// --resume to work on a subsequent invocation.
+	SaveSession bool
 	// ActiveAgent overrides Options.ActiveAgent for this run.
 	ActiveAgent string
 	// JSONSchema overrides Options.JSONSchema for this run.
@@ -129,12 +133,18 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.Resume != "" {
 		opts.Resume = ro.Resume
+		// --resume requires the previous session on disk; clear the flag so
+		// the current run also saves (it may itself be resumed later).
+		opts.NoSessionPersistence = false
 	}
 	if ro.ContinueSession {
 		opts.ContinueSession = true
 	}
 	// Any operation that references a prior session requires the session to be persisted.
 	if opts.SessionID != "" || opts.ContinueSession || opts.Resume != "" {
+		opts.NoSessionPersistence = false
+	}
+	if ro.SaveSession {
 		opts.NoSessionPersistence = false
 	}
 	if ro.ForkSession {

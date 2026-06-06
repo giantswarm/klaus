@@ -23,13 +23,17 @@ type fakePrompter struct {
 	messages  []claude.StreamMessage
 	statusVal claude.StatusInfo
 	result    string
+
+	// capturedOpts records the RunOptions passed on each call.
+	capturedOpts []*claude.RunOptions
 }
 
 func (f *fakePrompter) Run(ctx context.Context, prompt string) (<-chan claude.StreamMessage, error) {
 	return f.RunWithOptions(ctx, prompt, nil)
 }
 
-func (f *fakePrompter) RunWithOptions(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+func (f *fakePrompter) RunWithOptions(_ context.Context, _ string, opts *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+	f.capturedOpts = append(f.capturedOpts, opts)
 	if f.runErr != nil {
 		return nil, f.runErr
 	}
@@ -64,7 +68,7 @@ func (f *fakePrompter) Done() <-chan struct{} {
 func (f *fakePrompter) ResultDetail() claude.ResultDetailInfo {
 	return claude.ResultDetailInfo{ResultText: f.result}
 }
-func (f *fakePrompter) Messages() claude.MessagesInfo         { return claude.MessagesInfo{} }
+func (f *fakePrompter) Messages() claude.MessagesInfo { return claude.MessagesInfo{} }
 func (f *fakePrompter) RawMessages(_ int, _ []string) claude.RawMessagesInfo {
 	return claude.RawMessagesInfo{}
 }
@@ -286,6 +290,51 @@ func (b *blockingPrompter) RunWithOptions(ctx context.Context, prompt string, op
 		case <-b.block:
 		}
 	}()
-	// Return early with a working channel.
 	return ch, nil
+}
+
+// TestExecutor_AgentModeResume verifies that the second turn in agent mode
+// passes only --resume (not --session-id), which is what the claude CLI requires.
+func TestExecutor_AgentModeResume(t *testing.T) {
+	const sessionID = "sess-resume-test"
+	prompter := &fakePrompter{
+		result: "turn result",
+		statusVal: claude.StatusInfo{
+			Status:    claude.ProcessStatusCompleted,
+			SessionID: sessionID,
+			Result:    "turn result",
+		},
+	}
+	store := session.NewMemoryStore()
+	exec := a2a.New(prompter, store, a2a.ModeAgent)
+
+	// First turn — no prior session.
+	q1 := &captureQueue{}
+	err := exec.Execute(t.Context(), makeReqCtx("ctx-resume", "first"), q1)
+	require.NoError(t, err)
+	last1 := q1.events[len(q1.events)-1].(*a2asdk.TaskStatusUpdateEvent)
+	assert.Equal(t, a2asdk.TaskStateCompleted, last1.Status.State)
+
+	// First turn RunOptions: Resume should be empty (no prior session); SaveSession must be true.
+	require.Len(t, prompter.capturedOpts, 1)
+	opts1 := prompter.capturedOpts[0]
+	require.NotNil(t, opts1)
+	assert.Empty(t, opts1.Resume, "first turn must not pass --resume")
+	assert.Empty(t, opts1.SessionID, "first turn must not pass --session-id")
+	assert.True(t, opts1.SaveSession, "first turn must set SaveSession so the conversation is persisted")
+
+	// Second turn — store now has sessionID bound from turn 1.
+	q2 := &captureQueue{}
+	err = exec.Execute(t.Context(), makeReqCtx("ctx-resume", "second"), q2)
+	require.NoError(t, err)
+	last2 := q2.events[len(q2.events)-1].(*a2asdk.TaskStatusUpdateEvent)
+	assert.Equal(t, a2asdk.TaskStateCompleted, last2.Status.State)
+
+	// Second turn RunOptions: Resume must be set, SessionID must be empty, SaveSession must be true.
+	require.Len(t, prompter.capturedOpts, 2)
+	opts2 := prompter.capturedOpts[1]
+	require.NotNil(t, opts2)
+	assert.Equal(t, sessionID, opts2.Resume, "second turn must pass --resume <sessionID>")
+	assert.Empty(t, opts2.SessionID, "second turn must not pass --session-id")
+	assert.True(t, opts2.SaveSession, "second turn must set SaveSession")
 }
