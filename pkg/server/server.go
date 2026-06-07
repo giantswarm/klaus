@@ -61,10 +61,10 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 	mux.Handle("/v1/chat/completions", ownerMW(handleChatCompletions(process)))
 
 	// A2A endpoint and agent-card discovery (optional).
-	registerA2ARoutes(mux, cfg.Executor, func(h http.Handler) http.Handler { return ownerMW(h) })
+	a2aHandler := registerA2ARoutes(mux, cfg.Executor, func(h http.Handler) http.Handler { return ownerMW(h) })
 
 	// Operational endpoints (bypass owner validation).
-	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject)
+	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject, a2aHandler)
 
 	s.httpServer = &http.Server{
 		Addr:              ":" + cfg.Port,

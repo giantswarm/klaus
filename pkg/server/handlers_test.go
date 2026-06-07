@@ -270,7 +270,7 @@ func TestRegisterOperationalRoutes(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeAgent, "")
+	registerOperationalRoutes(mux, process, ModeAgent, "", nil)
 
 	paths := []string{"/healthz", "/readyz", "/status", "/", "/metrics", "/healthz/busy"}
 	for _, path := range paths {
@@ -289,7 +289,7 @@ func TestHandleMetrics(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeAgent, "")
+	registerOperationalRoutes(mux, process, ModeAgent, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	w := httptest.NewRecorder()
@@ -312,7 +312,7 @@ func TestRegisterOperationalRoutes_UnknownPath(t *testing.T) {
 	process := claude.NewProcess(claude.DefaultOptions())
 	mux := http.NewServeMux()
 
-	registerOperationalRoutes(mux, process, ModeAgent, "")
+	registerOperationalRoutes(mux, process, ModeAgent, "", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	w := httptest.NewRecorder()

@@ -91,11 +91,24 @@ func handleBusy(process claudepkg.Prompter) http.HandlerFunc {
 	}
 }
 
-func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string) {
+func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string, a2aHandler http.Handler) {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/healthz/busy", handleBusy(process))
 	mux.HandleFunc("/readyz", handleReadyz(process))
 	mux.HandleFunc("/status", handleStatus(process, mode, ownerSubject))
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/", handleRoot)
+	mux.Handle("/", rootHandler(a2aHandler))
+}
+
+// rootHandler returns a catch-all handler that dispatches POST requests to
+// a2aHandler when set. kagent constructs agent URLs as http://{name}.{ns}:8080
+// with no path, so POST / must reach the A2A JSON-RPC handler.
+func rootHandler(a2aHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a2aHandler != nil && r.Method == http.MethodPost {
+			a2aHandler.ServeHTTP(w, r)
+			return
+		}
+		handleRoot(w, r)
+	})
 }

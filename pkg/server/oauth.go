@@ -255,10 +255,10 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 	a2aMW := func(h http.Handler) http.Handler {
 		return ownerMW(s.oauthHandler.ValidateToken(h))
 	}
-	registerA2ARoutes(mux, s.executor, a2aMW)
+	a2aHandler := registerA2ARoutes(mux, s.executor, a2aMW)
 
 	// Health and status endpoints (unprotected, bypass owner validation).
-	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject)
+	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject, a2aHandler)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
