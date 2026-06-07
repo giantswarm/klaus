@@ -148,8 +148,12 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		return queue.Write(ctx, failedEvent(reqCtx, "agent error: "+err.Error()))
 	}
 
-	// Drain the stream and emit working events for text chunks.
+	// Drain the stream, emit working events for text chunks, and collect all
+	// messages so we can extract the result from the MessageTypeResult message.
+	// Status().Result is only populated after Submit(); RunWithOptions leaves
+	// status as Idle, so we must derive the result from the stream itself.
 	var lastText string
+	var messages []claude.StreamMessage
 	for msg := range ch {
 		select {
 		case <-ctx.Done():
@@ -157,6 +161,7 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		default:
 		}
 
+		messages = append(messages, msg)
 		if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
 			if msg.Text != "" && msg.Text != lastText {
 				lastText = msg.Text
@@ -174,6 +179,12 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	if result == "" {
 		detail := e.prompter.ResultDetail()
 		result = detail.ResultText
+	}
+	// Fallback: extract result from the stream messages directly. This covers
+	// the RunWithOptions path where status remains Idle (not Completed) and
+	// p.result is never written.
+	if result == "" {
+		result = claude.CollectResultText(messages)
 	}
 
 	if sessionID != "" {
