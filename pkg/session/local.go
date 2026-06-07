@@ -20,8 +20,7 @@ type localSession struct {
 // under a configurable directory. It is the default backend when no Postgres DSN
 // is provided, mirroring the existing KLAUS_RESULT_DIR pattern.
 //
-// Writes are serialized per-context via a per-file mutex, so concurrent turns on
-// different contexts proceed in parallel.
+// All file operations are serialized via a single mutex.
 type LocalStore struct {
 	dir string
 	mu  sync.Mutex // guards file-level operations
@@ -79,6 +78,9 @@ func (l *LocalStore) SessionID(_ context.Context, contextID string) (string, err
 }
 
 func (l *LocalStore) BindSession(_ context.Context, contextID, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	s, err := l.load(contextID)

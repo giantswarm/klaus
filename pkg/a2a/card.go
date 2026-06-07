@@ -32,13 +32,24 @@ func AgentCard() *a2a.AgentCard {
 	url := envOrDefault(envAgentURL, "http://localhost:8080/a2a")
 
 	return &a2a.AgentCard{
-		Name:        name,
-		Description: description,
-		Version:     version,
-		URL:         url,
+		Name:               name,
+		Description:        description,
+		Version:            version,
+		URL:                url,
+		ProtocolVersion:    string(a2a.Version),
+		DefaultInputModes:  []string{"text/plain"},
+		DefaultOutputModes: []string{"text/plain"},
 		Capabilities: a2a.AgentCapabilities{
 			Streaming:         true,
 			PushNotifications: false,
+		},
+		Skills: []a2a.AgentSkill{
+			{
+				ID:          "claude-code",
+				Name:        name,
+				Description: description,
+				Tags:        []string{"coding", "ai", "claude"},
+			},
 		},
 	}
 }

@@ -28,6 +28,9 @@ func (m *MemoryStore) SessionID(_ context.Context, contextID string) (string, er
 }
 
 func (m *MemoryStore) BindSession(_ context.Context, contextID, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[contextID] = sessionID

@@ -5,8 +5,13 @@
 // the warm-pool substrate. The Store tracks the contextID → sessionID binding and
 // persists the full conversation history (one Turn per model exchange) so that:
 //
-//   - Resume across pod restarts is driven by the stored sessionID.
+//   - The stored sessionID can be threaded to --resume on subsequent turns.
 //   - Conversation history is queryable by the MCP messages tool and the kagent UI.
+//
+// Note: cross-restart resume requires both a persistent Store backend (Postgres
+// via KLAUS_PG_DSN) AND that the claude CLI session files (~/.claude/) survive
+// the restart (i.e. mounted on a PVC). A surviving store binding alone is not
+// sufficient — the CLI cannot resume a session whose files no longer exist.
 //
 // Use NewStore to obtain a backend-selected implementation.
 package session

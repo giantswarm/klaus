@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -150,6 +151,9 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 			// outlives the MCP request but is cancelled on shutdown.
 			if err := process.Submit(serverCtx, message, &runOpts); err != nil {
 				metrics.PromptsTotal.WithLabelValues("error", "async").Inc()
+				if errors.Is(err, claudepkg.ErrBusy) {
+					return mcp.NewToolResultError("agent is busy: another prompt is already running"), nil
+				}
 				return mcp.NewToolResultError(fmt.Sprintf("failed to start task: %v", err)), nil
 			}
 
@@ -184,6 +188,9 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 		ch, err := process.RunWithOptions(ctx, message, &runOpts)
 		if err != nil {
 			metrics.PromptsTotal.WithLabelValues("error", "blocking").Inc()
+			if errors.Is(err, claudepkg.ErrBusy) {
+				return mcp.NewToolResultError("agent is busy: another prompt is already running"), nil
+			}
 			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
 		}
 

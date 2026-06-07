@@ -63,6 +63,9 @@ func (p *PostgresStore) SessionID(ctx context.Context, contextID string) (string
 }
 
 func (p *PostgresStore) BindSession(ctx context.Context, contextID, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
 	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO sessions.bindings (context_id, session_id, updated_at)
 		VALUES ($1, $2, now())

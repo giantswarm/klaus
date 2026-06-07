@@ -8,6 +8,8 @@
 package a2a
 
 import (
+	"strings"
+
 	"github.com/a2aproject/a2a-go/a2a"
 	"github.com/a2aproject/a2a-go/a2asrv"
 )
@@ -69,15 +71,16 @@ func canceledEvent(reqCtx *a2asrv.RequestContext) *a2a.TaskStatusUpdateEvent {
 	return ev
 }
 
-// extractText pulls the first non-empty text part from an A2A message.
+// extractText concatenates all text parts from an A2A message.
 func extractText(msg *a2a.Message) string {
 	if msg == nil {
 		return ""
 	}
+	var sb strings.Builder
 	for _, part := range msg.Parts {
-		if tp, ok := part.(a2a.TextPart); ok && tp.Text != "" {
-			return tp.Text
+		if tp, ok := part.(a2a.TextPart); ok {
+			sb.WriteString(tp.Text)
 		}
 	}
-	return ""
+	return sb.String()
 }

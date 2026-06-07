@@ -307,6 +307,95 @@ func (b *blockingPrompter) RunWithOptions(ctx context.Context, prompt string, op
 	return ch, nil
 }
 
+func TestExecutor_SubprocessError(t *testing.T) {
+	prompter := &fakePrompter{
+		statusVal: claude.StatusInfo{
+			Status:       claude.ProcessStatusError,
+			ErrorMessage: "subprocess exited with code 1",
+		},
+	}
+	store := session.NewMemoryStore()
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+
+	queue := &captureQueue{}
+	err := exec.Execute(t.Context(), makeReqCtx("ctx-err", "hello"), queue)
+	require.NoError(t, err)
+
+	last := queue.events[len(queue.events)-1]
+	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
+	require.True(t, ok)
+	assert.Equal(t, a2asdk.TaskStateFailed, statusEv.Status.State)
+	assert.True(t, statusEv.Final)
+}
+
+func TestExecutor_CollectResultTextFallback(t *testing.T) {
+	// Status().Result and ResultDetail().ResultText are both empty.
+	// The result must come from the MessageTypeResult message in the stream.
+	resultMsg := claude.StreamMessage{
+		Type:   claude.MessageTypeResult,
+		Result: "full response from stream",
+	}
+	prompter := &fakePrompter{
+		messages:  []claude.StreamMessage{resultMsg},
+		statusVal: claude.StatusInfo{Status: claude.ProcessStatusIdle},
+	}
+	store := session.NewMemoryStore()
+	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+
+	queue := &captureQueue{}
+	err := exec.Execute(t.Context(), makeReqCtx("ctx-fallback", "hello"), queue)
+	require.NoError(t, err)
+
+	var artifactEv *a2asdk.TaskArtifactUpdateEvent
+	for _, ev := range queue.events {
+		if ae, ok := ev.(*a2asdk.TaskArtifactUpdateEvent); ok {
+			artifactEv = ae
+			break
+		}
+	}
+	require.NotNil(t, artifactEv, "expected artifact-update event from CollectResultText fallback")
+	require.Len(t, artifactEv.Artifact.Parts, 1)
+	tp, ok := artifactEv.Artifact.Parts[0].(a2asdk.TextPart)
+	require.True(t, ok)
+	assert.Equal(t, "full response from stream", tp.Text)
+	assert.True(t, artifactEv.LastChunk)
+}
+
+func TestExecutor_BindSessionSkipsEmpty(t *testing.T) {
+	// When the subprocess returns no sessionID, BindSession must not be called
+	// with "", which would overwrite a prior binding.
+	prompter := &fakePrompter{
+		result: "turn result",
+		statusVal: claude.StatusInfo{
+			Status:    claude.ProcessStatusCompleted,
+			SessionID: "first-session",
+			Result:    "turn result",
+		},
+	}
+	store := session.NewMemoryStore()
+	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
+
+	// First turn binds the session.
+	q1 := &captureQueue{}
+	err := exec.Execute(t.Context(), makeReqCtx("ctx-bind", "first"), q1)
+	require.NoError(t, err)
+
+	sessID, err := store.SessionID(t.Context(), "ctx-bind")
+	require.NoError(t, err)
+	assert.Equal(t, "first-session", sessID)
+
+	// Second turn: prompter returns empty sessionID (simulates system message not arriving).
+	prompter.statusVal.SessionID = ""
+	q2 := &captureQueue{}
+	err = exec.Execute(t.Context(), makeReqCtx("ctx-bind", "second"), q2)
+	require.NoError(t, err)
+
+	// The binding must still be "first-session", not overwritten with "".
+	sessID, err = store.SessionID(t.Context(), "ctx-bind")
+	require.NoError(t, err)
+	assert.Equal(t, "first-session", sessID)
+}
+
 // TestExecutor_AgentModeResume verifies that the second turn in agent mode
 // passes only --resume (not --session-id), which is what the claude CLI requires.
 func TestExecutor_AgentModeResume(t *testing.T) {
