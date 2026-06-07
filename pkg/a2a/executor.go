@@ -46,12 +46,13 @@ type Executor struct {
 	mem      memory.Client
 	mode     Mode
 
-	// mu protects contextMu.
+	// mu protects inFlight.
 	mu sync.Mutex
-	// contextMu maps contextID to its per-context lock, preventing concurrent
-	// executions within the same conversation. A second request while one is
-	// in flight receives a rejected event.
-	contextMu map[string]*sync.Mutex
+	// inFlight tracks contextIDs that currently have an Execute in progress.
+	// A second request for the same contextID while one is in flight receives
+	// a rejected event. Using a presence-set avoids the unlock-then-delete
+	// race that a per-context mutex map would have.
+	inFlight map[string]struct{}
 }
 
 var _ a2asrv.AgentExecutor = (*Executor)(nil)
@@ -67,12 +68,12 @@ func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient 
 		memClient = memory.NoOp{}
 	}
 	return &Executor{
-		prompter:  prompter,
-		store:     store,
-		kagent:    kagentClient,
-		mem:       memClient,
-		mode:      mode,
-		contextMu: make(map[string]*sync.Mutex),
+		prompter: prompter,
+		store:    store,
+		kagent:   kagentClient,
+		mem:      memClient,
+		mode:     mode,
+		inFlight: make(map[string]struct{}),
 	}
 }
 
@@ -95,22 +96,20 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		))
 	span.End()
 
-	// Acquire the per-context lock; reject if already in-flight.
-	mu := e.lockForContext(contextID)
-	if !mu.TryLock() {
+	// Acquire the per-context in-flight slot; reject if already running.
+	if !e.lockForContext(contextID) {
 		log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
 		return queue.Write(ctx, rejectedEvent(reqCtx, "another request for this context is already in-flight"))
 	}
-	defer func() {
-		mu.Unlock()
-		e.releaseContext(contextID)
-	}()
+	defer e.releaseContext(contextID)
 
 	// Extract prompt text.
 	text := extractText(reqCtx.Message)
 	if text == "" {
 		return queue.Write(ctx, failedEvent(reqCtx, "message contains no text content"))
 	}
+
+	log.Printf("[a2a] turn start contextID=%q prompt=%q", contextID, claude.Truncate(text, 120))
 
 	// Intercept TUI-only slash commands.
 	if cmd, ok := interceptSlashCommand(text); ok {
@@ -149,43 +148,58 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	}
 
 	// Drain the stream, emit working events for text chunks, and collect all
-	// messages so we can extract the result from the MessageTypeResult message.
-	// Status().Result is only populated after Submit(); RunWithOptions leaves
-	// status as Idle, so we must derive the result from the stream itself.
+	// messages for result extraction and session ID discovery.
 	var lastText string
 	var messages []claude.StreamMessage
-	for msg := range ch {
+	var streamSessionID string
+drainLoop:
+	for {
 		select {
 		case <-ctx.Done():
+			// Stop the subprocess so it doesn't block indefinitely after the
+			// caller cancels; without this the stdout goroutine fills the 100-
+			// message buffer and cmd.Wait never returns, leaving status Busy.
+			_ = e.prompter.Stop()
 			return ctx.Err()
-		default:
-		}
-
-		messages = append(messages, msg)
-		if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
-			if msg.Text != "" && msg.Text != lastText {
-				lastText = msg.Text
-				if writeErr := queue.Write(ctx, workingEvent(reqCtx, claude.Truncate(msg.Text, 200))); writeErr != nil {
-					log.Printf("[a2a] write working chunk: %v", writeErr)
+		case msg, ok := <-ch:
+			if !ok {
+				break drainLoop
+			}
+			messages = append(messages, msg)
+			if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
+				streamSessionID = msg.SessionID
+				log.Printf("[a2a] session contextID=%q sessionID=%q", contextID, msg.SessionID)
+			}
+			if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
+				log.Printf("[a2a] tool_use contextID=%q tool=%q", contextID, msg.ToolName)
+			}
+			if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
+				if msg.Text != "" && msg.Text != lastText {
+					lastText = msg.Text
+					if writeErr := queue.Write(ctx, workingEvent(reqCtx, claude.Truncate(msg.Text, 200))); writeErr != nil {
+						log.Printf("[a2a] write working chunk: %v", writeErr)
+					}
 				}
 			}
 		}
 	}
 
-	// Collect result and bind session.
-	status := e.prompter.Status()
-	sessionID := status.SessionID
-	result := status.Result
-	if result == "" {
-		detail := e.prompter.ResultDetail()
-		result = detail.ResultText
+	// Log the raw result for console visibility (kubectl logs).
+	log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
+
+	// Derive the result from the stream only. Status().Result is NOT consulted
+	// because RunWithOptions leaves the process Idle; the disk fallback in
+	// Status() would serve a stale result from a previous MCP Submit.
+	result := claude.CollectResultText(messages)
+
+	if result != "" {
+		log.Printf("[a2a] result contextID=%q result=%q", contextID, claude.Truncate(result, 500))
 	}
-	// Fallback: extract result from the stream messages directly. This covers
-	// the RunWithOptions path where status remains Idle (not Completed) and
-	// p.result is never written.
-	if result == "" {
-		result = claude.CollectResultText(messages)
-	}
+
+	// Use the sessionID observed in this run's stream. Status().SessionID is
+	// NOT consulted because p.sessionID is reset at run start but may still
+	// carry a prior value if no system message arrives (e.g. early crash).
+	sessionID := streamSessionID
 
 	if sessionID != "" {
 		if bindErr := e.store.BindSession(ctx, contextID, sessionID); bindErr != nil {
@@ -197,6 +211,10 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	// writes are async and best-effort so they never block the response path.
 	e.recordTurns(contextID, sessionID, text, result)
 
+	// Query status only for error / retry-state detection; Result and SessionID
+	// fields are intentionally not used (see result/sessionID derivation above).
+	status := e.prompter.Status()
+
 	if status.Status == claude.ProcessStatusError {
 		errMsg := status.ErrorMessage
 		if errMsg == "" {
@@ -205,13 +223,12 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		return queue.Write(ctx, failedEvent(reqCtx, errMsg))
 	}
 
-	// Write the full result as a final artifact.
+	// If the subprocess is still Busy after the stream closed and we have no
+	// result, it is mid-retry (PersistentProcess recovering from a crash).
+	// Fail the turn rather than emitting a terminal completed with no artifact.
 	if result == "" && status.Status == claude.ProcessStatusBusy {
-		// Mid-retry: the subprocess is recovering. Emit a status hint.
-		retryMsg := fmt.Sprintf("reconnecting, attempt %d", status.RetryCount)
-		if writeErr := queue.Write(ctx, workingEvent(reqCtx, retryMsg)); writeErr != nil {
-			return fmt.Errorf("write retry working: %w", writeErr)
-		}
+		retryMsg := fmt.Sprintf("subprocess is recovering (attempt %d); no result produced", status.RetryCount)
+		return queue.Write(ctx, failedEvent(reqCtx, retryMsg))
 	}
 
 	if result != "" {
@@ -332,23 +349,24 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 	}()
 }
 
-// lockForContext returns (and lazily creates) the per-contextID mutex. The
-// returned mutex is not held; callers must call TryLock/Lock themselves.
-func (e *Executor) lockForContext(contextID string) *sync.Mutex {
+// lockForContext marks contextID as in-flight. Returns true if the slot was
+// acquired (caller may proceed), false if contextID was already in-flight
+// (caller should reject). The in-flight flag is set atomically under e.mu,
+// eliminating the unlock-then-delete race that a per-context mutex map has.
+func (e *Executor) lockForContext(contextID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	mu, ok := e.contextMu[contextID]
-	if !ok {
-		mu = &sync.Mutex{}
-		e.contextMu[contextID] = mu
+	if _, ok := e.inFlight[contextID]; ok {
+		return false
 	}
-	return mu
+	e.inFlight[contextID] = struct{}{}
+	return true
 }
 
-// releaseContext removes the per-context mutex once a context is no longer
-// in-flight. This prevents the map from growing unboundedly.
+// releaseContext clears the in-flight marker for contextID. This prevents
+// the map from growing unboundedly and unblocks the next request.
 func (e *Executor) releaseContext(contextID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	delete(e.contextMu, contextID)
+	delete(e.inFlight, contextID)
 }
