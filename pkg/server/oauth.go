@@ -368,8 +368,19 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		return nil, fmt.Errorf("unsupported OAuth provider: %s (supported: %s, %s)", config.Provider, OAuthProviderDex, OAuthProviderGoogle)
 	}
 
+	// Encryption-at-rest is wired on the store, not the server.
+	var memOpts []memory.Option
+	if len(config.Security.EncryptionKey) > 0 {
+		encryptor, err := security.NewEncryptor(config.Security.EncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create encryptor: %w", err)
+		}
+		memOpts = append(memOpts, memory.WithEncryptor(encryptor))
+		logger.Info("Token encryption at rest enabled (AES-256-GCM)")
+	}
+
 	// Use in-memory storage (sufficient for single-instance deployments).
-	memStore := memory.New()
+	memStore := memory.New(memOpts...)
 	var tokenStore storage.TokenStore = memStore
 	var clientStore storage.ClientStore = memStore
 	var flowStore storage.FlowStore = memStore
@@ -411,16 +422,6 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		return nil, fmt.Errorf("failed to create instrumentation: %w", err)
 	}
 	opts = append(opts, oauth.WithInstrumentation(inst))
-
-	// Set up encryption if key provided.
-	if len(config.Security.EncryptionKey) > 0 {
-		encryptor, err := security.NewEncryptor(config.Security.EncryptionKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create encryptor: %w", err)
-		}
-		opts = append(opts, oauth.WithEncryptor(encryptor))
-		logger.Info("Token encryption at rest enabled (AES-256-GCM)")
-	}
 
 	// Set up audit logging.
 	auditor := security.NewAuditor(logger, true)
