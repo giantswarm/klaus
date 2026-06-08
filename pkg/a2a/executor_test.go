@@ -3,6 +3,7 @@ package a2a_test
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,8 +40,26 @@ func (f *fakePrompter) RunWithOptions(_ context.Context, _ string, opts *claude.
 	if f.runErr != nil {
 		return nil, f.runErr
 	}
-	ch := make(chan claude.StreamMessage, len(f.messages)+1)
-	for _, m := range f.messages {
+	// Use explicit messages when provided; otherwise synthesise from status
+	// fields so that sessionID and result flow through the stream (as the real
+	// *Process does), not through Status() which the executor no longer reads.
+	msgs := f.messages
+	if len(msgs) == 0 {
+		if f.statusVal.SessionID != "" {
+			msgs = append(msgs, claude.StreamMessage{
+				Type:      claude.MessageTypeSystem,
+				SessionID: f.statusVal.SessionID,
+			})
+		}
+		if f.result != "" {
+			msgs = append(msgs, claude.StreamMessage{
+				Type:   claude.MessageTypeResult,
+				Result: f.result,
+			})
+		}
+	}
+	ch := make(chan claude.StreamMessage, len(msgs)+1)
+	for _, m := range msgs {
 		ch <- m
 	}
 	close(ch)
@@ -79,19 +98,31 @@ func (f *fakePrompter) OpenAIMessages(_ int) claude.OpenAIMessagesInfo {
 }
 func (f *fakePrompter) MarshalStatus() ([]byte, error) { return json.Marshal(f.statusVal) }
 
-// captureQueue collects events written during a test.
+// captureQueue collects events written during a test. It is safe for
+// concurrent use (Execute writes from a goroutine while tests read).
 type captureQueue struct {
+	mu     sync.Mutex
 	events []a2asdk.Event
 }
 
 func (q *captureQueue) Write(_ context.Context, event a2asdk.Event) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.events = append(q.events, event)
 	return nil
 }
 
 func (q *captureQueue) WriteVersioned(_ context.Context, event a2asdk.Event, _ a2asdk.TaskVersion) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.events = append(q.events, event)
 	return nil
+}
+
+func (q *captureQueue) len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.events)
 }
 
 func (q *captureQueue) Read(_ context.Context) (a2asdk.Event, a2asdk.TaskVersion, error) {
@@ -135,8 +166,7 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	assert.True(t, statusEv.Final)
 
 	// The prompter must NOT have been called for intercepted commands.
-	// Since fakePrompter.runErr is nil but we track calls via messages being absent.
-	// No working events should have been emitted before the artifact.
+	require.Empty(t, prompter.capturedOpts, "RunWithOptions must not be called for intercepted slash commands")
 }
 
 func TestExecutor_EmptyText(t *testing.T) {
@@ -247,7 +277,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 	// Give the goroutine time to acquire the lock.
 	// Poll until we see the working event.
 	require.Eventually(t, func() bool {
-		return len(queue1.events) > 0
+		return queue1.len() > 0
 	}, timeout, pollInterval)
 
 	// Second request to the SAME contextID — must be rejected.
@@ -418,12 +448,14 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	last1 := q1.events[len(q1.events)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last1.Status.State)
 
-	// First turn RunOptions: Resume should be empty (no prior session); SaveSession must be true.
+	// First turn RunOptions: Resume should be empty (no prior session);
+	// SessionID is seeded from the A2A contextID so the Claude session file
+	// and the kagent UI share the same UUID.
 	require.Len(t, prompter.capturedOpts, 1)
 	opts1 := prompter.capturedOpts[0]
 	require.NotNil(t, opts1)
 	assert.Empty(t, opts1.Resume, "first turn must not pass --resume")
-	assert.Empty(t, opts1.SessionID, "first turn must not pass --session-id")
+	assert.Equal(t, "resume", opts1.SessionID, "first turn must seed --session-id from contextID")
 	assert.True(t, opts1.SaveSession, "first turn must set SaveSession so the conversation is persisted")
 
 	// Second turn — store now has sessionID bound from turn 1.

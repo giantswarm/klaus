@@ -272,10 +272,28 @@ func (e *Executor) runOptions(ctx context.Context, contextID string) (*claude.Ru
 		return nil, err
 	}
 
-	return &claude.RunOptions{
-		Resume:      sessionID,
-		SaveSession: true,
-	}, nil
+	opts := &claude.RunOptions{SaveSession: true}
+	if sessionID != "" {
+		// Resume the session from the prior turn.
+		opts.Resume = sessionID
+	} else {
+		// First turn: seed the Claude session with a deterministic ID derived
+		// from the A2A contextID so the Claude session file is traceable to the
+		// same UUID that the kagent UI displays.
+		opts.SessionID = sessionIDFromContext(contextID)
+	}
+	return opts, nil
+}
+
+// sessionIDFromContext derives a Claude session ID from an A2A contextID.
+// A2A context IDs are typically "ctx-<uuid>"; the UUID part is extracted so
+// the Claude session file is named by the same UUID the kagent UI displays.
+// If contextID is already a plain UUID (no prefix), it is returned as-is.
+func sessionIDFromContext(contextID string) string {
+	if after, ok := strings.CutPrefix(contextID, "ctx-"); ok {
+		return after
+	}
+	return contextID
 }
 
 // augmentWithMemory retrieves relevant memory chunks and prepends them to
@@ -320,8 +338,8 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 			}); err != nil {
 				log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
 			}
-			if e.kagent != nil && sessionID != "" {
-				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "user", Content: userText})
+			if e.kagent != nil {
+				e.kagent.PushEvent(ctx, contextID, kagentapi.SessionEvent{Role: "user", Content: userText})
 			}
 			if err := e.mem.Store(ctx, contextID, "user", userText); err != nil {
 				log.Printf("[a2a] memory store user failed contextID=%q: %v", contextID, err)
@@ -339,8 +357,8 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 			}); err != nil {
 				log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
 			}
-			if e.kagent != nil && sessionID != "" {
-				e.kagent.PushEvent(ctx, sessionID, kagentapi.SessionEvent{Role: "assistant", Content: assistantText})
+			if e.kagent != nil {
+				e.kagent.PushEvent(ctx, contextID, kagentapi.SessionEvent{Role: "assistant", Content: assistantText})
 			}
 			if err := e.mem.Store(ctx, contextID, "assistant", assistantText); err != nil {
 				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
