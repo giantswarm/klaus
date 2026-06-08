@@ -4,7 +4,7 @@
 ARG VARIANT=alpine
 
 # Stage 1: Build the Go binary (runs on the build host, cross-compiles for target).
-FROM --platform=$BUILDPLATFORM golang:1.26.3 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.4 AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -41,7 +41,7 @@ RUN if [ "$VARIANT" = "alpine" ]; then \
 
 # Install Claude Code CLI globally.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VER=2.1.159
+ARG CLAUDE_CODE_VER=2.1.168
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VER} && \
     npm cache clean --force
 
