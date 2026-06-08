@@ -9,7 +9,7 @@
 //   - Conversation history is queryable by the MCP messages tool and the kagent UI.
 //
 // Note: cross-restart resume requires both a persistent Store backend (Postgres
-// via KLAUS_PG_DSN) AND that the claude CLI session files (~/.claude/) survive
+// via KLAUS_PGSQL_DSN) AND that the claude CLI session files (~/.claude/) survive
 // the restart (i.e. mounted on a PVC). A surviving store binding alone is not
 // sufficient — the CLI cannot resume a session whose files no longer exist.
 //

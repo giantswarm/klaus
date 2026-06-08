@@ -10,16 +10,16 @@ const (
 	// BackendMemory is the in-memory store (tests only).
 	BackendMemory = "memory"
 
-	envDSN        = "KLAUS_PG_DSN"
+	envDSN        = "KLAUS_PGSQL_DSN"
 	envSessionDir = "KLAUS_SESSION_DIR"
 )
 
 // NewStore constructs a Store from environment variables.
 //
-//   - KLAUS_PG_DSN: when set, use the Postgres backend. Fails fast if the DB
+//   - KLAUS_PGSQL_DSN: when set, use the Postgres backend. Fails fast if the DB
 //     is unreachable.
 //   - KLAUS_SESSION_DIR: base directory for the local backend (default
-//     ~/.klaus/sessions). Ignored when KLAUS_PG_DSN is set.
+//     ~/.klaus/sessions). Ignored when KLAUS_PGSQL_DSN is set.
 //
 // When neither variable is set, the local file backend is used and falls back
 // to os.TempDir if the directory cannot be created.

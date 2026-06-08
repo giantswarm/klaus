@@ -313,12 +313,8 @@ spec:
             {{- end }}
             {{- end }}
             # Session store
-            {{- if .Values.session.backend }}
-            - name: KLAUS_RESULT_BACKEND
-              value: {{ .Values.session.backend | quote }}
-            {{- end }}
             {{- if .Values.session.postgresSecretName }}
-            - name: KLAUS_PG_DSN
+            - name: KLAUS_PGSQL_DSN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.session.postgresSecretName }}

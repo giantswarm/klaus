@@ -332,7 +332,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
 
-	// Build the session store. Uses Postgres when KLAUS_PG_DSN is set,
+	// Build the session store. Uses Postgres when KLAUS_PGSQL_DSN is set,
 	// otherwise falls back to a local file store under ~/.klaus/sessions.
 	sessionStore, err := session.NewStore(context.Background())
 	if err != nil {

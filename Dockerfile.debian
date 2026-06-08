@@ -30,7 +30,11 @@ RUN VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || ech
     -X 'main.date=${DATE}'" \
     -o klaus .
 
-# Stage 2: Minimal runtime with Node.js and Claude CLI.
+# Stage 2: Go toolchain for the target platform.
+# Keep the version in sync with the builder stage above.
+FROM golang:1.26.4 AS go-toolchain
+
+# Stage 3: Minimal runtime with Node.js, Claude CLI, and Go toolchain.
 FROM node:24-${VARIANT}
 ARG VARIANT
 
@@ -64,6 +68,9 @@ RUN mkdir -p /workspace && chown klaus:klaus /workspace
 # Copy the Go binary from the builder stage.
 COPY --from=builder /app/klaus /usr/local/bin/klaus
 
+# Copy the Go toolchain so Claude Code can compile and run Go programs.
+COPY --from=go-toolchain /usr/local/go /usr/local/go
+
 LABEL io.giantswarm.klaus.type=toolchain \
       io.giantswarm.klaus.name=klaus
 USER klaus
@@ -71,6 +78,9 @@ WORKDIR /workspace
 
 ENV PORT=8080
 ENV SHELL=/bin/bash
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/workspace/go
+ENV PATH="/usr/local/go/bin:${PATH}"
 EXPOSE 8080
 
 ENTRYPOINT ["klaus"]

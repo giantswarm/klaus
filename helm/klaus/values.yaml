@@ -287,13 +287,11 @@ workspace:
 # Session store configuration.
 # Maps A2A context IDs to Claude session IDs and stores conversation turn history.
 session:
-  # backend selects the session store: "local" (filesystem), "postgres", or "memory".
-  # "memory" is for testing only — all state is lost on pod restart.
-  backend: "local"
   # postgresSecretName references a Kubernetes Secret containing the Postgres DSN
-  # (key specified by postgresSecretKey). Required when backend=postgres.
+  # under postgresSecretKey. When set, Postgres is used; otherwise the local
+  # file store under KLAUS_SESSION_DIR (or ~/.klaus/sessions) is used.
   postgresSecretName: ""
-  postgresSecretKey: "dsn"
+  postgresSecretKey: "uri"
   # dir overrides the directory used by the local backend.
   # Defaults to $HOME/.claude/projects when empty.
   dir: ""

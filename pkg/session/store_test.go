@@ -102,11 +102,11 @@ func TestLocalStore_AutoSeq(t *testing.T) {
 }
 
 // TestPostgresStore runs the store contract against a real Postgres instance.
-// It is skipped unless KLAUS_PG_DSN is set.
+// It is skipped unless KLAUS_PGSQL_DSN is set.
 func TestPostgresStore(t *testing.T) {
-	dsn := os.Getenv("KLAUS_PG_DSN")
+	dsn := os.Getenv("KLAUS_PGSQL_DSN")
 	if dsn == "" {
-		t.Skip("KLAUS_PG_DSN not set, skipping Postgres store test")
+		t.Skip("KLAUS_PGSQL_DSN not set, skipping Postgres store test")
 	}
 
 	store, err := session.NewPostgresStore(t.Context(), dsn)

@@ -180,6 +180,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+	p.sessionID = ""
 	// Preserve liveMessages and messageCount across turns so that
 	// the MCP messages tool returns the full conversation history
 	// and message_count accumulates rather than resetting (#171).
