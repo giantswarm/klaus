@@ -306,7 +306,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		if d, parseErr := time.ParseDuration(cfg.Claude.RetryBaseBackoff); parseErr == nil {
 			opts.RetryBaseBackoff = d
 		} else {
-			log.Printf("WARNING: ignoring invalid KLAUS_RETRY_BASE_BACKOFF %q: %v", cfg.Claude.RetryBaseBackoff, parseErr)
+			slog.Warn("ignoring invalid KLAUS_RETRY_BASE_BACKOFF", "value", cfg.Claude.RetryBaseBackoff, "error", parseErr)
 		}
 	}
 	// Derive NoSessionPersistence from mode: agent -> true, chat -> false.
@@ -332,8 +332,8 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
 
-	// Build the session store. Defaults to local backend; Postgres is used when
-	// KLAUS_RESULT_BACKEND=postgres and KLAUS_PG_DSN is set.
+	// Build the session store. Uses Postgres when KLAUS_PG_DSN is set,
+	// otherwise falls back to a local file store under ~/.klaus/sessions.
 	sessionStore, err := session.NewStore(context.Background())
 	if err != nil {
 		return fmt.Errorf("initialising session store: %w", err)
@@ -345,7 +345,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 			}
 		}()
 	}
-	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore), "backend", os.Getenv("KLAUS_RESULT_BACKEND"))
+	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore))
 
 	// Seed the session store when CLAUDE_CONTEXT_ID and CLAUDE_SESSION_ID are
 	// set. This lets an operator pre-bind a context → session mapping at pod
@@ -355,9 +355,9 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	seedSessionID := os.Getenv("CLAUDE_SESSION_ID")
 	if seedContextID != "" && seedSessionID != "" {
 		if bindErr := sessionStore.BindSession(context.Background(), seedContextID, seedSessionID); bindErr != nil {
-			log.Printf("WARNING: failed to seed session store (context=%s session=%s): %v", seedContextID, seedSessionID, bindErr) //nolint:gosec
+			slog.Error("failed to seed session store", "context_id", seedContextID, "session_id", seedSessionID, "error", bindErr)
 		} else {
-			log.Printf("Pre-seeded session store: context=%s session=%s", seedContextID, seedSessionID) //nolint:gosec
+			slog.Info("pre-seeded session store", "context_id", seedContextID, "session_id", seedSessionID)
 		}
 	}
 
@@ -414,7 +414,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// KLAUD_EMBEDDING_MODEL is unset.
 	memClient := memory.New()
 	if _, ok := memClient.(memory.NoOp); !ok {
-		log.Printf("memory augmentation enabled (kagent endpoint: %s)", os.Getenv("KAGENT_MEMORY_ENDPOINT")) //nolint:gosec
+		slog.Info("memory augmentation enabled", "endpoint", os.Getenv("KAGENT_MEMORY_ENDPOINT"))
 	}
 
 	// Build the A2A executor.
