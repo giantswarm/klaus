@@ -3,7 +3,7 @@ module github.com/giantswarm/klaus
 go 1.26.4
 
 require (
-	github.com/a2aproject/a2a-go v0.3.15
+	github.com/a2aproject/a2a-go/v2 v2.3.1
 	github.com/creativeprojects/go-selfupdate v1.5.2
 	github.com/giantswarm/mcp-oauth v0.2.194
 	github.com/giantswarm/mcp-toolkit v0.2.7
@@ -78,6 +78,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

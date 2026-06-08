@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2aclient"
-	"github.com/a2aproject/a2a-go/a2aclient/agentcard"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 )
 
 // Registry is the outbound A2A call dispatcher. It holds static name→URL
@@ -70,10 +70,10 @@ func (r *Registry) Call(ctx context.Context, target, message string) (string, er
 		return "", err
 	}
 
-	params := &a2a.MessageSendParams{
-		Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: message}),
+	req := &a2a.SendMessageRequest{
+		Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.NewTextPart(message)),
 	}
-	result, err := client.SendMessage(ctx, params)
+	result, err := client.SendMessage(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("A2A SendMessage to %q: %w", target, err)
 	}
@@ -86,20 +86,20 @@ func (r *Registry) Call(ctx context.Context, target, message string) (string, er
 	return r.pollTask(ctx, client, task, target)
 }
 
-// pollTask streams task events via ResubscribeToTask until a terminal state is reached.
+// pollTask streams task events via SubscribeToTask until a terminal state is reached.
 // Artifact text is accumulated and used as fallback when the terminal status carries
 // no message — the common case for Klaus agents, which emit output as artifact events.
 func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task *a2a.Task, target string) (string, error) {
 	log.Printf("[a2a] task %q submitted to %q, polling until terminal", task.ID, target)
 
 	var artifactText strings.Builder
-	for event, err := range client.ResubscribeToTask(ctx, &a2a.TaskIDParams{ID: task.ID}) {
+	for event, err := range client.SubscribeToTask(ctx, &a2a.SubscribeToTaskRequest{ID: task.ID}) {
 		if err != nil {
-			return "", fmt.Errorf("A2A ResubscribeToTask %q: %w", target, err)
+			return "", fmt.Errorf("A2A SubscribeToTask %q: %w", target, err)
 		}
 		switch e := event.(type) {
 		case *a2a.TaskStatusUpdateEvent:
-			log.Printf("[a2a] task %q state=%s final=%v", task.ID, e.Status.State, e.Final)
+			log.Printf("[a2a] task %q state=%s", task.ID, e.Status.State)
 			if e.Status.State.Terminal() {
 				if text := extractText(e.Status.Message); text != "" {
 					return text, nil
@@ -109,8 +109,8 @@ func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task 
 		case *a2a.TaskArtifactUpdateEvent:
 			if e.Artifact != nil {
 				for _, part := range e.Artifact.Parts {
-					if tp, ok := part.(a2a.TextPart); ok {
-						artifactText.WriteString(tp.Text)
+					if part != nil {
+						artifactText.WriteString(part.Text())
 					}
 				}
 			}
@@ -218,8 +218,8 @@ func textFromResult(result a2a.SendMessageResult) string {
 				continue
 			}
 			for _, part := range artifact.Parts {
-				if tp, ok := part.(a2a.TextPart); ok {
-					artifactSB.WriteString(tp.Text)
+				if part != nil {
+					artifactSB.WriteString(part.Text())
 				}
 			}
 		}

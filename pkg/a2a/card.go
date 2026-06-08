@@ -3,16 +3,16 @@ package a2a
 import (
 	"os"
 
-	"github.com/a2aproject/a2a-go/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 
 	"github.com/giantswarm/klaus/pkg/project"
 )
 
 const (
-	envAgentName        = "KKAUS_AGENT_NAME"
-	envAgentDescription = "KKAUS_AGENT_DESCRIPTION"
-	envAgentVersion     = "KKAUS_AGENT_VERSION"
-	envAgentURL         = "KKAUS_AGENT_URL"
+	envAgentName        = "KLAUS_AGENT_NAME"
+	envAgentDescription = "KLAUS_AGENT_DESCRIPTION"
+	envAgentVersion     = "KLAUS_AGENT_VERSION"
+	envAgentURL         = "KLAUS_AGENT_URL"
 
 	mimeTextPlain = "text/plain"
 )
@@ -21,10 +21,10 @@ const (
 // with sensible defaults derived from the build-time project metadata.
 //
 // Environment variables:
-//   - KKAUS_AGENT_NAME         (default: project.Name)
-//   - KKAUS_AGENT_DESCRIPTION  (default: "Klaus AI agent")
-//   - KKAUS_AGENT_VERSION      (default: project.Version())
-//   - KKAUS_AGENT_URL          (default: "http://localhost:8080/a2a")
+//   - KLAUS_AGENT_NAME         (default: project.Name)
+//   - KLAUS_AGENT_DESCRIPTION  (default: "Klaus AI agent")
+//   - KLAUS_AGENT_VERSION      (default: project.Version())
+//   - KLAUS_AGENT_URL          (default: "http://localhost:8080/a2a")
 func AgentCard() *a2a.AgentCard {
 	name := envOrDefault(envAgentName, project.Name)
 	description := envOrDefault(envAgentDescription, "Klaus AI agent")
@@ -32,14 +32,15 @@ func AgentCard() *a2a.AgentCard {
 	url := envOrDefault(envAgentURL, "http://localhost:8080/a2a")
 
 	return &a2a.AgentCard{
-		Name:               name,
-		Description:        description,
-		Version:            version,
-		URL:                url,
-		ProtocolVersion:    string(a2a.Version),
-		PreferredTransport: a2a.TransportProtocolJSONRPC,
-		AdditionalInterfaces: []a2a.AgentInterface{
-			{URL: url, Transport: a2a.TransportProtocolJSONRPC},
+		Name:        name,
+		Description: description,
+		Version:     version,
+		SupportedInterfaces: []*a2a.AgentInterface{
+			{
+				URL:             url,
+				ProtocolBinding: a2a.TransportProtocolJSONRPC,
+				ProtocolVersion: a2a.Version,
+			},
 		},
 		DefaultInputModes:  []string{mimeTextPlain},
 		DefaultOutputModes: []string{mimeTextPlain},

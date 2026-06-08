@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/a2aproject/a2a-go/a2asrv"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/kagentapi"

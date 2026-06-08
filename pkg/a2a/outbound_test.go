@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2aclient"
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,13 +93,13 @@ func TestRegistry_resolveURL_invalidURL(t *testing.T) {
 }
 
 func TestTextFromResult_message(t *testing.T) {
-	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.TextPart{Text: "hello"})
+	msg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("hello"))
 	got := textFromResult(msg)
 	require.Equal(t, "hello", got)
 }
 
 func TestTextFromResult_taskStatusMessage(t *testing.T) {
-	statusMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.TextPart{Text: "done"})
+	statusMsg := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("done"))
 	task := &a2a.Task{
 		Status: a2a.TaskStatus{Message: statusMsg},
 	}
@@ -110,7 +110,7 @@ func TestTextFromResult_taskStatusMessage(t *testing.T) {
 func TestTextFromResult_taskHistoryFallback(t *testing.T) {
 	task := &a2a.Task{
 		Status:  a2a.TaskStatus{},
-		History: []*a2a.Message{a2a.NewMessage(a2a.MessageRoleAgent, a2a.TextPart{Text: "from history"})},
+		History: []*a2a.Message{a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("from history"))},
 	}
 	got := textFromResult(task)
 	require.Equal(t, "from history", got)
@@ -123,7 +123,7 @@ func TestTextFromResult_taskArtifactFallback(t *testing.T) {
 	task := &a2a.Task{
 		Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
 		Artifacts: []*a2a.Artifact{
-			{ID: a2a.NewArtifactID(), Parts: a2a.ContentParts{a2a.TextPart{Text: "artifact output"}}},
+			{ID: a2a.NewArtifactID(), Parts: a2a.ContentParts{a2a.NewTextPart("artifact output")}},
 		},
 	}
 	got := textFromResult(task)
@@ -143,12 +143,10 @@ func TestRegistry_Call_integration(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, _ *http.Request) {
 		card := a2a.AgentCard{
-			Name:               "test-agent",
-			URL:                srv.URL,
-			ProtocolVersion:    "0.3",
-			PreferredTransport: a2a.TransportProtocolJSONRPC,
-			AdditionalInterfaces: []a2a.AgentInterface{
-				{URL: srv.URL, Transport: a2a.TransportProtocolJSONRPC},
+			Name:    "test-agent",
+			Version: "0.1.0",
+			SupportedInterfaces: []*a2a.AgentInterface{
+				{URL: srv.URL, ProtocolBinding: a2a.TransportProtocolJSONRPC, ProtocolVersion: a2a.Version},
 			},
 			Capabilities:       a2a.AgentCapabilities{Streaming: false},
 			DefaultInputModes:  []string{"text/plain"},
@@ -164,11 +162,11 @@ func TestRegistry_Call_integration(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 
-		reply := a2a.NewMessage(a2a.MessageRoleAgent, a2a.TextPart{Text: "pong"})
+		reply := a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewTextPart("pong"))
 		resp := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
-			"result":  reply,
+			"result":  map[string]any{"message": reply},
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)

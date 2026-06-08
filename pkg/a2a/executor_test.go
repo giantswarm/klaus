@@ -3,16 +3,14 @@ package a2a_test
 import (
 	"context"
 	"encoding/json"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	a2asdk "github.com/a2aproject/a2a-go/a2a"
-	"github.com/a2aproject/a2a-go/a2asrv"
-	"github.com/a2aproject/a2a-go/a2asrv/eventqueue"
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	"github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
@@ -98,46 +96,28 @@ func (f *fakePrompter) OpenAIMessages(_ int) claude.OpenAIMessagesInfo {
 }
 func (f *fakePrompter) MarshalStatus() ([]byte, error) { return json.Marshal(f.statusVal) }
 
-// captureQueue collects events written during a test. It is safe for
-// concurrent use (Execute writes from a goroutine while tests read).
-type captureQueue struct {
-	mu     sync.Mutex
-	events []a2asdk.Event
+// collectEvents drains the iterator and returns all events. Any iteration error
+// is returned immediately alongside the events collected so far.
+func collectEvents(ctx context.Context, seq func(yield func(a2asdk.Event, error) bool)) ([]a2asdk.Event, error) {
+	var events []a2asdk.Event
+	for event, err := range seq {
+		if err != nil {
+			return events, err
+		}
+		events = append(events, event)
+	}
+	_ = ctx
+	return events, nil
 }
 
-func (q *captureQueue) Write(_ context.Context, event a2asdk.Event) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.events = append(q.events, event)
-	return nil
-}
-
-func (q *captureQueue) WriteVersioned(_ context.Context, event a2asdk.Event, _ a2asdk.TaskVersion) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.events = append(q.events, event)
-	return nil
-}
-
-func (q *captureQueue) len() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return len(q.events)
-}
-
-func (q *captureQueue) Read(_ context.Context) (a2asdk.Event, a2asdk.TaskVersion, error) {
-	return nil, 0, eventqueue.ErrQueueClosed
-}
-
-func (q *captureQueue) Close() error { return nil }
-
-var _ eventqueue.Queue = (*captureQueue)(nil)
-
-// makeReqCtx builds a minimal RequestContext for testing.
-func makeReqCtx(contextID string, text string) *a2asrv.RequestContext {
-	msg := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.TextPart{Text: text})
-	msg.ContextID = contextID
-	return &a2asrv.RequestContext{
+// makeExecCtx builds a minimal ExecutorContext for testing.
+func makeExecCtx(contextID string, text string) *a2asrv.ExecutorContext {
+	var msg *a2asdk.Message
+	if text != "" {
+		msg = a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart(text))
+		msg.ContextID = contextID
+	}
+	return &a2asrv.ExecutorContext{
 		ContextID: contextID,
 		TaskID:    "task-123",
 		Message:   msg,
@@ -149,21 +129,19 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	reqCtx := makeReqCtx("ctx-1", "/clear please clear the context")
-
-	err := exec.Execute(t.Context(), reqCtx, queue)
+	execCtx := makeExecCtx("ctx-1", "/clear please clear the context")
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
 	require.NoError(t, err)
 
 	// Should have written an artifact event (the intercept reply) + completed.
-	require.GreaterOrEqual(t, len(queue.events), 2)
+	require.GreaterOrEqual(t, len(events), 2)
 
 	// The last event must be a terminal completed state.
-	last := queue.events[len(queue.events)-1]
+	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok, "last event should be TaskStatusUpdateEvent, got %T", last)
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 
 	// The prompter must NOT have been called for intercepted commands.
 	require.Empty(t, prompter.capturedOpts, "RunWithOptions must not be called for intercepted slash commands")
@@ -174,17 +152,16 @@ func TestExecutor_EmptyText(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	reqCtx := makeReqCtx("ctx-2", "")
+	execCtx := makeExecCtx("ctx-2", "")
 
-	err := exec.Execute(t.Context(), reqCtx, queue)
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
 	require.NoError(t, err)
 
-	require.Len(t, queue.events, 1)
-	statusEv, ok := queue.events[0].(*a2asdk.TaskStatusUpdateEvent)
+	require.Len(t, events, 1)
+	statusEv, ok := events[0].(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateFailed, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 }
 
 func TestExecutor_BusyReturnsRejected(t *testing.T) {
@@ -192,19 +169,17 @@ func TestExecutor_BusyReturnsRejected(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	reqCtx := makeReqCtx("ctx-3", "hello")
-
-	err := exec.Execute(t.Context(), reqCtx, queue)
+	execCtx := makeExecCtx("ctx-3", "hello")
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
 	require.NoError(t, err)
 
 	// working event + rejected event
-	require.GreaterOrEqual(t, len(queue.events), 1)
-	last := queue.events[len(queue.events)-1]
+	require.GreaterOrEqual(t, len(events), 1)
+	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateRejected, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 }
 
 func TestExecutor_SuccessfulTurn(t *testing.T) {
@@ -219,21 +194,19 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	reqCtx := makeReqCtx("ctx-4", "What is the answer?")
-
-	err := exec.Execute(t.Context(), reqCtx, queue)
+	execCtx := makeExecCtx("ctx-4", "What is the answer?")
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
 	require.NoError(t, err)
 
 	// Expect: working → artifact → completed.
-	require.GreaterOrEqual(t, len(queue.events), 3)
+	require.GreaterOrEqual(t, len(events), 3)
 
 	// The last event must be terminal completed.
-	last := queue.events[len(queue.events)-1]
+	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 
 	// Conversation turns are recorded asynchronously; give them time to land.
 	require.Eventually(t, func() bool {
@@ -251,38 +224,49 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 	// Use a prompter that blocks until the context is cancelled.
 	blocked := make(chan struct{})
-	prompter := &fakePrompter{}
-	prompter.messages = nil
-	// Replace RunWithOptions with a blocking version.
-	blocker := &blockingPrompter{fakePrompter: prompter, block: blocked}
+	blocker := &blockingPrompter{
+		fakePrompter: &fakePrompter{},
+		block:        blocked,
+	}
 
 	store := session.NewMemoryStore()
 	exec := a2a.New(blocker, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	// First request: holds the lock.
+	// First request: holds the lock. Signal when the first event arrives.
 	ctx1, cancel1 := context.WithCancel(t.Context())
-	queue1 := &captureQueue{}
-	reqCtx1 := makeReqCtx("ctx-concurrent", "first")
+	execCtx1 := makeExecCtx("ctx-concurrent", "first")
+	firstEvent := make(chan struct{})
 
 	doneCh := make(chan error, 1)
 	go func() {
-		doneCh <- exec.Execute(ctx1, reqCtx1, queue1)
+		var firstSent bool
+		for _, iterErr := range exec.Execute(ctx1, execCtx1) {
+			if !firstSent {
+				close(firstEvent)
+				firstSent = true
+			}
+			if iterErr != nil {
+				doneCh <- iterErr
+				return
+			}
+		}
+		doneCh <- nil
 	}()
 
-	// Give the goroutine time to acquire the lock.
-	// Poll until we see the working event.
-	require.Eventually(t, func() bool {
-		return queue1.len() > 0
-	}, timeout, pollInterval)
+	// Wait until the first (working) event has been yielded — proves lock is held.
+	select {
+	case <-firstEvent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first event from first request")
+	}
 
-	// Second request to the SAME contextID — must be rejected.
-	queue2 := &captureQueue{}
-	reqCtx2 := makeReqCtx("ctx-concurrent", "second")
-	err := exec.Execute(t.Context(), reqCtx2, queue2)
+	// Second request to the SAME contextID — must be rejected immediately.
+	execCtx2 := makeExecCtx("ctx-concurrent", "second")
+	events2, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx2))
 	require.NoError(t, err)
 
-	require.Len(t, queue2.events, 1)
-	statusEv, ok := queue2.events[0].(*a2asdk.TaskStatusUpdateEvent)
+	require.Len(t, events2, 1)
+	statusEv, ok := events2[0].(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateRejected, statusEv.Status.State)
 
@@ -297,16 +281,15 @@ func TestExecutor_Cancel(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	reqCtx := makeReqCtx("ctx-cancel", "")
-	err := exec.Cancel(t.Context(), reqCtx, queue)
+	execCtx := makeExecCtx("ctx-cancel", "")
+	events, err := collectEvents(t.Context(), exec.Cancel(t.Context(), execCtx))
 	require.NoError(t, err)
 
-	require.Len(t, queue.events, 1)
-	statusEv, ok := queue.events[0].(*a2asdk.TaskStatusUpdateEvent)
+	require.Len(t, events, 1)
+	statusEv, ok := events[0].(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateCanceled, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 }
 
 const (
@@ -342,15 +325,14 @@ func TestExecutor_SubprocessError(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	err := exec.Execute(t.Context(), makeReqCtx("ctx-err", "hello"), queue)
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-err", "hello")))
 	require.NoError(t, err)
 
-	last := queue.events[len(queue.events)-1]
+	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateFailed, statusEv.Status.State)
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 }
 
 func TestExecutor_CollectResultTextFallback(t *testing.T) {
@@ -367,12 +349,11 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	err := exec.Execute(t.Context(), makeReqCtx("ctx-fallback", "hello"), queue)
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-fallback", "hello")))
 	require.NoError(t, err)
 
 	var artifactEv *a2asdk.TaskArtifactUpdateEvent
-	for _, ev := range queue.events {
+	for _, ev := range events {
 		if ae, ok := ev.(*a2asdk.TaskArtifactUpdateEvent); ok {
 			artifactEv = ae
 			break
@@ -380,9 +361,7 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 	}
 	require.NotNil(t, artifactEv, "expected artifact-update event from CollectResultText fallback")
 	require.Len(t, artifactEv.Artifact.Parts, 1)
-	tp, ok := artifactEv.Artifact.Parts[0].(a2asdk.TextPart)
-	require.True(t, ok)
-	assert.Equal(t, "full response from stream", tp.Text)
+	assert.Equal(t, "full response from stream", artifactEv.Artifact.Parts[0].Text())
 	assert.True(t, artifactEv.LastChunk)
 }
 
@@ -400,13 +379,13 @@ func TestExecutor_ResumeAlwaysDerivedFromContextID(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
-	q1 := &captureQueue{}
-	require.NoError(t, exec.Execute(t.Context(), makeReqCtx("ctx-derived", "first"), q1))
+	_, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-derived", "first")))
+	require.NoError(t, err)
 
 	// Second turn: subprocess reports a different session ID — must not affect RunOptions.
 	prompter.statusVal.SessionID = "different-session-id"
-	q2 := &captureQueue{}
-	require.NoError(t, exec.Execute(t.Context(), makeReqCtx("ctx-derived", "second"), q2))
+	_, err = collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-derived", "second")))
+	require.NoError(t, err)
 
 	require.Len(t, prompter.capturedOpts, 2)
 	assert.Equal(t, "derived", prompter.capturedOpts[0].Resume)
@@ -431,10 +410,9 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
 	// First turn — no prior session.
-	q1 := &captureQueue{}
-	err := exec.Execute(t.Context(), makeReqCtx("ctx-resume", "first"), q1)
+	events1, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-resume", "first")))
 	require.NoError(t, err)
-	last1 := q1.events[len(q1.events)-1].(*a2asdk.TaskStatusUpdateEvent)
+	last1 := events1[len(events1)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last1.Status.State)
 
 	// First turn RunOptions: Resume is derived from contextID; SessionID is not set.
@@ -446,10 +424,9 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	assert.True(t, opts1.SaveSession, "first turn must set SaveSession so the conversation is persisted")
 
 	// Second turn — session ID is always derived from contextID, not from store.
-	q2 := &captureQueue{}
-	err = exec.Execute(t.Context(), makeReqCtx("ctx-resume", "second"), q2)
+	events2, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-resume", "second")))
 	require.NoError(t, err)
-	last2 := q2.events[len(q2.events)-1].(*a2asdk.TaskStatusUpdateEvent)
+	last2 := events2[len(events2)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last2.Status.State)
 
 	// Second turn RunOptions: same derived Resume, no SessionID.
@@ -507,16 +484,15 @@ func TestExecutor_StaleResumeRetry(t *testing.T) {
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
-	queue := &captureQueue{}
-	err := exec.Execute(t.Context(), makeReqCtx("ctx-stale", "hello after restart"), queue)
+	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-stale", "hello after restart")))
 	require.NoError(t, err)
 
 	// Turn must succeed, not fail.
-	last := queue.events[len(queue.events)-1]
+	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State, "stale resume should retry and complete")
-	assert.True(t, statusEv.Final)
+	assert.True(t, statusEv.Status.State.Terminal())
 
 	// Two RunWithOptions calls: first with Resume derived from contextID, second fresh with SessionID.
 	require.Len(t, prompter.capturedOpts, 2, "expected exactly two RunWithOptions calls")

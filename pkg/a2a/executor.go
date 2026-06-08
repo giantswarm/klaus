@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log"
 	"strings"
 	"sync"
@@ -13,8 +14,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/a2aproject/a2a-go/a2asrv"
-	"github.com/a2aproject/a2a-go/a2asrv/eventqueue"
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
 
 	"github.com/giantswarm/klaus/pkg/claude"
@@ -51,8 +52,7 @@ type Executor struct {
 	mu sync.Mutex
 	// inFlight tracks contextIDs that currently have an Execute in progress.
 	// A second request for the same contextID while one is in flight receives
-	// a rejected event. Using a presence-set avoids the unlock-then-delete
-	// race that a per-context mutex map would have.
+	// a rejected event.
 	inFlight map[string]struct{}
 }
 
@@ -79,248 +79,261 @@ func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient 
 }
 
 // Execute implements a2asrv.AgentExecutor. It runs a Klaus prompt for the
-// request and writes A2A events to queue:
+// request and yields A2A events in sequence:
 //
 //  1. working — immediately after lock acquired
 //  2. working (streaming) — for each assistant text chunk
 //  3. artifact with LastChunk=true — full result text when turn completes
-//  4. completed (Final=true) — terminal state
+//  4. completed — terminal state
 //
-// If the contextID is already in-flight, a rejected event is written instead.
-func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, queue eventqueue.Queue) error {
-	contextID := reqCtx.ContextID
+// If the contextID is already in-flight, a rejected event is yielded instead.
+func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
+	return func(yield func(a2asdk.Event, error) bool) {
+		contextID := execCtx.ContextID
 
-	_, span := telemetry.Tracer("a2a").Start(ctx, telemetry.SpanA2ATaskReceived,
-		trace.WithAttributes(
-			attribute.String(telemetry.AttrContextID, contextID),
-			attribute.Int(telemetry.AttrMessageLength, len(extractText(reqCtx.Message))),
-		))
-	span.End()
+		_, span := telemetry.Tracer("a2a").Start(ctx, telemetry.SpanA2ATaskReceived,
+			trace.WithAttributes(
+				attribute.String(telemetry.AttrContextID, contextID),
+				attribute.Int(telemetry.AttrMessageLength, len(extractText(execCtx.Message))),
+			))
+		span.End()
 
-	// Acquire the per-context in-flight slot; reject if already running.
-	if !e.lockForContext(contextID) {
-		log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
-		return queue.Write(ctx, rejectedEvent(reqCtx, "another request for this context is already in-flight"))
-	}
-	var releaseOnce sync.Once
-	releaseCtx := func() { releaseOnce.Do(func() { e.releaseContext(contextID) }) }
-	defer releaseCtx()
-
-	// Inject the authenticated caller's subject into ctx so memory scopes to
-	// the user rather than the static KAGENT_MEMORY_USER_ID fallback.
-	if authInfo := kagentapi.AuthInfoFromContext(ctx); authInfo.UserSub != "" {
-		ctx = memory.WithUserID(ctx, authInfo.UserSub)
-	}
-
-	// Extract prompt text.
-	text := extractText(reqCtx.Message)
-	if text == "" {
-		return queue.Write(ctx, failedEvent(reqCtx, "message contains no text content"))
-	}
-
-	log.Printf("[a2a] turn start contextID=%q prompt=%q", contextID, claude.Truncate(text, 120))
-
-	// Intercept TUI-only slash commands.
-	if cmd, ok := interceptSlashCommand(text); ok {
-		reply := fmt.Sprintf(
-			"`%s` is not available in this environment — Claude Code is running headless. "+
-				"Model and configuration are controlled via environment variables (CLAUDE_MODEL, etc.).", cmd)
-		if err := queue.Write(ctx, artifactEvent(reqCtx, reply, "")); err != nil {
-			return fmt.Errorf("write intercept artifact: %w", err)
+		// Acquire the per-context in-flight slot; reject if already running.
+		if !e.lockForContext(contextID) {
+			log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
+			yield(rejectedEvent(execCtx, "another request for this context is already in-flight"), nil)
+			return
 		}
-		return queue.Write(ctx, completedEvent(reqCtx))
-	}
+		var releaseOnce sync.Once
+		releaseCtx := func() { releaseOnce.Do(func() { e.releaseContext(contextID) }) }
+		defer releaseCtx()
 
-	// Emit initial working state.
-	if err := queue.Write(ctx, workingEvent(reqCtx, "thinking…")); err != nil {
-		return fmt.Errorf("write working: %w", err)
-	}
-
-	// Look up or build RunOptions based on mode.
-	runOpts, err := e.runOptions(ctx, contextID)
-	if err != nil {
-		log.Printf("[a2a] session lookup failed for contextID %q: %v", contextID, err)
-		// Non-fatal: proceed without resume.
-	}
-
-	// Retrieve semantic memory and prepend relevant past context to the prompt.
-	augmented := e.augmentWithMemory(ctx, contextID, text)
-
-	// Run the prompt.
-	ch, err := e.prompter.RunWithOptions(ctx, augmented, runOpts)
-	if err != nil {
-		if errors.Is(err, claude.ErrBusy) {
-			return queue.Write(ctx, rejectedEvent(reqCtx, "agent subprocess is busy"))
+		// Inject the authenticated caller's subject into ctx so memory scopes to
+		// the user rather than the static KAGENT_MEMORY_USER_ID fallback.
+		if authInfo := kagentapi.AuthInfoFromContext(ctx); authInfo.UserSub != "" {
+			ctx = memory.WithUserID(ctx, authInfo.UserSub)
 		}
-		log.Printf("[a2a] RunWithOptions failed for contextID %q: %v", contextID, err)
-		return queue.Write(ctx, failedEvent(reqCtx, "agent error: "+err.Error()))
-	}
 
-	// Drain the stream, emit working events for text chunks, and collect all
-	// messages for result extraction and session ID discovery.
-	var lastText string
-	var messages []claude.StreamMessage
-	var streamSessionID string
-drainLoop:
-	for {
-		select {
-		case <-ctx.Done():
-			// Release before Stop so a concurrent retry can acquire the slot
-			// without waiting for the subprocess to drain (up to 30 s).
-			releaseCtx()
-			_ = e.prompter.Stop()
-			return ctx.Err()
-		case msg, ok := <-ch:
-			if !ok {
-				break drainLoop
+		// Extract prompt text.
+		text := extractText(execCtx.Message)
+		if text == "" {
+			yield(failedEvent(execCtx, "message contains no text content"), nil)
+			return
+		}
+
+		log.Printf("[a2a] turn start contextID=%q prompt=%q", contextID, claude.Truncate(text, 120))
+
+		// Intercept TUI-only slash commands.
+		if cmd, ok := interceptSlashCommand(text); ok {
+			reply := fmt.Sprintf(
+				"`%s` is not available in this environment — Claude Code is running headless. "+
+					"Model and configuration are controlled via environment variables (CLAUDE_MODEL, etc.).", cmd)
+			if !yield(artifactEvent(execCtx, reply, ""), nil) {
+				return
 			}
-			messages = append(messages, msg)
-			if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
-				streamSessionID = msg.SessionID
-				log.Printf("[a2a] session contextID=%q sessionID=%q", contextID, msg.SessionID)
+			yield(completedEvent(execCtx), nil)
+			return
+		}
+
+		// Emit initial working state.
+		if !yield(workingEvent(execCtx, "thinking…"), nil) {
+			return
+		}
+
+		// Look up or build RunOptions based on mode.
+		runOpts, err := e.runOptions(ctx, contextID)
+		if err != nil {
+			log.Printf("[a2a] session lookup failed for contextID %q: %v", contextID, err)
+			// Non-fatal: proceed without resume.
+		}
+
+		// Retrieve semantic memory and prepend relevant past context to the prompt.
+		augmented := e.augmentWithMemory(ctx, contextID, text)
+
+		// Run the prompt.
+		ch, err := e.prompter.RunWithOptions(ctx, augmented, runOpts)
+		if err != nil {
+			if errors.Is(err, claude.ErrBusy) {
+				yield(rejectedEvent(execCtx, "agent subprocess is busy"), nil)
+				return
 			}
-			if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
-				log.Printf("[a2a] tool_use contextID=%q tool=%q", contextID, msg.ToolName)
-				if writeErr := queue.Write(ctx, workingEvent(reqCtx, "using tool: "+msg.ToolName)); writeErr != nil {
-					log.Printf("[a2a] write tool_use working: %v", writeErr)
+			log.Printf("[a2a] RunWithOptions failed for contextID %q: %v", contextID, err)
+			yield(failedEvent(execCtx, "agent error: "+err.Error()), nil)
+			return
+		}
+
+		// Drain the stream, emit working events for text chunks, and collect all
+		// messages for result extraction and session ID discovery.
+		var lastText string
+		var messages []claude.StreamMessage
+		var streamSessionID string
+	drainLoop:
+		for {
+			select {
+			case <-ctx.Done():
+				// Release before Stop so a concurrent retry can acquire the slot
+				// without waiting for the subprocess to drain (up to 30 s).
+				releaseCtx()
+				_ = e.prompter.Stop()
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					break drainLoop
 				}
-			}
-			if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
-				if msg.Text != "" && msg.Text != lastText {
-					lastText = msg.Text
-					if writeErr := queue.Write(ctx, workingEvent(reqCtx, claude.Truncate(msg.Text, 200))); writeErr != nil {
-						log.Printf("[a2a] write working chunk: %v", writeErr)
+				messages = append(messages, msg)
+				if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
+					streamSessionID = msg.SessionID
+					log.Printf("[a2a] session contextID=%q sessionID=%q", contextID, msg.SessionID)
+				}
+				if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
+					log.Printf("[a2a] tool_use contextID=%q tool=%q", contextID, msg.ToolName)
+					if !yield(workingEvent(execCtx, "using tool: "+msg.ToolName), nil) {
+						releaseCtx()
+						_ = e.prompter.Stop()
+						return
 					}
 				}
-			}
-		}
-	}
-
-	// Stale resume: subprocess exited with no session ID — the session file was
-	// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
-	// session using the deterministic context-derived ID so the turn succeeds.
-	if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
-		e.prompter.Status().Status == claude.ProcessStatusError {
-		log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
-		retryOpts := &claude.RunOptions{
-			SaveSession: true,
-			SessionID:   sessionIDFromContext(contextID),
-		}
-		if retryCh, retryErr := e.prompter.RunWithOptions(ctx, augmented, retryOpts); retryErr == nil {
-			messages = messages[:0]
-			lastText = ""
-		retryDrainLoop:
-			for {
-				select {
-				case <-ctx.Done():
-					releaseCtx()
-					_ = e.prompter.Stop()
-					return ctx.Err()
-				case msg, ok := <-retryCh:
-					if !ok {
-						break retryDrainLoop
-					}
-					messages = append(messages, msg)
-					if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
-						streamSessionID = msg.SessionID
-						log.Printf("[a2a] retry session contextID=%q sessionID=%q", contextID, msg.SessionID)
-					}
-					if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
-						log.Printf("[a2a] tool_use (retry) contextID=%q tool=%q", contextID, msg.ToolName)
-						if writeErr := queue.Write(ctx, workingEvent(reqCtx, "using tool: "+msg.ToolName)); writeErr != nil {
-							log.Printf("[a2a] write tool_use working (retry): %v", writeErr)
+				if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
+					if msg.Text != "" && msg.Text != lastText {
+						lastText = msg.Text
+						if !yield(workingEvent(execCtx, claude.Truncate(msg.Text, 200)), nil) {
+							releaseCtx()
+							_ = e.prompter.Stop()
+							return
 						}
 					}
-					if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
-						if msg.Text != "" && msg.Text != lastText {
-							lastText = msg.Text
-							if writeErr := queue.Write(ctx, workingEvent(reqCtx, claude.Truncate(msg.Text, 200))); writeErr != nil {
-								log.Printf("[a2a] write working chunk (retry): %v", writeErr)
+				}
+			}
+		}
+
+		// Stale resume: subprocess exited with no session ID — the session file was
+		// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
+		// session using the deterministic context-derived ID so the turn succeeds.
+		if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
+			e.prompter.Status().Status == claude.ProcessStatusError {
+			log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
+			retryOpts := &claude.RunOptions{
+				SaveSession: true,
+				SessionID:   sessionIDFromContext(contextID),
+			}
+			if retryCh, retryErr := e.prompter.RunWithOptions(ctx, augmented, retryOpts); retryErr == nil {
+				messages = messages[:0]
+				lastText = ""
+			retryDrainLoop:
+				for {
+					select {
+					case <-ctx.Done():
+						releaseCtx()
+						_ = e.prompter.Stop()
+						return
+					case msg, ok := <-retryCh:
+						if !ok {
+							break retryDrainLoop
+						}
+						messages = append(messages, msg)
+						if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
+							streamSessionID = msg.SessionID
+							log.Printf("[a2a] retry session contextID=%q sessionID=%q", contextID, msg.SessionID)
+						}
+						if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
+							log.Printf("[a2a] tool_use (retry) contextID=%q tool=%q", contextID, msg.ToolName)
+							if !yield(workingEvent(execCtx, "using tool: "+msg.ToolName), nil) {
+								releaseCtx()
+								_ = e.prompter.Stop()
+								return
+							}
+						}
+						if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
+							if msg.Text != "" && msg.Text != lastText {
+								lastText = msg.Text
+								if !yield(workingEvent(execCtx, claude.Truncate(msg.Text, 200)), nil) {
+									releaseCtx()
+									_ = e.prompter.Stop()
+									return
+								}
 							}
 						}
 					}
 				}
+			} else {
+				log.Printf("[a2a] retry RunWithOptions failed contextID=%q: %v", contextID, retryErr)
 			}
-		} else {
-			log.Printf("[a2a] retry RunWithOptions failed contextID=%q: %v", contextID, retryErr)
 		}
-	}
 
-	// Log the raw result for console visibility (kubectl logs).
-	log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
+		log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
 
-	// Derive the result from the stream only. Status().Result is NOT consulted
-	// because RunWithOptions leaves the process Idle; the disk fallback in
-	// Status() would serve a stale result from a previous MCP Submit.
-	result := claude.CollectResultText(messages)
+		// Derive the result from the stream only. Status().Result is NOT consulted
+		// because RunWithOptions leaves the process Idle; the disk fallback in
+		// Status() would serve a stale result from a previous MCP Submit.
+		result := claude.CollectResultText(messages)
 
-	if result != "" {
-		log.Printf("[a2a] result contextID=%q result=%q", contextID, claude.Truncate(result, 500))
-	}
-
-	// Use the sessionID observed in this run's stream. Status().SessionID is
-	// NOT consulted because p.sessionID is reset at run start but may still
-	// carry a prior value if no system message arrives (e.g. early crash).
-	sessionID := streamSessionID
-
-	// Record user prompt and assistant reply as conversation turns. Both
-	// writes are async and best-effort so they never block the response path.
-	e.recordTurns(ctx, contextID, sessionID, text, result)
-
-	// Query status only for error / retry-state detection; Result and SessionID
-	// fields are intentionally not used (see result/sessionID derivation above).
-	status := e.prompter.Status()
-
-	if status.Status == claude.ProcessStatusError {
-		errMsg := status.ErrorMessage
-		if errMsg == "" {
-			errMsg = "agent subprocess exited with an error"
+		if result != "" {
+			log.Printf("[a2a] result contextID=%q result=%q", contextID, claude.Truncate(result, 500))
 		}
-		return queue.Write(ctx, failedEvent(reqCtx, errMsg))
-	}
 
-	// If the subprocess is still Busy after the stream closed and we have no
-	// result, it is mid-retry (PersistentProcess recovering from a crash).
-	// Fail the turn rather than emitting a terminal completed with no artifact.
-	if result == "" && status.Status == claude.ProcessStatusBusy {
-		retryMsg := fmt.Sprintf("subprocess is recovering (attempt %d); no result produced", status.RetryCount)
-		return queue.Write(ctx, failedEvent(reqCtx, retryMsg))
-	}
+		// Use the sessionID observed in this run's stream. Status().SessionID is
+		// NOT consulted because p.sessionID is reset at run start but may still
+		// carry a prior value if no system message arrives (e.g. early crash).
+		sessionID := streamSessionID
 
-	if result != "" {
-		if writeErr := queue.Write(ctx, artifactEvent(reqCtx, result, sessionID)); writeErr != nil {
-			return fmt.Errorf("write artifact: %w", writeErr)
+		// Record user prompt and assistant reply as conversation turns. Both
+		// writes are async and best-effort so they never block the response path.
+		e.recordTurns(ctx, contextID, sessionID, text, result)
+
+		// Query status only for error / retry-state detection.
+		status := e.prompter.Status()
+
+		if status.Status == claude.ProcessStatusError {
+			errMsg := status.ErrorMessage
+			if errMsg == "" {
+				errMsg = "agent subprocess exited with an error"
+			}
+			yield(failedEvent(execCtx, errMsg), nil)
+			return
 		}
-	}
 
-	return queue.Write(ctx, completedEvent(reqCtx))
+		// If the subprocess is still Busy after the stream closed and we have no
+		// result, it is mid-retry (PersistentProcess recovering from a crash).
+		if result == "" && status.Status == claude.ProcessStatusBusy {
+			retryMsg := fmt.Sprintf("subprocess is recovering (attempt %d); no result produced", status.RetryCount)
+			yield(failedEvent(execCtx, retryMsg), nil)
+			return
+		}
+
+		if result != "" {
+			if !yield(artifactEvent(execCtx, result, sessionID), nil) {
+				return
+			}
+		}
+
+		yield(completedEvent(execCtx), nil)
+	}
 }
 
 // Cancel implements a2asrv.AgentExecutor. It stops the Klaus subprocess and
-// writes a canceled terminal event.
-func (e *Executor) Cancel(ctx context.Context, reqCtx *a2asrv.RequestContext, queue eventqueue.Queue) error {
-	if err := e.prompter.Stop(); err != nil {
-		log.Printf("[a2a] Cancel: Stop() error for contextID %q: %v", reqCtx.ContextID, err)
-	}
+// yields a canceled terminal event.
+func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
+	return func(yield func(a2asdk.Event, error) bool) {
+		if err := e.prompter.Stop(); err != nil {
+			log.Printf("[a2a] Cancel: Stop() error for contextID %q: %v", execCtx.ContextID, err)
+		}
 
-	// Give the subprocess up to 30 s to exit gracefully.
-	done := e.prompter.Done()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		log.Printf("[a2a] Cancel: subprocess did not stop within 30s for contextID %q", reqCtx.ContextID)
-	case <-ctx.Done():
-	}
+		// Give the subprocess up to 30 s to exit gracefully.
+		done := e.prompter.Done()
+		select {
+		case <-done:
+		case <-time.After(30 * time.Second):
+			log.Printf("[a2a] Cancel: subprocess did not stop within 30s for contextID %q", execCtx.ContextID)
+		case <-ctx.Done():
+		}
 
-	return queue.Write(ctx, canceledEvent(reqCtx))
+		yield(canceledEvent(execCtx), nil)
+	}
 }
 
 // runOptions builds per-invocation RunOptions for the given contextID.
 // In agent mode it always resumes by the ID derived from contextID; in chat
 // mode session continuity is owned by the PersistentProcess itself.
-// The derived ID is deterministic so no store lookup is needed: when no
-// session file exists yet (first turn or emptyDir restart) the subprocess
-// fails to resume, and the stale-resume retry path creates it with SessionID.
 func (e *Executor) runOptions(_ context.Context, contextID string) (*claude.RunOptions, error) {
 	if e.mode != ModeAgent {
 		return nil, nil
@@ -424,9 +437,7 @@ func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, 
 		}
 
 		// Store the turn as a completed A2A task so the kagent UI can render
-		// conversation history on reload. kagent's BYO passthrough proxy does
-		// not persist tasks itself; GET /api/sessions/{id}/tasks would return
-		// empty without this call.
+		// conversation history on reload.
 		if e.kagent != nil && userText != "" && assistantText != "" {
 			e.kagent.StoreTask(ctx, newEventID(), contextID, userText, assistantText)
 		}
@@ -434,9 +445,7 @@ func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, 
 }
 
 // lockForContext marks contextID as in-flight. Returns true if the slot was
-// acquired (caller may proceed), false if contextID was already in-flight
-// (caller should reject). The in-flight flag is set atomically under e.mu,
-// eliminating the unlock-then-delete race that a per-context mutex map has.
+// acquired (caller may proceed), false if contextID was already in-flight.
 func (e *Executor) lockForContext(contextID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -447,8 +456,7 @@ func (e *Executor) lockForContext(contextID string) bool {
 	return true
 }
 
-// releaseContext clears the in-flight marker for contextID. This prevents
-// the map from growing unboundedly and unblocks the next request.
+// releaseContext clears the in-flight marker for contextID.
 func (e *Executor) releaseContext(contextID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
