@@ -259,6 +259,19 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 		"addr", addr,
 		"base_url", config.BaseURL,
 	)
+	slog.Info("server endpoints",
+		"mcp", "/mcp",
+		"healthz", "/healthz",
+		"readyz", "/readyz",
+		"oauth_metadata", "/.well-known/oauth-authorization-server",
+		"oauth_protected_resource", "/.well-known/oauth-protected-resource",
+		"oauth_register", "/oauth/register",
+		"oauth_authorize", "/oauth/authorize",
+		"oauth_token", "/oauth/token",
+		"oauth_callback", "/oauth/callback",
+		"oauth_revoke", "/oauth/revoke",
+		"oauth_introspect", "/oauth/introspect",
+	)
 
 	if config.TLS.CertFile != "" && config.TLS.KeyFile != "" {
 		return s.httpServer.ListenAndServeTLS(config.TLS.CertFile, config.TLS.KeyFile)

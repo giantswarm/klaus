@@ -177,7 +177,7 @@ func (st *subagentTracker) completeSubagent(toolID string, inf inflightSubagent,
 	}
 
 	st.completed = append(st.completed, call)
-	slog.Debug("claude: subagent completed",
+	slog.Info("claude: subagent completed",
 		"type", call.Type, "description", call.Description,
 		"tool_calls", call.ToolCalls, "tokens", call.Tokens, "duration_ms", call.DurationMS)
 }

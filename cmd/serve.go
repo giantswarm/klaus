@@ -208,7 +208,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 			slog.Warn("logging shutdown error", "error", shutdownErr)
 		}
 	}()
-	_ = logger
 
 	traceShutdown, err := tracing.Init(context.Background(),
 		tracing.WithServiceName(project.Name),
