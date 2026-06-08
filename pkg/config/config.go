@@ -103,6 +103,10 @@ type ServerConfig struct {
 	Port string `yaml:"port"`
 	// OwnerSubject restricts /mcp to the configured identity.
 	OwnerSubject string `yaml:"ownerSubject"`
+	// KagentPushEnabled controls whether completed turns are pushed to the
+	// kagent task/event API. Defaults to false; the push moves to
+	// klaus-gateway in a later step and must not run on main until then.
+	KagentPushEnabled bool `yaml:"kagentPushEnabled"`
 }
 
 // OAuthFileConfig mirrors the OAuth flags for YAML configuration.
@@ -226,6 +230,7 @@ func applyEnvOverrides(cfg *Config) {
 	// Server settings.
 	envOverrideString(&cfg.Server.Port, "PORT")
 	envOverrideString(&cfg.Server.OwnerSubject, "KLAUS_OWNER_SUBJECT")
+	envOverrideBool(&cfg.Server.KagentPushEnabled, "KLAUS_KAGENT_PUSH_ENABLED")
 
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")

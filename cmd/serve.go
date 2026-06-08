@@ -367,10 +367,15 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		mode = server.ModeChat
 	}
 
-	// Build kagent client (no-op when KAGENT_API_ENDPOINT is unset).
-	kagentClient := kagentapi.New(os.Getenv("KAGENT_API_ENDPOINT"))
-	if kagentClient.Enabled() {
-		log.Printf("kagent session-events push enabled (endpoint: %s)", os.Getenv("KAGENT_API_ENDPOINT")) //nolint:gosec
+	// Build kagent client. Gated behind KLAUS_KAGENT_PUSH_ENABLED (default
+	// false) because the push migrates to the gateway; the client is a
+	// testing-branch bridge that must not run on main.
+	var kagentClient *kagentapi.Client
+	if cfg.Server.KagentPushEnabled {
+		kagentClient = kagentapi.New(os.Getenv("KAGENT_API_ENDPOINT"))
+		if kagentClient.Enabled() {
+			slog.Info("kagent session-events push enabled", "endpoint", os.Getenv("KAGENT_API_ENDPOINT"))
+		}
 	}
 
 	// Build the A2A executor.
