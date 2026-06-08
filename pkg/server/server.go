@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"net/http"
 
@@ -73,17 +72,17 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 
 // Start blocks, serving HTTP requests until Shutdown is called.
 func (s *Server) Start() error {
-	log.Printf("Starting %s on %s", project.Name, s.httpServer.Addr)
+	slog.Info("starting server", "name", project.Name, "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
 }
 
 // Shutdown gracefully drains MCP sessions, then stops the HTTP server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	log.Println("Shutting down server...")
+	slog.Info("shutting down server")
 
 	// Shutdown MCP server first (closes SSE connections).
 	if err := s.mcpServer.Shutdown(ctx); err != nil {
-		log.Printf("MCP server shutdown error: %v", err)
+		slog.Error("MCP server shutdown error", "error", err)
 	}
 
 	return s.httpServer.Shutdown(ctx)

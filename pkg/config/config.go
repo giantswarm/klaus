@@ -13,7 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -334,7 +334,7 @@ func envOverrideInt(target *int, key string) {
 	if v := os.Getenv(key); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			log.Printf("WARNING: ignoring invalid integer for %s=%q: %v", key, v, err) // #nosec G706 -- value is safely quoted via %q
+			slog.Warn("ignoring invalid integer env var", "key", key, "value", v, "error", err)
 			return
 		}
 		*target = n
@@ -345,7 +345,7 @@ func envOverrideFloat64(target *float64, key string) {
 	if v := os.Getenv(key); v != "" {
 		f, err := strconv.ParseFloat(v, 64)
 		if err != nil {
-			log.Printf("WARNING: ignoring invalid float for %s=%q: %v", key, v, err) // #nosec G706 -- value is safely quoted via %q
+			slog.Warn("ignoring invalid float env var", "key", key, "value", v, "error", err)
 			return
 		}
 		*target = f

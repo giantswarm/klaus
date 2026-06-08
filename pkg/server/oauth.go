@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -255,19 +254,24 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 		IdleTimeout:       DefaultIdleTimeout,
 	}
 
-	log.Printf("Starting %s with OAuth on %s", project.Name, addr)
-	log.Printf("  Base URL: %s", config.BaseURL)
-	log.Printf("  MCP endpoint: /mcp (requires OAuth Bearer token)")
-	log.Printf("  Health endpoints: /healthz, /readyz")
-	log.Printf("  OAuth endpoints:")
-	log.Printf("    - Authorization Server Metadata: /.well-known/oauth-authorization-server")
-	log.Printf("    - Protected Resource Metadata: /.well-known/oauth-protected-resource")
-	log.Printf("    - Client Registration: /oauth/register")
-	log.Printf("    - Authorization: /oauth/authorize")
-	log.Printf("    - Token: /oauth/token")
-	log.Printf("    - Callback: /oauth/callback")
-	log.Printf("    - Revoke: /oauth/revoke")
-	log.Printf("    - Introspect: /oauth/introspect")
+	slog.Info("starting server with OAuth",
+		"name", project.Name,
+		"addr", addr,
+		"base_url", config.BaseURL,
+	)
+	slog.Info("server endpoints",
+		"mcp", "/mcp",
+		"healthz", "/healthz",
+		"readyz", "/readyz",
+		"oauth_metadata", "/.well-known/oauth-authorization-server",
+		"oauth_protected_resource", "/.well-known/oauth-protected-resource",
+		"oauth_register", "/oauth/register",
+		"oauth_authorize", "/oauth/authorize",
+		"oauth_token", "/oauth/token",
+		"oauth_callback", "/oauth/callback",
+		"oauth_revoke", "/oauth/revoke",
+		"oauth_introspect", "/oauth/introspect",
+	)
 
 	if config.TLS.CertFile != "" && config.TLS.KeyFile != "" {
 		return s.httpServer.ListenAndServeTLS(config.TLS.CertFile, config.TLS.KeyFile)

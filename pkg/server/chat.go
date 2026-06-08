@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -141,7 +141,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 	// Disable the server's write timeout for this long-lived SSE stream.
 	rc := http.NewResponseController(w)
 	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-		log.Printf("[chat] failed to disable write deadline: %v", err)
+		slog.Error("chat: failed to disable write deadline", "error", err)
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -160,7 +160,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 		select {
 		case <-r.Context().Done():
 			if err := process.Stop(); err != nil {
-				log.Printf("[chat] failed to stop process on client disconnect: %v", err)
+				slog.Error("chat: failed to stop process on client disconnect", "error", err)
 			}
 			return
 		case msg, ok := <-ch:
@@ -194,7 +194,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 
 			data, err := json.Marshal(chunk)
 			if err != nil {
-				log.Printf("[chat] failed to marshal SSE chunk: %v", err)
+				slog.Error("chat: failed to marshal SSE chunk", "error", err)
 				continue
 			}
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
@@ -216,7 +216,7 @@ func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model strin
 	}
 	data, err := json.Marshal(final)
 	if err != nil {
-		log.Printf("[chat] failed to marshal final SSE chunk: %v", err)
+		slog.Error("chat: failed to marshal final SSE chunk", "error", err)
 		return
 	}
 	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
@@ -270,7 +270,7 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("[chat] failed to encode response: %v", err)
+		slog.Error("chat: failed to encode response", "error", err)
 	}
 }
 

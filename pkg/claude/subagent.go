@@ -2,7 +2,7 @@ package claude
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"time"
@@ -73,8 +73,8 @@ func (st *subagentTracker) handleToolUse(msg StreamMessage) bool {
 
 	// Cap in-flight tracking to prevent unbounded growth.
 	if len(st.inflight) >= maxInflightSubagents {
-		log.Printf("[claude] subagent tracking limit reached (%d), ignoring new dispatch: %s",
-			maxInflightSubagents, msg.ToolID)
+		slog.Warn("claude: subagent tracking limit reached, ignoring new dispatch",
+			"limit", maxInflightSubagents, "tool_id", msg.ToolID)
 		return false
 	}
 
@@ -177,8 +177,9 @@ func (st *subagentTracker) completeSubagent(toolID string, inf inflightSubagent,
 	}
 
 	st.completed = append(st.completed, call)
-	log.Printf("[claude] subagent completed: type=%q description=%q tool_calls=%d tokens=%d duration_ms=%.0f",
-		call.Type, call.Description, call.ToolCalls, call.Tokens, call.DurationMS)
+	slog.Info("claude: subagent completed",
+		"type", call.Type, "description", call.Description,
+		"tool_calls", call.ToolCalls, "tokens", call.Tokens, "duration_ms", call.DurationMS)
 }
 
 // calls returns a copy of all completed and in-flight subagent calls.
