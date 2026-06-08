@@ -20,6 +20,21 @@ import (
 	"context"
 )
 
+type contextKeyUserID struct{}
+
+// WithUserID stores the authenticated user's subject in ctx so memory
+// implementations can scope reads/writes to the caller rather than the
+// static KAGENT_MEMORY_USER_ID env value.
+func WithUserID(ctx context.Context, userID string) context.Context {
+	return context.WithValue(ctx, contextKeyUserID{}, userID)
+}
+
+// UserIDFromContext returns the user ID stored by WithUserID, or "" if absent.
+func UserIDFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(contextKeyUserID{}).(string)
+	return v
+}
+
 // Chunk is a single memory fragment retrieved for a query.
 type Chunk struct {
 	// Content is the recalled text to inject into the system prompt.

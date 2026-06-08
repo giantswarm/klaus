@@ -104,6 +104,12 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 	}
 	defer e.releaseContext(contextID)
 
+	// Inject the authenticated caller's subject into ctx so memory scopes to
+	// the user rather than the static KAGENT_MEMORY_USER_ID fallback.
+	if authInfo := kagentapi.AuthInfoFromContext(ctx); authInfo.UserSub != "" {
+		ctx = memory.WithUserID(ctx, authInfo.UserSub)
+	}
+
 	// Extract prompt text.
 	text := extractText(reqCtx.Message)
 	if text == "" {
@@ -173,6 +179,9 @@ drainLoop:
 			}
 			if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
 				log.Printf("[a2a] tool_use contextID=%q tool=%q", contextID, msg.ToolName)
+				if writeErr := queue.Write(ctx, workingEvent(reqCtx, "using tool: "+msg.ToolName)); writeErr != nil {
+					log.Printf("[a2a] write tool_use working: %v", writeErr)
+				}
 			}
 			if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
 				if msg.Text != "" && msg.Text != lastText {
@@ -216,6 +225,9 @@ drainLoop:
 					}
 					if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
 						log.Printf("[a2a] tool_use (retry) contextID=%q tool=%q", contextID, msg.ToolName)
+						if writeErr := queue.Write(ctx, workingEvent(reqCtx, "using tool: "+msg.ToolName)); writeErr != nil {
+							log.Printf("[a2a] write tool_use working (retry): %v", writeErr)
+						}
 					}
 					if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
 						if msg.Text != "" && msg.Text != lastText {

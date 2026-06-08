@@ -8,8 +8,6 @@ import (
 	"github.com/giantswarm/klaus/pkg/project"
 )
 
-// agentCardEnvs lists the environment variables that configure the agent card.
-// Each corresponds to a field in the returned AgentCard.
 const (
 	envAgentName        = "AGENT_NAME"
 	envAgentDescription = "AGENT_DESCRIPTION"
@@ -37,6 +35,10 @@ func AgentCard() *a2a.AgentCard {
 		Version:            version,
 		URL:                url,
 		ProtocolVersion:    string(a2a.Version),
+		PreferredTransport: a2a.TransportProtocolJSONRPC,
+		AdditionalInterfaces: []a2a.AgentInterface{
+			{URL: url, Transport: a2a.TransportProtocolJSONRPC},
+		},
 		DefaultInputModes:  []string{"text/plain"},
 		DefaultOutputModes: []string{"text/plain"},
 		Capabilities: a2a.AgentCapabilities{
@@ -45,10 +47,22 @@ func AgentCard() *a2a.AgentCard {
 		},
 		Skills: []a2a.AgentSkill{
 			{
+				ID:          "coding",
+				Name:        "Software Engineering",
+				Description: "Read, write, and refactor code across any language; run tests; navigate large codebases; propose and apply multi-file changes.",
+				Tags:        []string{"coding", "refactoring", "testing", "debugging"},
+			},
+			{
+				ID:          "analysis",
+				Name:        "Code & Data Analysis",
+				Description: "Explain complex code, trace execution paths, analyse logs, review pull requests, and summarise technical documents.",
+				Tags:        []string{"analysis", "review", "explanation", "documentation"},
+			},
+			{
 				ID:          "claude-code",
 				Name:        name,
 				Description: description,
-				Tags:        []string{"coding", "ai", "claude"},
+				Tags:        []string{"claude", "ai", "agent"},
 			},
 		},
 	}

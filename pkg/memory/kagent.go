@@ -50,6 +50,15 @@ func kagentEnvOrDefault(key, def string) string {
 	return def
 }
 
+// effectiveUserID returns the user ID from ctx when set (via WithUserID),
+// falling back to the static fallback configured at construction time.
+func effectiveUserID(ctx context.Context, fallback string) string {
+	if v := UserIDFromContext(ctx); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type kagentAddRequest struct {
 	AgentName string    `json:"agent_name"`
 	UserID    string    `json:"user_id"`
@@ -74,8 +83,10 @@ type kagentSearchResult struct {
 
 // Retrieve searches the kagent memory store for the top-N most relevant chunks
 // for the given query. The contextID is not forwarded to kagent (which uses
-// agentName+userID as its own scoping keys).
+// agentName+userID as its own scoping keys). The userID is taken from ctx
+// (set by memory.WithUserID) when present, falling back to KAGENT_MEMORY_USER_ID.
 func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, topN int) ([]Chunk, error) {
+	userID := effectiveUserID(ctx, c.userID)
 	vector, err := c.embedder.embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
@@ -83,7 +94,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 
 	body, err := json.Marshal(kagentSearchRequest{
 		AgentName: c.agentName,
-		UserID:    c.userID,
+		UserID:    userID,
 		Vector:    vector,
 		Limit:     topN,
 		MinScore:  0.3,
@@ -97,7 +108,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 		return nil, fmt.Errorf("build search request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", c.userID)
+	req.Header.Set("X-User-ID", userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -124,6 +135,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 // Store persists content to the kagent memory store asynchronously.
 // The role parameter is prepended to content to preserve speaker attribution.
 func (c *KagentClient) Store(ctx context.Context, _ string, role string, content string) error {
+	userID := effectiveUserID(ctx, c.userID)
 	text := role + ": " + content
 	vector, err := c.embedder.embed(ctx, text)
 	if err != nil {
@@ -132,7 +144,7 @@ func (c *KagentClient) Store(ctx context.Context, _ string, role string, content
 
 	body, err := json.Marshal(kagentAddRequest{
 		AgentName: c.agentName,
-		UserID:    c.userID,
+		UserID:    userID,
 		Content:   text,
 		Vector:    vector,
 	})
@@ -145,7 +157,7 @@ func (c *KagentClient) Store(ctx context.Context, _ string, role string, content
 		return fmt.Errorf("build store request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", c.userID)
+	req.Header.Set("X-User-ID", userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

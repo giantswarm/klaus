@@ -3,6 +3,7 @@ package a2a
 import (
 	"context"
 	"fmt"
+	"log"
 	"maps"
 	"net/url"
 	"strings"
@@ -77,7 +78,38 @@ func (r *Registry) Call(ctx context.Context, target, message string) (string, er
 		return "", fmt.Errorf("A2A SendMessage to %q: %w", target, err)
 	}
 
-	return textFromResult(result), nil
+	task, ok := result.(*a2a.Task)
+	if !ok || task.Status.State.Terminal() {
+		return textFromResult(result), nil
+	}
+
+	return r.pollTask(ctx, client, task, target)
+}
+
+// pollTask streams task events via ResubscribeToTask until a terminal state is reached.
+func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task *a2a.Task, target string) (string, error) {
+	log.Printf("[a2a] task %q submitted to %q, polling until terminal", task.ID, target)
+
+	for event, err := range client.ResubscribeToTask(ctx, &a2a.TaskIDParams{ID: task.ID}) {
+		if err != nil {
+			return "", fmt.Errorf("A2A ResubscribeToTask %q: %w", target, err)
+		}
+		switch e := event.(type) {
+		case *a2a.TaskStatusUpdateEvent:
+			log.Printf("[a2a] task %q state=%s final=%v", task.ID, e.Status.State, e.Final)
+			if e.Status.State.Terminal() {
+				if e.Status.Message != nil {
+					if text := extractText(e.Status.Message); text != "" {
+						return text, nil
+					}
+				}
+				return "", nil
+			}
+		case *a2a.TaskArtifactUpdateEvent:
+			// Artifact events carry partial output; skip — wait for terminal status.
+		}
+	}
+	return "", fmt.Errorf("A2A task %q stream ended without terminal state", task.ID)
 }
 
 // Targets returns the configured static name→URL map (read-only copy).
