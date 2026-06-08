@@ -23,6 +23,9 @@ import (
 const (
 	defaultTimeout    = 5 * time.Second
 	envKagentAgentRef = "KAGENT_AGENT_REF"
+
+	a2aKindMessage = "message"
+	a2aKindText    = "text"
 )
 
 // a2aMessage is the JSON structure stored in Event.Data — a trpc-a2a-go
@@ -67,10 +70,10 @@ type a2aTaskStatus struct {
 // and plain-text content. id should be unique per event (e.g. a UUID).
 func NewSessionEvent(id, role, text string) SessionEvent {
 	msg := a2aMessage{
-		Kind:      "message",
+		Kind:      a2aKindMessage,
 		MessageID: id,
 		Role:      role,
-		Parts:     []a2aPart{{Kind: "text", Text: text}},
+		Parts:     []a2aPart{{Kind: a2aKindText, Text: text}},
 	}
 	data, _ := json.Marshal(msg)
 	return SessionEvent{ID: id, Data: string(data)}
@@ -169,10 +172,10 @@ func (c *Client) StoreTask(ctx context.Context, taskID, contextID, userText, age
 		ContextID: contextID,
 		Status:    a2aTaskStatus{State: "completed"},
 		History: []a2aMessage{
-			{Kind: "message", MessageID: taskID + "-user", Role: "user",
-				Parts: []a2aPart{{Kind: "text", Text: userText}}},
-			{Kind: "message", MessageID: taskID + "-agent", Role: "agent",
-				Parts: []a2aPart{{Kind: "text", Text: agentText}}},
+			{Kind: a2aKindMessage, MessageID: taskID + "-user", Role: "user",
+				Parts: []a2aPart{{Kind: a2aKindText, Text: userText}}},
+			{Kind: a2aKindMessage, MessageID: taskID + "-agent", Role: "agent",
+				Parts: []a2aPart{{Kind: a2aKindText, Text: agentText}}},
 		},
 	}
 

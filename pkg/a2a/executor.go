@@ -389,7 +389,7 @@ func (e *Executor) augmentWithMemory(ctx context.Context, contextID, text string
 func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, userText, assistantText string) {
 	authInfo := kagentapi.AuthInfoFromContext(parentCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second) //nolint:gosec // intentional: goroutine must outlive the request context
 		defer cancel()
 		if authInfo.BearerToken != "" {
 			ctx = kagentapi.WithAuthInfo(ctx, authInfo)

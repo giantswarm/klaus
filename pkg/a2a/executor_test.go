@@ -484,7 +484,7 @@ type staleResumePrompter struct {
 
 func (p *staleResumePrompter) RunWithOptions(_ context.Context, _ string, opts *claude.RunOptions) (<-chan claude.StreamMessage, error) {
 	p.calls++
-	p.fakePrompter.capturedOpts = append(p.fakePrompter.capturedOpts, opts)
+	p.capturedOpts = append(p.capturedOpts, opts)
 	var msgs []claude.StreamMessage
 	if p.calls >= 2 {
 		// Retry succeeds: emit session + result.

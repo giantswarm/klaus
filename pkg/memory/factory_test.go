@@ -68,14 +68,14 @@ func TestKagentClient_RetrieveStore(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/memories/search":
 			xUserIDOnSearch = r.Header.Get("X-User-ID")
-			json.NewDecoder(r.Body).Decode(&searchBody) //nolint:errcheck
+			json.NewDecoder(r.Body).Decode(&searchBody) //nolint:errcheck,gosec
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode([]map[string]any{
 				{"id": "a1", "content": "remembered text", "score": 0.85},
 			})
 		case "/api/memories/sessions":
 			xUserIDOnStore = r.Header.Get("X-User-ID")
-			json.NewDecoder(r.Body).Decode(&storeBody) //nolint:errcheck
+			json.NewDecoder(r.Body).Decode(&storeBody) //nolint:errcheck,gosec
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
