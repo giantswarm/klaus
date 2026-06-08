@@ -235,11 +235,6 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State)
 	assert.True(t, statusEv.Final)
 
-	// The session should be bound in the store.
-	sessID, err := store.SessionID(t.Context(), "ctx-4")
-	require.NoError(t, err)
-	assert.Equal(t, "sess-abc", sessID)
-
 	// Conversation turns are recorded asynchronously; give them time to land.
 	require.Eventually(t, func() bool {
 		turns, histErr := store.History(t.Context(), "ctx-4")
@@ -391,39 +386,33 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 	assert.True(t, artifactEv.LastChunk)
 }
 
-func TestExecutor_BindSessionSkipsEmpty(t *testing.T) {
-	// When the subprocess returns no sessionID, BindSession must not be called
-	// with "", which would overwrite a prior binding.
+func TestExecutor_ResumeAlwaysDerivedFromContextID(t *testing.T) {
+	// Both turns must use --resume derived from the A2A contextID, regardless
+	// of what session ID the subprocess emits. The store is never consulted.
 	prompter := &fakePrompter{
 		result: "turn result",
 		statusVal: claude.StatusInfo{
 			Status:    claude.ProcessStatusCompleted,
-			SessionID: "first-session",
+			SessionID: "subprocess-reported-id",
 			Result:    "turn result",
 		},
 	}
 	store := session.NewMemoryStore()
 	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
-	// First turn binds the session.
 	q1 := &captureQueue{}
-	err := exec.Execute(t.Context(), makeReqCtx("ctx-bind", "first"), q1)
-	require.NoError(t, err)
+	require.NoError(t, exec.Execute(t.Context(), makeReqCtx("ctx-derived", "first"), q1))
 
-	sessID, err := store.SessionID(t.Context(), "ctx-bind")
-	require.NoError(t, err)
-	assert.Equal(t, "first-session", sessID)
-
-	// Second turn: prompter returns empty sessionID (simulates system message not arriving).
-	prompter.statusVal.SessionID = ""
+	// Second turn: subprocess reports a different session ID — must not affect RunOptions.
+	prompter.statusVal.SessionID = "different-session-id"
 	q2 := &captureQueue{}
-	err = exec.Execute(t.Context(), makeReqCtx("ctx-bind", "second"), q2)
-	require.NoError(t, err)
+	require.NoError(t, exec.Execute(t.Context(), makeReqCtx("ctx-derived", "second"), q2))
 
-	// The binding must still be "first-session", not overwritten with "".
-	sessID, err = store.SessionID(t.Context(), "ctx-bind")
-	require.NoError(t, err)
-	assert.Equal(t, "first-session", sessID)
+	require.Len(t, prompter.capturedOpts, 2)
+	assert.Equal(t, "derived", prompter.capturedOpts[0].Resume)
+	assert.Equal(t, "derived", prompter.capturedOpts[1].Resume)
+	assert.Empty(t, prompter.capturedOpts[0].SessionID)
+	assert.Empty(t, prompter.capturedOpts[1].SessionID)
 }
 
 // TestExecutor_AgentModeResume verifies that the second turn in agent mode
@@ -448,28 +437,26 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	last1 := q1.events[len(q1.events)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last1.Status.State)
 
-	// First turn RunOptions: Resume should be empty (no prior session);
-	// SessionID is seeded from the A2A contextID so the Claude session file
-	// and the kagent UI share the same UUID.
+	// First turn RunOptions: Resume is derived from contextID; SessionID is not set.
 	require.Len(t, prompter.capturedOpts, 1)
 	opts1 := prompter.capturedOpts[0]
 	require.NotNil(t, opts1)
-	assert.Empty(t, opts1.Resume, "first turn must not pass --resume")
-	assert.Equal(t, "resume", opts1.SessionID, "first turn must seed --session-id from contextID")
+	assert.Equal(t, "resume", opts1.Resume, "first turn derives --resume from contextID")
+	assert.Empty(t, opts1.SessionID, "first turn must not set --session-id")
 	assert.True(t, opts1.SaveSession, "first turn must set SaveSession so the conversation is persisted")
 
-	// Second turn — store now has sessionID bound from turn 1.
+	// Second turn — session ID is always derived from contextID, not from store.
 	q2 := &captureQueue{}
 	err = exec.Execute(t.Context(), makeReqCtx("ctx-resume", "second"), q2)
 	require.NoError(t, err)
 	last2 := q2.events[len(q2.events)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last2.Status.State)
 
-	// Second turn RunOptions: Resume must be set, SessionID must be empty, SaveSession must be true.
+	// Second turn RunOptions: same derived Resume, no SessionID.
 	require.Len(t, prompter.capturedOpts, 2)
 	opts2 := prompter.capturedOpts[1]
 	require.NotNil(t, opts2)
-	assert.Equal(t, sessionID, opts2.Resume, "second turn must pass --resume <sessionID>")
+	assert.Equal(t, "resume", opts2.Resume, "second turn derives --resume from contextID")
 	assert.Empty(t, opts2.SessionID, "second turn must not pass --session-id")
 	assert.True(t, opts2.SaveSession, "second turn must set SaveSession")
 }
@@ -514,16 +501,10 @@ func (p *staleResumePrompter) Status() claude.StatusInfo {
 // gone after pod restart), the executor retries with a fresh session and the
 // turn completes rather than failing.
 func TestExecutor_StaleResumeRetry(t *testing.T) {
-	const oldSession = "old-session-id"
-
 	inner := &fakePrompter{}
 	prompter := &staleResumePrompter{fakePrompter: inner}
 
 	store := session.NewMemoryStore()
-	// Pre-populate the store with the stale session binding (as Postgres would
-	// have it after a pod restart with emptyDir workspace).
-	require.NoError(t, store.BindSession(t.Context(), "ctx-stale", oldSession))
-
 	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
 
 	queue := &captureQueue{}
@@ -537,14 +518,9 @@ func TestExecutor_StaleResumeRetry(t *testing.T) {
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State, "stale resume should retry and complete")
 	assert.True(t, statusEv.Final)
 
-	// Two RunWithOptions calls: first with Resume (stale), second without.
+	// Two RunWithOptions calls: first with Resume derived from contextID, second fresh with SessionID.
 	require.Len(t, prompter.capturedOpts, 2, "expected exactly two RunWithOptions calls")
-	assert.Equal(t, oldSession, prompter.capturedOpts[0].Resume, "first call must use --resume with the stale ID")
+	assert.Equal(t, "stale", prompter.capturedOpts[0].Resume, "first call must derive --resume from contextID")
 	assert.Empty(t, prompter.capturedOpts[1].Resume, "retry call must not pass --resume")
 	assert.Equal(t, "stale", prompter.capturedOpts[1].SessionID, "retry must seed session ID from contextID")
-
-	// After retry the store must hold the NEW session ID.
-	sessID, err := store.SessionID(t.Context(), "ctx-stale")
-	require.NoError(t, err)
-	assert.Equal(t, "new-session-id", sessID, "stale Postgres binding must be overwritten after retry")
 }

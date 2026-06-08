@@ -102,7 +102,9 @@ func (e *Executor) Execute(ctx context.Context, reqCtx *a2asrv.RequestContext, q
 		log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
 		return queue.Write(ctx, rejectedEvent(reqCtx, "another request for this context is already in-flight"))
 	}
-	defer e.releaseContext(contextID)
+	var releaseOnce sync.Once
+	releaseCtx := func() { releaseOnce.Do(func() { e.releaseContext(contextID) }) }
+	defer releaseCtx()
 
 	// Inject the authenticated caller's subject into ctx so memory scopes to
 	// the user rather than the static KAGENT_MEMORY_USER_ID fallback.
@@ -163,9 +165,9 @@ drainLoop:
 	for {
 		select {
 		case <-ctx.Done():
-			// Stop the subprocess so it doesn't block indefinitely after the
-			// caller cancels; without this the stdout goroutine fills the 100-
-			// message buffer and cmd.Wait never returns, leaving status Busy.
+			// Release before Stop so a concurrent retry can acquire the slot
+			// without waiting for the subprocess to drain (up to 30 s).
+			releaseCtx()
 			_ = e.prompter.Stop()
 			return ctx.Err()
 		case msg, ok := <-ch:
@@ -197,7 +199,6 @@ drainLoop:
 	// Stale resume: subprocess exited with no session ID — the session file was
 	// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
 	// session using the deterministic context-derived ID so the turn succeeds.
-	// The stale Postgres binding is overwritten by BindSession after the retry.
 	if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
 		e.prompter.Status().Status == claude.ProcessStatusError {
 		log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
@@ -212,6 +213,7 @@ drainLoop:
 			for {
 				select {
 				case <-ctx.Done():
+					releaseCtx()
 					_ = e.prompter.Stop()
 					return ctx.Err()
 				case msg, ok := <-retryCh:
@@ -260,12 +262,6 @@ drainLoop:
 	// NOT consulted because p.sessionID is reset at run start but may still
 	// carry a prior value if no system message arrives (e.g. early crash).
 	sessionID := streamSessionID
-
-	if sessionID != "" {
-		if bindErr := e.store.BindSession(ctx, contextID, sessionID); bindErr != nil {
-			log.Printf("[a2a] BindSession failed for contextID %q: %v", contextID, bindErr)
-		}
-	}
 
 	// Record user prompt and assistant reply as conversation turns. Both
 	// writes are async and best-effort so they never block the response path.
@@ -320,29 +316,19 @@ func (e *Executor) Cancel(ctx context.Context, reqCtx *a2asrv.RequestContext, qu
 }
 
 // runOptions builds per-invocation RunOptions for the given contextID.
-// In agent mode it threads the persisted sessionID; in chat mode session
-// continuity is owned by the PersistentProcess itself.
-func (e *Executor) runOptions(ctx context.Context, contextID string) (*claude.RunOptions, error) {
+// In agent mode it always resumes by the ID derived from contextID; in chat
+// mode session continuity is owned by the PersistentProcess itself.
+// The derived ID is deterministic so no store lookup is needed: when no
+// session file exists yet (first turn or emptyDir restart) the subprocess
+// fails to resume, and the stale-resume retry path creates it with SessionID.
+func (e *Executor) runOptions(_ context.Context, contextID string) (*claude.RunOptions, error) {
 	if e.mode != ModeAgent {
 		return nil, nil
 	}
-
-	sessionID, err := e.store.SessionID(ctx, contextID)
-	if err != nil {
-		return nil, err
-	}
-
-	opts := &claude.RunOptions{SaveSession: true}
-	if sessionID != "" {
-		// Resume the session from the prior turn.
-		opts.Resume = sessionID
-	} else {
-		// First turn: seed the Claude session with a deterministic ID derived
-		// from the A2A contextID so the Claude session file is traceable to the
-		// same UUID that the kagent UI displays.
-		opts.SessionID = sessionIDFromContext(contextID)
-	}
-	return opts, nil
+	return &claude.RunOptions{
+		SaveSession: true,
+		Resume:      sessionIDFromContext(contextID),
+	}, nil
 }
 
 // sessionIDFromContext derives a Claude session ID from an A2A contextID.
