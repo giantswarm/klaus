@@ -11,9 +11,9 @@
 //
 // Required env for kagent backend:
 //   - KAGENT_MEMORY_ENDPOINT — kagent controller base URL
-//   - KLAUD_EMBEDDING_ENDPOINT — OpenAI-compatible embedding base URL (default: https://api.openai.com/v1)
-//   - KLAUD_EMBEDDING_MODEL — embedding model name (e.g. text-embedding-3-small)
-//   - KLAUD_EMBEDDING_API_KEY — API key (omit for unauthenticated vLLM endpoints)
+//   - KLAUS_EMBEDDING_ENDPOINT — OpenAI-compatible embedding base URL (default: https://api.openai.com/v1)
+//   - KLAUS_EMBEDDING_MODEL — embedding model name (e.g. text-embedding-3-small)
+//   - KLAUS_EMBEDDING_API_KEY — API key (omit for unauthenticated vLLM endpoints)
 package memory
 
 import (

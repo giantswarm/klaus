@@ -351,15 +351,15 @@ spec:
               value: {{ .Values.memory.userID | quote }}
             {{- end }}
             {{- if .Values.memory.embedding.endpoint }}
-            - name: KLAUD_EMBEDDING_ENDPOINT
+            - name: KLAUS_EMBEDDING_ENDPOINT
               value: {{ .Values.memory.embedding.endpoint | quote }}
             {{- end }}
             {{- if .Values.memory.embedding.model }}
-            - name: KLAUD_EMBEDDING_MODEL
+            - name: KLAUS_EMBEDDING_MODEL
               value: {{ .Values.memory.embedding.model | quote }}
             {{- end }}
             {{- if .Values.memory.embedding.secretName }}
-            - name: KLAUD_EMBEDDING_API_KEY
+            - name: KLAUS_EMBEDDING_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.memory.embedding.secretName }}

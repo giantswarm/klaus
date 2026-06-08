@@ -411,7 +411,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	}
 
 	// Build memory client. No-op when KAGENT_MEMORY_ENDPOINT or
-	// KLAUD_EMBEDDING_MODEL is unset.
+	// KLAUS_EMBEDDING_MODEL is unset.
 	memClient := memory.New()
 	if _, ok := memClient.(memory.NoOp); !ok {
 		slog.Info("memory augmentation enabled", "endpoint", os.Getenv("KAGENT_MEMORY_ENDPOINT"))

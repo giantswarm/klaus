@@ -25,14 +25,14 @@ type embeddingClient struct {
 }
 
 func newEmbeddingClientFromEnv() *embeddingClient {
-	endpoint := os.Getenv("KLAUD_EMBEDDING_ENDPOINT")
+	endpoint := os.Getenv("KLAUS_EMBEDDING_ENDPOINT")
 	if endpoint == "" {
 		endpoint = "https://api.openai.com/v1"
 	}
 	return &embeddingClient{
 		endpoint:   endpoint,
-		model:      os.Getenv("KLAUD_EMBEDDING_MODEL"),
-		apiKey:     os.Getenv("KLAUD_EMBEDDING_API_KEY"),
+		model:      os.Getenv("KLAUS_EMBEDDING_MODEL"),
+		apiKey:     os.Getenv("KLAUS_EMBEDDING_API_KEY"),
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }

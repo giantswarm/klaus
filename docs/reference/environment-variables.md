@@ -87,16 +87,16 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 
 ## Memory augmentation
 
-Requires `KAGENT_MEMORY_ENDPOINT` and `KLAUD_EMBEDDING_MODEL` to be set. When either is absent, memory is silently disabled.
+Requires `KAGENT_MEMORY_ENDPOINT` and `KLAUS_EMBEDDING_MODEL` to be set. When either is absent, memory is silently disabled.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KAGENT_MEMORY_ENDPOINT` | kagent controller base URL for memory storage/retrieval | -- |
 | `KAGENT_MEMORY_AGENT_NAME` | Agent identifier for memory attribution | `klaus` |
 | `KAGENT_MEMORY_USER_ID` | User identifier for memory attribution | `default` |
-| `KLAUD_EMBEDDING_ENDPOINT` | OpenAI-compatible embedding base URL | `https://api.openai.com/v1` |
-| `KLAUD_EMBEDDING_MODEL` | Embedding model name (e.g. `text-embedding-3-small`); required to enable memory | -- |
-| `KLAUD_EMBEDDING_API_KEY` | API key for the embedding endpoint; omit for unauthenticated endpoints | -- |
+| `KLAUS_EMBEDDING_ENDPOINT` | OpenAI-compatible embedding base URL | `https://api.openai.com/v1` |
+| `KLAUS_EMBEDDING_MODEL` | Embedding model name (e.g. `text-embedding-3-small`); required to enable memory | -- |
+| `KLAUS_EMBEDDING_API_KEY` | API key for the embedding endpoint; omit for unauthenticated endpoints | -- |
 
 ## OTel tracing (server-side)
 

@@ -6,7 +6,7 @@ import "os"
 //
 // Returns NoOp when:
 //   - KAGENT_MEMORY_ENDPOINT is unset (no store configured)
-//   - KLAUD_EMBEDDING_MODEL is unset (vectors cannot be generated)
+//   - KLAUS_EMBEDDING_MODEL is unset (vectors cannot be generated)
 //
 // When both are set, returns a KagentClient that stores and searches
 // conversation memory via the kagent pgvector API.

@@ -97,7 +97,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 		return nil, fmt.Errorf("build search request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", "klaus")
+	req.Header.Set("X-User-ID", c.userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -145,7 +145,7 @@ func (c *KagentClient) Store(ctx context.Context, _ string, role string, content
 		return fmt.Errorf("build store request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", "klaus")
+	req.Header.Set("X-User-ID", c.userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
