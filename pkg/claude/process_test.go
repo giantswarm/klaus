@@ -753,8 +753,6 @@ func TestProcess_MergedOpts(t *testing.T) {
 		if !merged.ContinueSession {
 			t.Error("expected ContinueSession to be true")
 		}
-		// ContinueSession must disable NoSessionPersistence so that
-		// --continue can find the previous session on disk (#171).
 		if merged.NoSessionPersistence {
 			t.Error("expected NoSessionPersistence to be false when ContinueSession is true")
 		}
@@ -766,9 +764,19 @@ func TestProcess_MergedOpts(t *testing.T) {
 		if merged.SessionID != "test-session-uuid" {
 			t.Errorf("expected session id %q, got %q", "test-session-uuid", merged.SessionID)
 		}
-		// A named session must be persisted so --continue can resume it on the next turn.
 		if merged.NoSessionPersistence {
 			t.Error("expected NoSessionPersistence to be false when SessionID is set")
+		}
+	})
+
+	t.Run("Resume disables NoSessionPersistence", func(t *testing.T) {
+		runOpts := &RunOptions{Resume: "test-resume-id"}
+		merged := process.mergedOpts(runOpts)
+		if merged.Resume != "test-resume-id" {
+			t.Errorf("expected resume id %q, got %q", "test-resume-id", merged.Resume)
+		}
+		if merged.NoSessionPersistence {
+			t.Error("expected NoSessionPersistence to be false when Resume is set")
 		}
 	})
 
