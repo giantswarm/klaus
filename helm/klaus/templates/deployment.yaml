@@ -18,6 +18,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "klaus.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- include "klaus.validateWorkspaceGit" . }}
@@ -417,7 +418,12 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: claude-home
+          {{- if .Values.claudeHome.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ if .Values.claudeHome.existingClaim }}{{ .Values.claudeHome.existingClaim }}{{ else }}{{ include "klaus.fullname" . }}-claude-home{{ end }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: npm-cache
           emptyDir: {}
       {{- with .Values.nodeSelector }}

@@ -276,6 +276,17 @@ workspace:
   #       memory: 512Mi
   gitResources: {}
 
+# claudeHome configures persistent storage for the Claude Code session state
+# (~/.claude). Required for durable --resume across pod restarts.
+# When disabled, an emptyDir is used and JSONL is wiped on every restart.
+# Durable resume requires both claudeHome.enabled=true and KLAUS_PGSQL_DSN.
+claudeHome:
+  enabled: false
+  storageClass: ""
+  size: 2Gi
+  # existingClaim mounts a pre-existing PVC instead of creating one.
+  existingClaim: ""
+
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its
 # native telemetry (tokens, cost, sessions, tool events, API requests).
