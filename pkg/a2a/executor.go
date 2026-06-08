@@ -15,6 +15,7 @@ import (
 
 	"github.com/a2aproject/a2a-go/a2asrv"
 	"github.com/a2aproject/a2a-go/a2asrv/eventqueue"
+	"github.com/google/uuid"
 
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/kagentapi"
@@ -209,7 +210,7 @@ drainLoop:
 
 	// Record user prompt and assistant reply as conversation turns. Both
 	// writes are async and best-effort so they never block the response path.
-	e.recordTurns(contextID, sessionID, text, result)
+	e.recordTurns(ctx, contextID, sessionID, text, result)
 
 	// Query status only for error / retry-state detection; Result and SessionID
 	// fields are intentionally not used (see result/sessionID derivation above).
@@ -322,10 +323,18 @@ func (e *Executor) augmentWithMemory(ctx context.Context, contextID, text string
 // recordTurns persists the user prompt and assistant reply as conversation
 // turns in the store, then pushes them to the kagent UI. Both operations are
 // async and best-effort: failures are logged only, never returned.
-func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText string) {
+//
+// parentCtx carries the caller's OIDC AuthInfo (set by extractCallerAuth
+// middleware). It is captured before the goroutine so the goroutine can
+// re-inject it into the detached timeout context for kagent auth.
+func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, userText, assistantText string) {
+	authInfo := kagentapi.AuthInfoFromContext(parentCtx)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		if authInfo.BearerToken != "" {
+			ctx = kagentapi.WithAuthInfo(ctx, authInfo)
+		}
 
 		if userText != "" {
 			userContent, _ := json.Marshal(userText)
@@ -339,7 +348,7 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 				log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
 			}
 			if e.kagent != nil {
-				e.kagent.PushEvent(ctx, contextID, kagentapi.SessionEvent{Role: "user", Content: userText})
+				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "user", userText))
 			}
 			if err := e.mem.Store(ctx, contextID, "user", userText); err != nil {
 				log.Printf("[a2a] memory store user failed contextID=%q: %v", contextID, err)
@@ -358,7 +367,7 @@ func (e *Executor) recordTurns(contextID, sessionID, userText, assistantText str
 				log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
 			}
 			if e.kagent != nil {
-				e.kagent.PushEvent(ctx, contextID, kagentapi.SessionEvent{Role: "assistant", Content: assistantText})
+				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "agent", assistantText))
 			}
 			if err := e.mem.Store(ctx, contextID, "assistant", assistantText); err != nil {
 				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
@@ -388,3 +397,5 @@ func (e *Executor) releaseContext(contextID string) {
 	defer e.mu.Unlock()
 	delete(e.inFlight, contextID)
 }
+
+func newEventID() string { return uuid.New().String() }

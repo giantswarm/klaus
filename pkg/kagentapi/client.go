@@ -4,6 +4,9 @@
 //
 // Env: KAGENT_API_ENDPOINT — base URL (e.g. http://kagent-controller.kagent.svc).
 // When unset, all operations are no-ops.
+//
+// Env: KAGENT_AGENT_REF — namespace/name of this agent as registered in kagent
+// (e.g. "kagent/klaud-coding"). When set, sent as X-Agent-Name on push requests.
 package kagentapi
 
 import (
@@ -13,16 +16,49 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 )
 
-const defaultTimeout = 5 * time.Second
+const (
+	defaultTimeout   = 5 * time.Second
+	envKagentAgentRef = "KAGENT_AGENT_REF"
+)
+
+// a2aMessage is the JSON structure stored in Event.Data — a trpc-a2a-go
+// protocol.Message. Defined here so pkg/kagentapi has no dependency on the
+// trpc SDK.
+type a2aMessage struct {
+	Kind      string    `json:"kind"`
+	MessageID string    `json:"messageId"`
+	Role      string    `json:"role"`
+	Parts     []a2aPart `json:"parts"`
+}
+
+type a2aPart struct {
+	Kind string `json:"kind"`
+	Text string `json:"text"`
+}
 
 // SessionEvent is a single turn event sent to the kagent session history API.
 // POST /api/sessions/{id}/events
+// Data is a JSON-serialized A2A protocol.Message (see NewSessionEvent).
 type SessionEvent struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	ID   string `json:"id"`
+	Data string `json:"data"`
+}
+
+// NewSessionEvent builds a SessionEvent for the given role ("user" or "agent")
+// and plain-text content. id should be unique per event (e.g. a UUID).
+func NewSessionEvent(id, role, text string) SessionEvent {
+	msg := a2aMessage{
+		Kind:      "message",
+		MessageID: id,
+		Role:      role,
+		Parts:     []a2aPart{{Kind: "text", Text: text}},
+	}
+	data, _ := json.Marshal(msg)
+	return SessionEvent{ID: id, Data: string(data)}
 }
 
 // Client pushes session turn events to the kagent UI. It is safe for
@@ -50,6 +86,11 @@ func (c *Client) Enabled() bool {
 
 // PushEvent sends a single session event to the kagent controller.
 // It is a best-effort operation; any error is logged and discarded.
+//
+// Auth: the kagent controller runs in trusted-proxy mode and requires a Bearer
+// JWT + the user sub via X-User-Id. Auth is read from ctx (set by the
+// extractCallerAuth middleware in pkg/server). Without valid auth the push
+// returns 401 and is silently discarded.
 func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionEvent) {
 	if !c.Enabled() {
 		return
@@ -68,8 +109,19 @@ func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionE
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// kagent controller uses internal-trust auth via X-User-ID.
-	req.Header.Set("X-User-ID", "klaus")
+
+	// Forward the caller's OIDC identity so the kagent controller can locate
+	// the session (which is owned by the user, not the agent pod).
+	info := AuthInfoFromContext(ctx)
+	if info.BearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+info.BearerToken)
+	}
+	if info.UserSub != "" {
+		req.Header.Set("X-User-Id", info.UserSub)
+	}
+	if agentRef := os.Getenv(envKagentAgentRef); agentRef != "" {
+		req.Header.Set("X-Agent-Name", agentRef)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
