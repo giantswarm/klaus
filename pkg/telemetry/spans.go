@@ -1,5 +1,15 @@
 package telemetry
 
+import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// Tracer returns a named tracer from the global provider.
+func Tracer(name string) trace.Tracer {
+	return otel.Tracer(name)
+}
+
 // Span names used across the Klaus packages. Centralised here so a2a,
 // claude, and mcp packages all reference the same strings.
 const (

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -170,7 +170,7 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			log.Printf("[claude persistent stderr] %s", line)
+			slog.Debug("claude persistent stderr", "line", line)
 			p.mu.Lock()
 			p.stderrTail.add(line)
 			p.mu.Unlock()
@@ -185,7 +185,7 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 		p.startWatchdog(context.Background(), processDone)
 	}
 
-	log.Println("[claude] persistent subprocess started")
+	slog.Info("claude: persistent subprocess started")
 	return nil
 }
 
@@ -207,10 +207,10 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 	p.watchdogCancel = watchCancel
 
 	go func() {
-		log.Printf("[claude] watchdog started, waiting for subprocess exit")
+		slog.Debug("claude: watchdog started, waiting for subprocess exit")
 		select {
 		case <-watchCtx.Done():
-			log.Printf("[claude] watchdog cancelled before subprocess exit")
+			slog.Debug("claude: watchdog cancelled before subprocess exit")
 			return
 		case <-processDone:
 		}
@@ -222,24 +222,25 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 
 		// Only restart if the process exited unexpectedly (not via Stop).
 		if status == ProcessStatusStopped {
-			log.Printf("[claude] watchdog: subprocess stopped intentionally, not restarting")
+			slog.Debug("claude: watchdog: subprocess stopped intentionally, not restarting")
 			return
 		}
 
-		log.Printf("[claude] watchdog: subprocess exited unexpectedly (status=%s, lastError=%s), restarting in %v", status, lastErr, restartBackoff)
+		slog.Warn("claude: subprocess exited unexpectedly, restarting",
+			"status", status, "last_error", lastErr, "backoff", restartBackoff)
 		metrics.ProcessRestartsTotal.Inc()
 
 		select {
 		case <-watchCtx.Done():
-			log.Printf("[claude] watchdog cancelled during restart backoff")
+			slog.Debug("claude: watchdog cancelled during restart backoff")
 			return
 		case <-time.After(restartBackoff):
 		}
 
 		if err := p.Start(watchCtx); err != nil {
-			log.Printf("[claude] watchdog: failed to restart persistent subprocess: %v", err)
+			slog.Error("claude: watchdog failed to restart persistent subprocess", "error", err)
 		} else {
-			log.Printf("[claude] watchdog: persistent subprocess restarted successfully")
+			slog.Info("claude: watchdog restarted persistent subprocess successfully")
 		}
 	}()
 }
@@ -307,7 +308,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		close(processDone)
 		p.mu.Unlock()
 		metrics.SetProcessStatus(string(status))
-		log.Printf("[claude] persistent subprocess exited (waitErr=%v, lastError=%s, status=%s)", waitErr, lastErr, status)
+		slog.Info("claude: persistent subprocess exited", "wait_err", waitErr, "last_error", lastErr, "status", status)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -327,7 +328,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 
 		msg, parseErr := ParseStreamMessage(line)
 		if parseErr != nil {
-			log.Printf("[claude persistent] failed to parse stream message: %v (line: %s)", parseErr, string(line))
+			slog.Warn("claude persistent: failed to parse stream message", "error", parseErr, "line", string(line))
 			continue
 		}
 
@@ -467,7 +468,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 	}
 
 	if scanErr := scanner.Err(); scanErr != nil {
-		log.Printf("[claude persistent] stdout scanner error: %v", scanErr)
+		slog.Error("claude persistent: stdout scanner error", "error", scanErr)
 	}
 }
 
@@ -501,7 +502,7 @@ func (p *PersistentProcess) Run(ctx context.Context, prompt string) (<-chan Stre
 func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (<-chan StreamMessage, error) {
 	if runOpts != nil {
 		if ignored := runOpts.ignoredFields(); len(ignored) > 0 {
-			log.Printf("[claude persistent] WARNING: per-invocation overrides ignored in persistent mode: %s", strings.Join(ignored, ", "))
+			slog.Warn("claude persistent: per-invocation overrides ignored in persistent mode", "ignored", strings.Join(ignored, ", "))
 		}
 	}
 
@@ -644,7 +645,7 @@ func (p *PersistentProcess) Stop() error {
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		log.Printf("[claude persistent] SIGTERM failed (process may have already exited): %v", err)
+		slog.Warn("claude persistent: SIGTERM failed (process may have already exited)", "error", err)
 		return nil
 	}
 
@@ -653,7 +654,7 @@ func (p *PersistentProcess) Stop() error {
 	case <-processDone:
 		return nil
 	case <-time.After(10 * time.Second):
-		log.Printf("[claude persistent] process did not exit after SIGTERM, sending SIGKILL")
+		slog.Warn("claude persistent: process did not exit after SIGTERM, sending SIGKILL")
 		return cmd.Process.Kill()
 	}
 }

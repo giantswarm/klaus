@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,11 +16,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/giantswarm/mcp-toolkit/logging"
+	"github.com/giantswarm/mcp-toolkit/tracing"
+
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
-	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
 const (
@@ -189,17 +191,38 @@ pkg/config for the full Config struct and supported fields.`,
 
 // runServe contains the main server logic, now driven by the structured Config.
 func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig server.OAuthConfig) error {
-	// Set up OTel tracing. No-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
-	_, telShutdown, err := telemetry.Setup(context.Background(), project.Name, project.Version())
+	logger, logShutdown, err := logging.Init(context.Background(),
+		logging.WithServiceName(project.Name),
+		logging.WithServiceVersion(project.Version()),
+	)
 	if err != nil {
-		log.Printf("WARNING: OTel setup failed, tracing disabled: %v", err)
-		telShutdown = func(_ context.Context) error { return nil }
+		logger = slog.Default()
+		slog.Warn("logging init failed, falling back to default logger", "error", err)
+	} else {
+		slog.SetDefault(logger)
 	}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if shutdownErr := telShutdown(ctx); shutdownErr != nil {
-			log.Printf("WARNING: OTel shutdown error: %v", shutdownErr)
+		if shutdownErr := logShutdown(ctx); shutdownErr != nil {
+			slog.Warn("logging shutdown error", "error", shutdownErr)
+		}
+	}()
+	_ = logger
+
+	traceShutdown, err := tracing.Init(context.Background(),
+		tracing.WithServiceName(project.Name),
+		tracing.WithServiceVersion(project.Version()),
+	)
+	if err != nil {
+		slog.Warn("OTel tracing init failed, tracing disabled", "error", err)
+		traceShutdown = func(_ context.Context) error { return nil }
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := traceShutdown(ctx); shutdownErr != nil {
+			slog.Warn("OTel tracing shutdown error", "error", shutdownErr)
 		}
 	}()
 
@@ -268,7 +291,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.Agents != "" {
 		var agents map[string]claude.AgentConfig
 		if err := json.Unmarshal([]byte(cfg.Claude.Agents), &agents); err != nil {
-			log.Printf("WARNING: failed to parse claude.agents: %v", err)
+			slog.Warn("failed to parse claude.agents", "error", err)
 		} else {
 			opts.Agents = agents
 		}
@@ -288,15 +311,15 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// SubPath is not supported).
 	soulPath := soulFilePath()
 	if soul, err := loadSOULFile(soulPath); err != nil {
-		log.Printf("WARNING: failed to load personality from %q: %v", soulPath, err)
+		slog.Warn("failed to load personality", "path", soulPath, "error", err)
 	} else if soul != "" {
 		if opts.AppendSystemPrompt != "" {
 			opts.AppendSystemPrompt += "\n\n"
 		}
 		opts.AppendSystemPrompt += soul
-		log.Printf("Loaded personality from %q (%d bytes)", soulPath, len(soul))
+		slog.Info("loaded personality", "path", soulPath, "bytes", len(soul))
 	} else if os.Getenv("KLAUS_SOUL_FILE") != "" {
-		log.Printf("WARNING: KLAUS_SOUL_FILE is set to %q but the file does not exist or is empty", soulPath)
+		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
 
 	// Create the Claude process manager.
@@ -304,7 +327,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	// using the canonical validators from the claude package.
 	var process claude.Prompter
 	if cfg.Claude.Mode == server.ModeChat {
-		log.Println("Starting in chat mode (bidirectional stream-json)")
+		slog.Info("starting in chat mode (bidirectional stream-json)")
 		process = claude.NewPersistentProcess(opts)
 	} else {
 		process = claude.NewProcess(opts)
@@ -312,7 +335,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 
 	// Owner-based access control.
 	if cfg.Server.OwnerSubject != "" {
-		log.Printf("Owner-based access control enabled (subject: %s)", cfg.Server.OwnerSubject)
+		slog.Info("owner-based access control enabled", "subject", cfg.Server.OwnerSubject)
 	}
 
 	// Determine listen port: flag > config > default.
@@ -349,13 +372,13 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server
 
 	// Warn about insecure configuration.
 	if config.Security.AllowPublicClientRegistration {
-		log.Println("WARNING: Public client registration is enabled - this allows unlimited client registration")
+		slog.Warn("public client registration is enabled - this allows unlimited client registration")
 	}
 	if config.Security.AllowInsecureAuthWithoutState {
-		log.Println("WARNING: State parameter is optional - this weakens CSRF protection")
+		slog.Warn("state parameter is optional - this weakens CSRF protection")
 	}
 	if len(config.Security.EncryptionKey) == 0 {
-		log.Println("WARNING: OAuth encryption key not set - tokens will be stored unencrypted")
+		slog.Warn("OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
 	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config, cfg.OwnerSubject)
@@ -395,7 +418,7 @@ func runServerLifecycle(
 
 	select {
 	case <-quit:
-		log.Println("Shutdown signal received...")
+		slog.Info("shutdown signal received")
 	case err := <-serverDone:
 		if err != nil {
 			return fmt.Errorf("HTTP server error: %w", err)
@@ -404,7 +427,7 @@ func runServerLifecycle(
 
 	// Stop any running Claude process.
 	if err := process.Stop(); err != nil {
-		log.Printf("Error stopping Claude process: %v", err)
+		slog.Error("error stopping Claude process", "error", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), server.DefaultShutdownTimeout)
@@ -414,7 +437,7 @@ func runServerLifecycle(
 		return fmt.Errorf("server forced to shutdown: %w", err)
 	}
 
-	log.Println("Server exited")
+	slog.Info("server exited")
 	return nil
 }
 

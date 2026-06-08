@@ -3,7 +3,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -105,7 +105,7 @@ func resultStorePath(getenv func(string) string, homeDir func() (string, error))
 		if filepath.IsAbs(dir) {
 			return dir
 		}
-		log.Printf("[klaus] WARNING: %s=%q is not an absolute path, ignoring", resultDirEnvVar, dir)
+		slog.Warn("KLAUS_RESULT_DIR is not an absolute path, ignoring", "value", dir)
 	}
 	if home, err := homeDir(); err == nil && home != "" {
 		return filepath.Join(home, defaultResultSubdir)
@@ -124,7 +124,7 @@ func resultStoreDir(opts Options) string {
 		if filepath.IsAbs(cleaned) {
 			return cleaned
 		}
-		log.Printf("[klaus] WARNING: ResultDir %q is not an absolute path, falling back to default", opts.ResultDir)
+		slog.Warn("ResultDir is not an absolute path, falling back to default", "value", opts.ResultDir)
 	}
 	return ResultStorePath()
 }
@@ -225,7 +225,7 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 	}
 
 	if err := store.Save(pr); err != nil {
-		log.Printf("[klaus] failed to persist result: %v", err)
+		slog.Error("failed to persist result", "error", err)
 	}
 }
 

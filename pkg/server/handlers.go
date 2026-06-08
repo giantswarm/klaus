@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -70,7 +70,7 @@ func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) 
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			log.Printf("Failed to encode status response: %v", err)
+			slog.Error("failed to encode status response", "error", err)
 		}
 	}
 }

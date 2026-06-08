@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -252,7 +252,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 		defer stderrWg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[claude stderr] %s", scanner.Text())
+			slog.Debug("claude stderr", "line", scanner.Text())
 		}
 	}()
 
@@ -291,7 +291,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 
 			msg, parseErr := ParseStreamMessage(line)
 			if parseErr != nil {
-				log.Printf("[claude] failed to parse stream message: %v (line: %s)", parseErr, string(line))
+				slog.Warn("claude: failed to parse stream message", "error", parseErr, "line", string(line))
 				continue
 			}
 
@@ -390,7 +390,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 		}
 
 		if scanErr := scanner.Err(); scanErr != nil {
-			log.Printf("[claude] stdout scanner error: %v", scanErr)
+			slog.Error("claude: stdout scanner error", "error", scanErr)
 		}
 	}()
 
@@ -449,7 +449,7 @@ func (p *Process) Stop() error {
 
 	// Send SIGTERM first.
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		log.Printf("[claude] SIGTERM failed (process may have already exited): %v", err)
+		slog.Warn("claude: SIGTERM failed (process may have already exited)", "error", err)
 		return nil
 	}
 
@@ -459,7 +459,7 @@ func (p *Process) Stop() error {
 		return nil
 	case <-time.After(10 * time.Second):
 		// Force kill.
-		log.Printf("[claude] process did not exit after SIGTERM, sending SIGKILL")
+		slog.Warn("claude: process did not exit after SIGTERM, sending SIGKILL")
 		return cmd.Process.Kill()
 	}
 }
