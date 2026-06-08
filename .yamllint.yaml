@@ -1,11 +1,8 @@
 ---
 extends: default
-
 rules:
-  line-length:
-    max: 140
   comments:
-    require-starting-space: true
     min-spaces-from-content: 1
-  truthy:
-    check-keys: false
+  document-start: disable
+  line-length:
+    max: 200
