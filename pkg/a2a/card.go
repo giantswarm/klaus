@@ -13,6 +13,8 @@ const (
 	envAgentDescription = "AGENT_DESCRIPTION"
 	envAgentVersion     = "AGENT_VERSION"
 	envAgentURL         = "AGENT_URL"
+
+	mimeTextPlain = "text/plain"
 )
 
 // AgentCard returns an A2A AgentCard populated from environment variables,
@@ -39,8 +41,8 @@ func AgentCard() *a2a.AgentCard {
 		AdditionalInterfaces: []a2a.AgentInterface{
 			{URL: url, Transport: a2a.TransportProtocolJSONRPC},
 		},
-		DefaultInputModes:  []string{"text/plain"},
-		DefaultOutputModes: []string{"text/plain"},
+		DefaultInputModes:  []string{mimeTextPlain},
+		DefaultOutputModes: []string{mimeTextPlain},
 		Capabilities: a2a.AgentCapabilities{
 			Streaming:         true,
 			PushNotifications: false,

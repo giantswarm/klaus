@@ -18,7 +18,7 @@ import (
 // targets, an optional dynamic allowlist, and a per-host client cache.
 // A nil *Registry disables the a2a_call MCP tool.
 type Registry struct {
-	targets      map[string]string  // name → base URL
+	targets      map[string]string // name → base URL
 	allowDynamic bool
 	allowedHosts map[string]struct{} // host[:port] → present; empty = deny all dynamic
 
