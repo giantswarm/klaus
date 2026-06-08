@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -46,37 +45,6 @@ func NewPostgresStore(ctx context.Context, dsn string) (*PostgresStore, error) {
 // Close releases the underlying connection pool.
 func (p *PostgresStore) Close() error {
 	return p.db.Close()
-}
-
-func (p *PostgresStore) SessionID(ctx context.Context, contextID string) (string, error) {
-	var sessionID string
-	err := p.db.QueryRowContext(ctx,
-		`SELECT session_id FROM sessions.bindings WHERE context_id = $1`,
-		contextID,
-	).Scan(&sessionID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("querying session binding: %w", err)
-	}
-	return sessionID, nil
-}
-
-func (p *PostgresStore) BindSession(ctx context.Context, contextID, sessionID string) error {
-	if sessionID == "" {
-		return nil
-	}
-	_, err := p.db.ExecContext(ctx, `
-		INSERT INTO sessions.bindings (context_id, session_id, updated_at)
-		VALUES ($1, $2, now())
-		ON CONFLICT (context_id)
-		DO UPDATE SET session_id = EXCLUDED.session_id, updated_at = EXCLUDED.updated_at
-	`, contextID, sessionID)
-	if err != nil {
-		return fmt.Errorf("upserting session binding: %w", err)
-	}
-	return nil
 }
 
 func (p *PostgresStore) AppendTurn(ctx context.Context, t Turn) error {

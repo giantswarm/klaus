@@ -12,8 +12,7 @@ import (
 
 // localSession holds the persisted data for a single contextID in the local store.
 type localSession struct {
-	SessionID string `json:"session_id"`
-	Turns     []Turn `json:"turns"`
+	Turns []Turn `json:"turns"`
 }
 
 // LocalStore is a file-backed Store. Each contextID maps to a single JSON file
@@ -65,30 +64,6 @@ func (l *LocalStore) save(contextID string, s *localSession) error {
 		return fmt.Errorf("writing session file: %w", err)
 	}
 	return os.Rename(tmp, l.path(contextID))
-}
-
-func (l *LocalStore) SessionID(_ context.Context, contextID string) (string, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s, err := l.load(contextID)
-	if err != nil {
-		return "", err
-	}
-	return s.SessionID, nil
-}
-
-func (l *LocalStore) BindSession(_ context.Context, contextID, sessionID string) error {
-	if sessionID == "" {
-		return nil
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	s, err := l.load(contextID)
-	if err != nil {
-		return err
-	}
-	s.SessionID = sessionID
-	return l.save(contextID, s)
 }
 
 func (l *LocalStore) AppendTurn(_ context.Context, t Turn) error {

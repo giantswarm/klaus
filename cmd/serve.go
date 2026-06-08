@@ -347,25 +347,12 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	}
 	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore))
 
-	// Seed the session store when CLAUDE_CONTEXT_ID and CLAUDE_SESSION_ID are
-	// set. This lets an operator pre-bind a context → session mapping at pod
-	// start, enabling agent-mode resume across restarts without a first-turn
-	// warm-up call. For chat mode the ResumeSessionID option handles this.
-	seedContextID := os.Getenv("CLAUDE_CONTEXT_ID")
-	seedSessionID := os.Getenv("CLAUDE_SESSION_ID")
-	if seedContextID != "" && seedSessionID != "" {
-		if bindErr := sessionStore.BindSession(context.Background(), seedContextID, seedSessionID); bindErr != nil {
-			slog.Error("failed to seed session store", "context_id", seedContextID, "session_id", seedSessionID, "error", bindErr)
-		} else {
-			slog.Info("pre-seeded session store", "context_id", seedContextID, "session_id", seedSessionID)
-		}
-	}
-
 	// In chat mode, propagate CLAUDE_SESSION_ID as the startup resume session
-	// so the persistent subprocess continues an existing conversation after a
-	// pod restart. In agent mode the store binding (above) handles this.
-	if cfg.Claude.Mode == server.ModeChat && seedSessionID != "" {
-		opts.ResumeSessionID = seedSessionID
+	// so the persistent subprocess continues an existing conversation after a pod restart.
+	if cfg.Claude.Mode == server.ModeChat {
+		if seedSessionID := os.Getenv("CLAUDE_SESSION_ID"); seedSessionID != "" {
+			opts.ResumeSessionID = seedSessionID
+		}
 	}
 
 	// Create the Claude process manager.

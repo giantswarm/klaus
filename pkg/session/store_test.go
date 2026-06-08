@@ -18,23 +18,6 @@ func testStore(t *testing.T, store session.Store) {
 	const ctxID = "ctx-abc"
 	const sessID = "sess-123"
 
-	// No binding yet.
-	got, err := store.SessionID(ctx, ctxID)
-	require.NoError(t, err)
-	require.Empty(t, got)
-
-	// Bind and read back.
-	require.NoError(t, store.BindSession(ctx, ctxID, sessID))
-	got, err = store.SessionID(ctx, ctxID)
-	require.NoError(t, err)
-	require.Equal(t, sessID, got)
-
-	// Re-bind (update).
-	require.NoError(t, store.BindSession(ctx, ctxID, "sess-456"))
-	got, err = store.SessionID(ctx, ctxID)
-	require.NoError(t, err)
-	require.Equal(t, "sess-456", got)
-
 	// Append turns.
 	turn1 := session.Turn{
 		ContextID: ctxID,

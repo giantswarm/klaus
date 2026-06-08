@@ -1,17 +1,12 @@
-// Package session provides multi-session state persistence for Klaus.
+// Package session provides conversation history persistence for Klaus.
 //
-// A Klaus pod handles one active claude subprocess (one session) at a time, but
-// over its lifetime the same pod may be reused across multiple A2A contexts via
-// the warm-pool substrate. The Store tracks the contextID → sessionID binding and
-// persists the full conversation history (one Turn per model exchange) so that:
-//
-//   - The stored sessionID can be threaded to --resume on subsequent turns.
-//   - Conversation history is queryable by the MCP messages tool and the kagent UI.
+// The Store persists the full conversation history (one Turn per model exchange)
+// so that history is queryable by the MCP messages tool and the kagent UI.
 //
 // Note: cross-restart resume requires both a persistent Store backend (Postgres
 // via KLAUS_PGSQL_DSN) AND that the claude CLI session files (~/.claude/) survive
-// the restart (i.e. mounted on a PVC). A surviving store binding alone is not
-// sufficient — the CLI cannot resume a session whose files no longer exist.
+// the restart (mounted on a PVC). History alone is not sufficient; the CLI cannot
+// resume a session whose files no longer exist.
 //
 // Use NewStore to obtain a backend-selected implementation.
 package session
@@ -33,13 +28,9 @@ type Turn struct {
 	TS      time.Time
 }
 
-// Store persists contextID → sessionID bindings and per-turn conversation history.
+// Store persists per-turn conversation history.
 // All methods must be safe for concurrent use.
 type Store interface {
-	// SessionID returns the claude sessionID bound to contextID, or "" if none.
-	SessionID(ctx context.Context, contextID string) (string, error)
-	// BindSession records the contextID → sessionID mapping.
-	BindSession(ctx context.Context, contextID, sessionID string) error
 	// AppendTurn persists a conversation turn.
 	AppendTurn(ctx context.Context, t Turn) error
 	// History returns all turns for contextID in ascending sequence order.

@@ -15,11 +15,3 @@ CREATE TABLE IF NOT EXISTS sessions.turns (
 
 CREATE INDEX IF NOT EXISTS turns_session_idx
     ON sessions.turns (session_id);
-
--- Lightweight session binding table. Allows looking up the latest sessionID
--- for a contextID without scanning the turns table.
-CREATE TABLE IF NOT EXISTS sessions.bindings (
-    context_id TEXT        NOT NULL PRIMARY KEY,
-    session_id TEXT        NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
