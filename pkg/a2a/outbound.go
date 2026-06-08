@@ -87,9 +87,12 @@ func (r *Registry) Call(ctx context.Context, target, message string) (string, er
 }
 
 // pollTask streams task events via ResubscribeToTask until a terminal state is reached.
+// Artifact text is accumulated and used as fallback when the terminal status carries
+// no message — the common case for Klaus agents, which emit output as artifact events.
 func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task *a2a.Task, target string) (string, error) {
 	log.Printf("[a2a] task %q submitted to %q, polling until terminal", task.ID, target)
 
+	var artifactText strings.Builder
 	for event, err := range client.ResubscribeToTask(ctx, &a2a.TaskIDParams{ID: task.ID}) {
 		if err != nil {
 			return "", fmt.Errorf("A2A ResubscribeToTask %q: %w", target, err)
@@ -98,15 +101,19 @@ func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task 
 		case *a2a.TaskStatusUpdateEvent:
 			log.Printf("[a2a] task %q state=%s final=%v", task.ID, e.Status.State, e.Final)
 			if e.Status.State.Terminal() {
-				if e.Status.Message != nil {
-					if text := extractText(e.Status.Message); text != "" {
-						return text, nil
-					}
+				if text := extractText(e.Status.Message); text != "" {
+					return text, nil
 				}
-				return "", nil
+				return artifactText.String(), nil
 			}
 		case *a2a.TaskArtifactUpdateEvent:
-			// Artifact events carry partial output; skip — wait for terminal status.
+			if e.Artifact != nil {
+				for _, part := range e.Artifact.Parts {
+					if tp, ok := part.(a2a.TextPart); ok {
+						artifactText.WriteString(tp.Text)
+					}
+				}
+			}
 		}
 	}
 	return "", fmt.Errorf("A2A task %q stream ended without terminal state", task.ID)
@@ -194,19 +201,34 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 
 // textFromResult extracts concatenated text from a SendMessageResult.
 // Handles both *a2a.Message (direct response) and *a2a.Task (deferred / polled).
+// Priority: status message → artifacts → history (newest agent message).
 func textFromResult(result a2a.SendMessageResult) string {
 	switch v := result.(type) {
 	case *a2a.Message:
 		return extractText(v)
 	case *a2a.Task:
-		if v.Status.Message != nil {
-			if text := extractText(v.Status.Message); text != "" {
-				return text
+		if text := extractText(v.Status.Message); text != "" {
+			return text
+		}
+		// Many agents (including Klaus) emit output as artifact events rather
+		// than attaching text to the terminal status message.
+		var artifactSB strings.Builder
+		for _, artifact := range v.Artifacts {
+			if artifact == nil {
+				continue
+			}
+			for _, part := range artifact.Parts {
+				if tp, ok := part.(a2a.TextPart); ok {
+					artifactSB.WriteString(tp.Text)
+				}
 			}
 		}
-		// Fall back to the most recent agent message in history.
+		if s := artifactSB.String(); s != "" {
+			return s
+		}
+		// Last resort: most recent agent message in history.
 		for i := len(v.History) - 1; i >= 0; i-- {
-			if v.History[i].Role == a2a.MessageRoleAgent {
+			if v.History[i] != nil && v.History[i].Role == a2a.MessageRoleAgent {
 				if text := extractText(v.History[i]); text != "" {
 					return text
 				}

@@ -116,6 +116,20 @@ func TestTextFromResult_taskHistoryFallback(t *testing.T) {
 	require.Equal(t, "from history", got)
 }
 
+func TestTextFromResult_taskArtifactFallback(t *testing.T) {
+	// Many agents (including Klaus) emit output as artifact events, not as a
+	// message on the terminal status. textFromResult must fall back to artifacts
+	// when Status.Message is nil or empty.
+	task := &a2a.Task{
+		Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+		Artifacts: []*a2a.Artifact{
+			{ID: a2a.NewArtifactID(), Parts: a2a.ContentParts{a2a.TextPart{Text: "artifact output"}}},
+		},
+	}
+	got := textFromResult(task)
+	require.Equal(t, "artifact output", got)
+}
+
 func TestTextFromResult_nil(t *testing.T) {
 	got := textFromResult(nil)
 	require.Empty(t, got)
