@@ -4,7 +4,7 @@
 ARG VARIANT=alpine
 
 # Stage 1: Build the Go binary (runs on the build host, cross-compiles for target).
-FROM --platform=$BUILDPLATFORM golang:1.26.3 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.4 AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
