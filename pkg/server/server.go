@@ -38,13 +38,15 @@ type Config struct {
 	// Executor is the optional A2A executor. When set, the /a2a endpoint and
 	// agent-card discovery URLs are mounted. When nil, A2A is not exposed.
 	Executor *a2apkg.Executor
+	// A2ACaller enables the a2a_call MCP tool. When nil, the tool is not registered.
+	A2ACaller mcppkg.Caller
 }
 
 // NewServer creates a Server that serves MCP and operational endpoints.
 // The serverCtx controls the lifetime of background goroutines; it should
 // be cancelled during server shutdown to ensure drain goroutines are cleaned up.
 func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config) *Server {
-	mcpSrv := mcppkg.NewServer(serverCtx, process)
+	mcpSrv := mcppkg.NewServer(serverCtx, process, cfg.A2ACaller)
 
 	mux := http.NewServeMux()
 

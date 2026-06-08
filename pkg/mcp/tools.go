@@ -19,11 +19,17 @@ import (
 // definition, request parsing, and progress notification payloads.
 const argMessage = "message"
 
+// Caller is the interface for outbound A2A calls, satisfied by *a2a.Registry.
+// A nil Caller disables the a2a_call tool.
+type Caller interface {
+	Call(ctx context.Context, target, message string) (string, error)
+}
+
 // RegisterTools registers all MCP tools on the given server. The serverCtx
 // controls the lifetime of background drain goroutines spawned by non-blocking
 // prompt submissions; it should be cancelled during server shutdown to ensure
-// goroutines are not orphaned.
-func RegisterTools(serverCtx context.Context, s *server.MCPServer, process claudepkg.Prompter) {
+// goroutines are not orphaned. caller may be nil; when nil, a2a_call is not registered.
+func RegisterTools(serverCtx context.Context, s *server.MCPServer, process claudepkg.Prompter, caller Caller) {
 	s.AddTools(
 		promptTool(serverCtx, process),
 		statusTool(process),
@@ -31,6 +37,9 @@ func RegisterTools(serverCtx context.Context, s *server.MCPServer, process claud
 		resultTool(process),
 		messagesTool(process),
 	)
+	if caller != nil {
+		s.AddTools(a2aCallTool(caller))
+	}
 }
 
 func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.ServerTool {
@@ -408,6 +417,50 @@ func messagesTool(process claudepkg.Prompter) server.ServerTool {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal messages: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(data)), nil
+	}
+
+	return server.ServerTool{Tool: tool, Handler: handler}
+}
+
+func a2aCallTool(caller Caller) server.ServerTool {
+	tool := mcp.NewTool("a2a_call",
+		mcp.WithDescription("Call another A2A-compatible agent and return its response. "+
+			"Use target to specify a named agent (configured in a2a.targets) or a full URL "+
+			"when dynamic calls are enabled. The call blocks until the remote agent returns "+
+			"a terminal result."),
+		mcp.WithString("target",
+			mcp.Required(),
+			mcp.Description("Named target (e.g. \"summarizer\") or full base URL (e.g. \"https://agent.example.com\"). "+
+				"Named targets are resolved from the server's a2a.targets configuration."),
+		),
+		mcp.WithString(argMessage,
+			mcp.Required(),
+			mcp.Description("The prompt or task description to send to the remote agent"),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		target, err := request.RequireString("target")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if strings.TrimSpace(target) == "" {
+			return mcp.NewToolResultError("target must not be empty"), nil
+		}
+
+		message, err := request.RequireString(argMessage)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if strings.TrimSpace(message) == "" {
+			return mcp.NewToolResultError("message must not be empty"), nil
+		}
+
+		result, err := caller.Call(ctx, target, message)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("a2a_call failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(result), nil
 	}
 
 	return server.ServerTool{Tool: tool, Handler: handler}

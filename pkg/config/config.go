@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -41,6 +42,23 @@ type Config struct {
 
 	// OAuth holds OAuth 2.1 authentication settings.
 	OAuth OAuthFileConfig `yaml:"oauth"`
+
+	// A2A holds settings for outbound A2A calls via the a2a_call MCP tool.
+	A2A A2AConfig `yaml:"a2a"`
+}
+
+// A2AConfig holds outbound A2A call settings.
+type A2AConfig struct {
+	// Targets maps logical names to A2A base URLs.
+	// Env: KLAUS_A2A_TARGETS as name=url,name2=url2,...
+	Targets map[string]string `yaml:"targets"`
+	// AllowDynamic enables URL-based calls to agents not listed in Targets.
+	// Requires AllowedHosts to be non-empty (fail-closed).
+	// Env: KLAUS_A2A_ALLOW_DYNAMIC
+	AllowDynamic bool `yaml:"allowDynamic"`
+	// AllowedHosts lists host[:port] values permitted for dynamic URL calls.
+	// Env: KLAUS_A2A_ALLOWED_HOSTS as comma-separated host[:port] values.
+	AllowedHosts []string `yaml:"allowedHosts"`
 }
 
 // ClaudeConfig holds settings that are forwarded to the Claude Code CLI.
@@ -241,6 +259,11 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideString(&cfg.Server.OwnerSubject, "KLAUS_OWNER_SUBJECT")
 	envOverrideBool(&cfg.Server.KagentPushEnabled, "KLAUS_KAGENT_PUSH_ENABLED")
 
+	// Outbound A2A settings.
+	envOverrideA2ATargets(&cfg.A2A.Targets, "KLAUS_A2A_TARGETS")
+	envOverrideBool(&cfg.A2A.AllowDynamic, "KLAUS_A2A_ALLOW_DYNAMIC")
+	envOverrideCSV(&cfg.A2A.AllowedHosts, "KLAUS_A2A_ALLOWED_HOSTS")
+
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")
 	envOverrideString(&cfg.OAuth.Google.ClientSecret, "GOOGLE_CLIENT_SECRET")
@@ -289,6 +312,11 @@ func (c *Config) Validate() error {
 		} else if len(decoded) != 32 {
 			errs = append(errs, fmt.Errorf("oauth.security.encryptionKey must decode to exactly 32 bytes, got %d", len(decoded)))
 		}
+	}
+
+	// Validate outbound A2A config.
+	if err := c.A2A.validate(); err != nil {
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)
@@ -369,6 +397,47 @@ func envOverrideFloat64(target *float64, key string) {
 func envOverrideCSV(target *[]string, key string) {
 	if v := os.Getenv(key); v != "" {
 		*target = strings.Split(v, ",")
+	}
+}
+
+// validate checks internal consistency of the A2AConfig.
+func (a *A2AConfig) validate() error {
+	if a.AllowDynamic && len(a.AllowedHosts) == 0 {
+		return fmt.Errorf("a2a.allowDynamic requires a2a.allowedHosts to be non-empty (fail-closed)")
+	}
+	seen := make(map[string]struct{}, len(a.Targets))
+	for name, rawURL := range a.Targets {
+		if _, dup := seen[name]; dup {
+			return fmt.Errorf("a2a.targets: duplicate target name %q", name)
+		}
+		seen[name] = struct{}{}
+		if _, err := url.ParseRequestURI(rawURL); err != nil {
+			return fmt.Errorf("a2a.targets[%q]: invalid URL %q: %w", name, rawURL, err)
+		}
+	}
+	return nil
+}
+
+// envOverrideA2ATargets parses "name=url,name2=url2,..." from the env var key
+// into a map. Each pair is split on the first '=' only; entries without '=' are
+// silently skipped with a warning. Existing map values are preserved when the
+// env var is unset.
+func envOverrideA2ATargets(target *map[string]string, key string) {
+	v := os.Getenv(key)
+	if v == "" {
+		return
+	}
+	m := make(map[string]string)
+	for _, pair := range strings.Split(v, ",") {
+		idx := strings.IndexByte(pair, '=')
+		if idx < 1 {
+			slog.Warn("skipping malformed entry in env var: expected name=url", "key", key, "value", pair)
+			continue
+		}
+		m[pair[:idx]] = pair[idx+1:]
+	}
+	if len(m) > 0 {
+		*target = m
 	}
 }
 

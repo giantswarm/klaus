@@ -417,6 +417,20 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Info("memory augmentation enabled", "endpoint", os.Getenv("KAGENT_MEMORY_ENDPOINT"))
 	}
 
+	// Build outbound A2A registry for the a2a_call MCP tool.
+	a2aRegistry := a2apkg.NewRegistry(a2apkg.RegistryConfig{
+		Targets:      cfg.A2A.Targets,
+		AllowDynamic: cfg.A2A.AllowDynamic,
+		AllowedHosts: cfg.A2A.AllowedHosts,
+	})
+	if a2aRegistry != nil {
+		names := make([]string, 0, len(a2aRegistry.Targets()))
+		for name := range a2aRegistry.Targets() {
+			names = append(names, name)
+		}
+		log.Printf("a2a_call enabled (targets: %v, allowDynamic: %v)", names, cfg.A2A.AllowDynamic)
+	}
+
 	// Build the A2A executor.
 	a2aMode := a2apkg.ModeChat
 	if cfg.Claude.Mode != server.ModeChat {
@@ -429,6 +443,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		Mode:         mode,
 		OwnerSubject: cfg.Server.OwnerSubject,
 		Executor:     executor,
+		A2ACaller:    a2aRegistry,
 	}
 
 	if enableOAuth {
@@ -453,7 +468,7 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server
 		slog.Warn("OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(serverCtx, process, cfg.Executor, config, cfg.OwnerSubject)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, cfg.Executor, cfg.A2ACaller, config, cfg.OwnerSubject)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}

@@ -204,6 +204,7 @@ type OAuthServer struct {
 	serverCtx    context.Context
 	process      claudepkg.Prompter
 	executor     *a2apkg.Executor
+	a2aCaller    mcppkg.Caller
 	oauthServer  *oauth.Server
 	oauthHandler *handler.Handler
 	httpServer   *http.Server
@@ -215,7 +216,8 @@ type OAuthServer struct {
 // during server shutdown. ownerSubject restricts MCP access to the configured
 // owner identity; when empty, no owner validation is performed.
 // executor is optional; when non-nil the /a2a endpoint is mounted.
-func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, executor *a2apkg.Executor, config OAuthConfig, ownerSubject string) (*OAuthServer, error) {
+// a2aCaller is optional; when non-nil the a2a_call MCP tool is registered.
+func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, executor *a2apkg.Executor, a2aCaller mcppkg.Caller, config OAuthConfig, ownerSubject string) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
@@ -227,6 +229,7 @@ func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, execu
 		serverCtx:    serverCtx,
 		process:      process,
 		executor:     executor,
+		a2aCaller:    a2aCaller,
 		oauthServer:  oauthSrv,
 		oauthHandler: oauthHandler,
 		ownerSubject: ownerSubject,
@@ -321,7 +324,7 @@ func (s *OAuthServer) setupOAuthRoutes(mux *http.ServeMux) {
 }
 
 func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
-	mcpSrv := mcppkg.NewMCPServer(s.serverCtx, s.process)
+	mcpSrv := mcppkg.NewMCPServer(s.serverCtx, s.process, s.a2aCaller)
 
 	opts := []mcpserver.StreamableHTTPOption{
 		mcpserver.WithEndpointPath("/mcp"),

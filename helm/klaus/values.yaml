@@ -302,6 +302,25 @@ session:
   contextID: ""
   sessionID: ""
 
+# Outbound A2A calls via the a2a_call MCP tool.
+# Configure static targets or allow dynamic URL calls to listed hosts.
+a2a:
+  # targets maps logical names to A2A base URLs.
+  # Example:
+  #   targets:
+  #     summarizer: http://summarizer-agent.agents.svc
+  #     researcher: https://researcher.example.com
+  targets: {}
+  # allowDynamic enables calls to arbitrary URLs (must pair with allowedHosts).
+  allowDynamic: false
+  # allowedHosts lists host[:port] values permitted for dynamic calls.
+  # Required when allowDynamic is true (fail-closed when empty).
+  # Example:
+  #   allowedHosts:
+  #     - agent1.agents.svc
+  #     - agent2.example.com:8080
+  allowedHosts: []
+
 # kagent integration.
 # When endpoint is set, completed A2A turns are pushed to the kagent
 # session-events API so that conversations appear in the kagent UI.
