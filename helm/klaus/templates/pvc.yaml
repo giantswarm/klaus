@@ -16,3 +16,22 @@ spec:
     requests:
       storage: {{ .Values.workspace.size }}
 {{- end }}
+{{- if and .Values.claudeHome.enabled (not .Values.claudeHome.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "klaus.fullname" . }}-claude-home
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "klaus.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.claudeHome.storageClass }}
+  storageClassName: {{ .Values.claudeHome.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.claudeHome.size }}
+{{- end }}

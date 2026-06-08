@@ -493,7 +493,12 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: claude-home
+          {{- if .Values.claudeHome.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ if .Values.claudeHome.existingClaim }}{{ .Values.claudeHome.existingClaim }}{{ else }}{{ include "klaus.fullname" . }}-claude-home{{ end }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: npm-cache
           emptyDir: {}
       {{- with .Values.nodeSelector }}

@@ -284,6 +284,16 @@ workspace:
   #       memory: 512Mi
   gitResources: {}
 
+# claudeHome configures persistent storage for the Claude Code session state
+# (~/.claude). Required for durable --resume across pod restarts.
+# When disabled, an emptyDir is used and session history is wiped on pod restart.
+claudeHome:
+  enabled: false
+  storageClass: ""
+  size: 2Gi
+  # existingClaim mounts a pre-existing PVC instead of creating one.
+  existingClaim: ""
+
 # Session store configuration.
 # Maps A2A context IDs to Claude session IDs and stores conversation turn history.
 session:

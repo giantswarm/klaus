@@ -389,6 +389,15 @@
         }
       }
     },
+    "claudeHome": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "storageClass": { "type": "string" },
+        "size": { "type": "string" },
+        "existingClaim": { "type": "string" }
+      }
+    },
     "session": {
       "type": "object",
       "properties": {
