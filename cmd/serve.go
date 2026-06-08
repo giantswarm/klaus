@@ -189,25 +189,28 @@ pkg/config for the full Config struct and supported fields.`,
 	return cmd
 }
 
+// shutdownTelemetry flushes a telemetry pipeline with a 5-second deadline.
+func shutdownTelemetry(name string, fn func(context.Context) error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := fn(ctx); err != nil {
+		slog.Warn("telemetry shutdown error", "component", name, "error", err)
+	}
+}
+
 // runServe contains the main server logic, now driven by the structured Config.
 func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig server.OAuthConfig) error {
-	logger, logShutdown, err := logging.Init(context.Background(),
+	var logShutdown logging.Shutdown = func(_ context.Context) error { return nil }
+	if l, shutdown, initErr := logging.Init(context.Background(),
 		logging.WithServiceName(project.Name),
 		logging.WithServiceVersion(project.Version()),
-	)
-	if err != nil {
-		logger = slog.Default()
-		slog.Warn("logging init failed, falling back to default logger", "error", err)
+	); initErr != nil {
+		slog.Warn("logging init failed, falling back to default logger", "error", initErr)
 	} else {
-		slog.SetDefault(logger)
+		slog.SetDefault(l)
+		logShutdown = shutdown
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if shutdownErr := logShutdown(ctx); shutdownErr != nil {
-			slog.Warn("logging shutdown error", "error", shutdownErr)
-		}
-	}()
+	defer func() { shutdownTelemetry("logging", logShutdown) }()
 
 	traceShutdown, err := tracing.Init(context.Background(),
 		tracing.WithServiceName(project.Name),
@@ -217,13 +220,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Warn("OTel tracing init failed, tracing disabled", "error", err)
 		traceShutdown = func(_ context.Context) error { return nil }
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if shutdownErr := traceShutdown(ctx); shutdownErr != nil {
-			slog.Warn("OTel tracing shutdown error", "error", shutdownErr)
-		}
-	}()
+	defer func() { shutdownTelemetry("tracing", traceShutdown) }()
 
 	// Build Claude options from config struct.
 	opts := claude.DefaultOptions()

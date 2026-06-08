@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -20,20 +21,21 @@ const (
 	SpanClaudeSubprocessExit  = "claude.subprocess.exit"
 )
 
-// Attribute key names for span attributes.
-const (
-	AttrContextID     = "a2a.context_id"
-	AttrSessionID     = "claude.session_id"
-	AttrMessageLength = "a2a.message_length"
-	AttrModel         = "claude.model"
-	AttrResume        = "claude.resume"
-	AttrTurnIndex     = "claude.turn_index"
-	AttrStopReason    = "claude.stop_reason"
-	AttrInputTokens   = "claude.input_tokens"
-	AttrOutputTokens  = "claude.output_tokens"
-	AttrToolName      = "mcp.tool_name"
-	AttrServerName    = "mcp.server_name"
-	AttrDurationMS    = "mcp.duration_ms"
-	AttrExitCode      = "claude.exit_code"
-	AttrRetryCount    = "claude.retry_count"
+// Attribute keys for span attributes. Using attribute.Key provides type-safe
+// value constructors (e.g. AttrModel.String(v), AttrInputTokens.Int64(v)).
+var (
+	AttrContextID     = attribute.Key("a2a.context_id")
+	AttrSessionID     = attribute.Key("claude.session_id")
+	AttrMessageLength = attribute.Key("a2a.message_length")
+	AttrModel         = attribute.Key("claude.model")
+	AttrResume        = attribute.Key("claude.resume")
+	AttrTurnIndex     = attribute.Key("claude.turn_index")
+	AttrStopReason    = attribute.Key("claude.stop_reason")
+	AttrInputTokens   = attribute.Key("claude.input_tokens")
+	AttrOutputTokens  = attribute.Key("claude.output_tokens")
+	AttrToolName      = attribute.Key("mcp.tool_name")
+	AttrServerName    = attribute.Key("mcp.server_name")
+	AttrDurationMS    = attribute.Key("mcp.duration_ms")
+	AttrExitCode      = attribute.Key("claude.exit_code")
+	AttrRetryCount    = attribute.Key("claude.retry_count")
 )
