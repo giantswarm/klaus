@@ -373,6 +373,14 @@ func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, 
 				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
 			}
 		}
+
+		// Store the turn as a completed A2A task so the kagent UI can render
+		// conversation history on reload. kagent's BYO passthrough proxy does
+		// not persist tasks itself; GET /api/sessions/{id}/tasks would return
+		// empty without this call.
+		if e.kagent != nil && userText != "" && assistantText != "" {
+			e.kagent.StoreTask(ctx, newEventID(), contextID, userText, assistantText)
+		}
 	}()
 }
 

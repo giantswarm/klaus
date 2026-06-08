@@ -48,6 +48,21 @@ type SessionEvent struct {
 	Data string `json:"data"`
 }
 
+// a2aTask mirrors the subset of trpc-a2a-go protocol.Task that the kagent
+// controller's POST /api/tasks endpoint persists. The full SDK is not imported
+// to avoid a cross-module dependency.
+type a2aTask struct {
+	Kind      string        `json:"kind"`
+	ID        string        `json:"id"`
+	ContextID string        `json:"contextId"`
+	Status    a2aTaskStatus `json:"status"`
+	History   []a2aMessage  `json:"history,omitempty"`
+}
+
+type a2aTaskStatus struct {
+	State string `json:"state"`
+}
+
 // NewSessionEvent builds a SessionEvent for the given role ("user" or "agent")
 // and plain-text content. id should be unique per event (e.g. a UUID).
 func NewSessionEvent(id, role, text string) SessionEvent {
@@ -132,5 +147,65 @@ func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionE
 
 	if resp.StatusCode >= 400 {
 		c.log.WarnContext(ctx, "kagentapi: push event non-2xx", "status", resp.StatusCode, "session_id", sessionID)
+	}
+}
+
+// StoreTask persists a completed turn as an A2A task in kagent's task store.
+// This is required for BYO agents because kagent's A2A passthrough proxy does
+// not persist tasks itself — the task store is only populated by declarative
+// (Python ADK) agents. Without this call, GET /api/sessions/{id}/tasks always
+// returns empty and the kagent UI shows no conversation history on reload.
+//
+// taskID must be unique per task (e.g. a UUID). contextID is the A2A context
+// ID that matches the kagent session. userText and agentText are the turn.
+func (c *Client) StoreTask(ctx context.Context, taskID, contextID, userText, agentText string) {
+	if !c.Enabled() {
+		return
+	}
+
+	task := a2aTask{
+		Kind:      "task",
+		ID:        taskID,
+		ContextID: contextID,
+		Status:    a2aTaskStatus{State: "completed"},
+		History: []a2aMessage{
+			{Kind: "message", MessageID: taskID + "-user", Role: "user",
+				Parts: []a2aPart{{Kind: "text", Text: userText}}},
+			{Kind: "message", MessageID: taskID + "-agent", Role: "agent",
+				Parts: []a2aPart{{Kind: "text", Text: agentText}}},
+		},
+	}
+
+	body, err := json.Marshal(task)
+	if err != nil {
+		c.log.ErrorContext(ctx, "kagentapi: marshal task", "err", err)
+		return
+	}
+
+	url := fmt.Sprintf("%s/api/tasks", c.endpoint)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		c.log.ErrorContext(ctx, "kagentapi: build task request", "err", err, "task_id", taskID)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	info := AuthInfoFromContext(ctx)
+	if info.BearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+info.BearerToken)
+	}
+	if info.UserSub != "" {
+		req.Header.Set("X-User-Id", info.UserSub)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		c.log.WarnContext(ctx, "kagentapi: store task failed", "err", err, "task_id", taskID)
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 400 {
+		c.log.WarnContext(ctx, "kagentapi: store task non-2xx", "status", resp.StatusCode, "task_id", taskID)
 	}
 }
