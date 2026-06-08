@@ -350,6 +350,14 @@
           "description": "Operating mode: agent (single-shot, no session persistence) or chat (persistent subprocess, sessions saved to disk). Default: agent.",
           "enum": ["agent", "chat"],
           "default": "agent"
+        },
+        "retryMaxAttempts": {
+          "type": "integer",
+          "description": "Maximum subprocess restart attempts. 0 uses the default (3)."
+        },
+        "retryBaseBackoff": {
+          "type": "string",
+          "description": "Initial backoff before the first restart (e.g. 2s). Empty uses the default."
         }
       }
     },
@@ -378,6 +386,47 @@
         },
         "existingClaim": {
           "type": "string"
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "postgresSecretName": { "type": "string" },
+        "postgresSecretKey": { "type": "string" },
+        "dir": { "type": "string" },
+        "contextID": { "type": "string" },
+        "sessionID": { "type": "string" }
+      }
+    },
+    "a2a": {
+      "type": "object",
+      "properties": {
+        "targets": { "type": "object" },
+        "allowDynamic": { "type": "boolean" },
+        "allowedHosts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "kagent": {
+      "type": "object",
+      "properties": {
+        "endpoint": { "type": "string" }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "properties": {
+        "kagentEndpoint": { "type": "string" },
+        "agentName": { "type": "string" },
+        "userID": { "type": "string" },
+        "embedding": {
+          "type": "object",
+          "properties": {
+            "endpoint": { "type": "string" },
+            "model": { "type": "string" },
+            "secretName": { "type": "string" },
+            "secretKey": { "type": "string" }
+          }
         }
       }
     },
