@@ -473,3 +473,78 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	assert.Empty(t, opts2.SessionID, "second turn must not pass --session-id")
 	assert.True(t, opts2.SaveSession, "second turn must set SaveSession")
 }
+
+// staleResumePrompter simulates a subprocess that fails on the first (resume)
+// call but succeeds on the retry (fresh session). Used to test stale-resume
+// detection after pod restart with emptyDir workspace.
+type staleResumePrompter struct {
+	*fakePrompter
+	calls int
+}
+
+func (p *staleResumePrompter) RunWithOptions(_ context.Context, _ string, opts *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+	p.calls++
+	p.fakePrompter.capturedOpts = append(p.fakePrompter.capturedOpts, opts)
+	var msgs []claude.StreamMessage
+	if p.calls >= 2 {
+		// Retry succeeds: emit session + result.
+		msgs = []claude.StreamMessage{
+			{Type: claude.MessageTypeSystem, SessionID: "new-session-id"},
+			{Type: claude.MessageTypeResult, Result: "retry succeeded"},
+		}
+	}
+	// First call: empty channel — no session ID emitted, simulates failed resume.
+	ch := make(chan claude.StreamMessage, len(msgs)+1)
+	for _, m := range msgs {
+		ch <- m
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (p *staleResumePrompter) Status() claude.StatusInfo {
+	if p.calls <= 1 {
+		// After first (failed) call: subprocess error.
+		return claude.StatusInfo{Status: claude.ProcessStatusError, ErrorMessage: "exit status 1"}
+	}
+	return claude.StatusInfo{Status: claude.ProcessStatusIdle}
+}
+
+// TestExecutor_StaleResumeRetry verifies that when --resume fails (session file
+// gone after pod restart), the executor retries with a fresh session and the
+// turn completes rather than failing.
+func TestExecutor_StaleResumeRetry(t *testing.T) {
+	const oldSession = "old-session-id"
+
+	inner := &fakePrompter{}
+	prompter := &staleResumePrompter{fakePrompter: inner}
+
+	store := session.NewMemoryStore()
+	// Pre-populate the store with the stale session binding (as Postgres would
+	// have it after a pod restart with emptyDir workspace).
+	require.NoError(t, store.BindSession(t.Context(), "ctx-stale", oldSession))
+
+	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
+
+	queue := &captureQueue{}
+	err := exec.Execute(t.Context(), makeReqCtx("ctx-stale", "hello after restart"), queue)
+	require.NoError(t, err)
+
+	// Turn must succeed, not fail.
+	last := queue.events[len(queue.events)-1]
+	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
+	require.True(t, ok)
+	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State, "stale resume should retry and complete")
+	assert.True(t, statusEv.Final)
+
+	// Two RunWithOptions calls: first with Resume (stale), second without.
+	require.Len(t, prompter.capturedOpts, 2, "expected exactly two RunWithOptions calls")
+	assert.Equal(t, oldSession, prompter.capturedOpts[0].Resume, "first call must use --resume with the stale ID")
+	assert.Empty(t, prompter.capturedOpts[1].Resume, "retry call must not pass --resume")
+	assert.Equal(t, "stale", prompter.capturedOpts[1].SessionID, "retry must seed session ID from contextID")
+
+	// After retry the store must hold the NEW session ID.
+	sessID, err := store.SessionID(t.Context(), "ctx-stale")
+	require.NoError(t, err)
+	assert.Equal(t, "new-session-id", sessID, "stale Postgres binding must be overwritten after retry")
+}

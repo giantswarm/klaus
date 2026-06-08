@@ -185,6 +185,53 @@ drainLoop:
 		}
 	}
 
+	// Stale resume: subprocess exited with no session ID — the session file was
+	// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
+	// session using the deterministic context-derived ID so the turn succeeds.
+	// The stale Postgres binding is overwritten by BindSession after the retry.
+	if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
+		e.prompter.Status().Status == claude.ProcessStatusError {
+		log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
+		retryOpts := &claude.RunOptions{
+			SaveSession: true,
+			SessionID:   sessionIDFromContext(contextID),
+		}
+		if retryCh, retryErr := e.prompter.RunWithOptions(ctx, augmented, retryOpts); retryErr == nil {
+			messages = messages[:0]
+			lastText = ""
+		retryDrainLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					_ = e.prompter.Stop()
+					return ctx.Err()
+				case msg, ok := <-retryCh:
+					if !ok {
+						break retryDrainLoop
+					}
+					messages = append(messages, msg)
+					if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
+						streamSessionID = msg.SessionID
+						log.Printf("[a2a] retry session contextID=%q sessionID=%q", contextID, msg.SessionID)
+					}
+					if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
+						log.Printf("[a2a] tool_use (retry) contextID=%q tool=%q", contextID, msg.ToolName)
+					}
+					if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
+						if msg.Text != "" && msg.Text != lastText {
+							lastText = msg.Text
+							if writeErr := queue.Write(ctx, workingEvent(reqCtx, claude.Truncate(msg.Text, 200))); writeErr != nil {
+								log.Printf("[a2a] write working chunk (retry): %v", writeErr)
+							}
+						}
+					}
+				}
+			}
+		} else {
+			log.Printf("[a2a] retry RunWithOptions failed contextID=%q: %v", contextID, retryErr)
+		}
+	}
+
 	// Log the raw result for console visibility (kubectl logs).
 	log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
 
