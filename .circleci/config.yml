@@ -5,7 +5,7 @@ orbs:
 jobs:
   notify-downstream:
     docker:
-    - image: cimg/base:2026.04
+    - image: cimg/base:2026.06
     steps:
     - run:
         name: Notify downstream repos of new release
