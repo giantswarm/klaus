@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultTimeout   = 5 * time.Second
+	defaultTimeout    = 5 * time.Second
 	envKagentAgentRef = "KAGENT_AGENT_REF"
 )
 
