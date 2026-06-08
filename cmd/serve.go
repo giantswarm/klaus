@@ -428,7 +428,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		for name := range a2aRegistry.Targets() {
 			names = append(names, name)
 		}
-		log.Printf("a2a_call enabled (targets: %v, allowDynamic: %v)", names, cfg.A2A.AllowDynamic)
+		slog.Info("a2a_call enabled", "targets", names, "allow_dynamic", cfg.A2A.AllowDynamic)
 	}
 
 	// Build the A2A executor.

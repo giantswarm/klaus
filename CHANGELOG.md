@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A2A server** (`a2a.enabled`): Klaus exposes a JSON-RPC A2A endpoint at `/a2a`, accepting tasks from other A2A agents. Per-context session serialization prevents task-ID collisions under concurrent inbound requests.
+- **A2A outbound client** (`a2a_call` tool): Calls remote A2A agents by name from within a Claude Code session. Static targets are configured via `KKAUS_A2A_TARGETS` (JSON) or `a2a.targets` in Helm values. Dynamic resolution is opt-in via `KKAUS_A2A_ALLOW_DYNAMIC`; all outbound URLs are validated against an allowlist (`KKAUS_A2A_ALLOWED_HOSTS` / `a2a.allowedHosts`).
+- **Session store** (`session.backend`): Three-backend persistent session store (local file, Postgres via `pgx/v5`, in-memory) for multi-turn conversation history across pod restarts. Postgres requires a Secret with the DSN (`session.postgresSecretName` / `session.postgresSecretKey`, default key `"uri"`).
+- **Retry with resume**: Persistent subprocess retries on exit up to `KKAUS_RETRY_MAX_ATTEMPTS` times (default 3), resuming from the last successful Claude session ID.
+- **Semantic memory** (`KAGENT_MEMORY_ENDPOINT`): Per-user semantic memory backed by the kagent pgvector API. Relevant past turns are prepended to each prompt; new turns are embedded and stored after each response. Requires `KAGENT_MEMORY_ENDPOINT`, `KKAUS_EMBEDDING_ENDPOINT`, and `KKAUS_EMBEDDING_MODEL`.
+- **kagent session/task push** (`KAGENT_API_ENDPOINT`): Session turn events and completed tasks are forwarded to the kagent controller, populating the kagent UI session history. Requires `KAGENT_API_ENDPOINT` and `KAGENT_AGENT_REF`.
+- **OpenTelemetry spans**: Spans for subprocess start/stop, turn completion, retry events, and MCP tool calls (`pkg/telemetry`). Attribute key prefix `claude.*` for subprocess/session attributes.
+- **Durable `claude-home` PVC** (`claudeHome.enabled`): A PersistentVolumeClaim for `/home/user/.claude` preserves Claude Code authentication state and local configuration across pod restarts.
+
+### Changed
+
+- `automountServiceAccountToken` defaults to `false` in the Helm chart Deployment; the service account token is no longer auto-mounted into the Klaus pod.
+
 ### Changed
 
 

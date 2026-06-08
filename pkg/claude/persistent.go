@@ -548,7 +548,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				// "budget" in the result text when --max-budget-usd is exceeded.
 				if msg.IsError && strings.Contains(strings.ToLower(msg.Result), "budget") {
 					p.lastStopReason = StopReasonBudget
-				} else if !msg.IsError {
+				} else if msg.IsError {
+					p.lastStopReason = StopReasonError
+				} else {
 					// Successful turn: reset retry counter.
 					p.retryCount = 0
 					p.lastStopReason = StopReasonCompleted

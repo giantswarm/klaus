@@ -20,7 +20,7 @@ import (
 //	POST /api/memories/sessions — store a content+vector pair
 //	POST /api/memories/search   — vector similarity search
 //
-// Both endpoints require X-User-ID: <any non-empty value> for internal-trust auth.
+// Both endpoints require X-User-Id: <any non-empty value> for internal-trust auth.
 type KagentClient struct {
 	endpoint   string
 	agentName  string
@@ -108,7 +108,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 		return nil, fmt.Errorf("build search request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-User-Id", userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -127,7 +127,7 @@ func (c *KagentClient) Retrieve(ctx context.Context, _ string, query string, top
 
 	chunks := make([]Chunk, 0, len(items))
 	for _, item := range items {
-		chunks = append(chunks, Chunk{Content: item.Content, Score: float32(item.Score)})
+		chunks = append(chunks, Chunk{Content: item.Content, Score: item.Score})
 	}
 	return chunks, nil
 }
@@ -157,7 +157,7 @@ func (c *KagentClient) Store(ctx context.Context, _ string, role string, content
 		return fmt.Errorf("build store request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-User-Id", userID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

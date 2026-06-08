@@ -396,7 +396,14 @@ func envOverrideFloat64(target *float64, key string) {
 
 func envOverrideCSV(target *[]string, key string) {
 	if v := os.Getenv(key); v != "" {
-		*target = strings.Split(v, ",")
+		parts := strings.Split(v, ",")
+		trimmed := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if s := strings.TrimSpace(p); s != "" {
+				trimmed = append(trimmed, s)
+			}
+		}
+		*target = trimmed
 	}
 }
 

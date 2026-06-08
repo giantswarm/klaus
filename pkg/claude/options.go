@@ -124,8 +124,8 @@ type Options struct {
 	AddDirs []string
 
 	// RetryMaxAttempts is the maximum number of times the persistent subprocess
-	// watchdog will restart with --resume on unexpected exit. 0 means unlimited
-	// (not recommended in production). Defaults to 3.
+	// watchdog will restart with --resume on unexpected exit. 0 selects the
+	// default of 3.
 	RetryMaxAttempts int
 	// RetryBaseBackoff is the initial backoff duration before the first restart
 	// attempt. Each subsequent attempt doubles the duration.
@@ -400,14 +400,15 @@ func (o Options) PersistentArgs() []string {
 }
 
 // persistentRestartArgs returns the CLI argument list for restarting a persistent
-// subprocess after an unexpected exit. It is identical to PersistentArgs but
-// appends --resume <sessionID> so the CLI continues the existing session rather
-// than starting a fresh one. Callers must only invoke this when sessionID is
+// subprocess after an unexpected exit. It strips ResumeSessionID (the pod-startup
+// resume) and appends --resume <sessionID> (the live session) so that exactly one
+// --resume flag is present. Callers must only invoke this when sessionID is
 // non-empty; a cold start must use PersistentArgs instead.
 func (o Options) persistentRestartArgs(sessionID string) []string {
-	args := o.PersistentArgs()
-	args = append(args, "--resume", sessionID)
-	return args
+	o2 := o
+	o2.ResumeSessionID = ""
+	args := o2.PersistentArgs()
+	return append(args, "--resume", sessionID)
 }
 
 // retryConfig returns the effective retry settings, applying defaults when the

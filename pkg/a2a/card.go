@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	envAgentName        = "AGENT_NAME"
-	envAgentDescription = "AGENT_DESCRIPTION"
-	envAgentVersion     = "AGENT_VERSION"
-	envAgentURL         = "AGENT_URL"
+	envAgentName        = "KKAUS_AGENT_NAME"
+	envAgentDescription = "KKAUS_AGENT_DESCRIPTION"
+	envAgentVersion     = "KKAUS_AGENT_VERSION"
+	envAgentURL         = "KKAUS_AGENT_URL"
 
 	mimeTextPlain = "text/plain"
 )
@@ -21,10 +21,10 @@ const (
 // with sensible defaults derived from the build-time project metadata.
 //
 // Environment variables:
-//   - AGENT_NAME         (default: project.Name)
-//   - AGENT_DESCRIPTION  (default: "Klaus AI agent")
-//   - AGENT_VERSION      (default: project.Version())
-//   - AGENT_URL          (default: "http://localhost:8080/a2a")
+//   - KKAUS_AGENT_NAME         (default: project.Name)
+//   - KKAUS_AGENT_DESCRIPTION  (default: "Klaus AI agent")
+//   - KKAUS_AGENT_VERSION      (default: project.Version())
+//   - KKAUS_AGENT_URL          (default: "http://localhost:8080/a2a")
 func AgentCard() *a2a.AgentCard {
 	name := envOrDefault(envAgentName, project.Name)
 	description := envOrDefault(envAgentDescription, "Klaus AI agent")

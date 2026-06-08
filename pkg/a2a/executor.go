@@ -397,14 +397,16 @@ func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, 
 
 		if userText != "" {
 			userContent, _ := json.Marshal(userText)
-			if err := e.store.AppendTurn(ctx, session.Turn{
-				ContextID: contextID,
-				SessionID: sessionID,
-				Role:      "user",
-				Content:   userContent,
-				TS:        time.Now(),
-			}); err != nil {
-				log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
+			if sessionID != "" {
+				if err := e.store.AppendTurn(ctx, session.Turn{
+					ContextID: contextID,
+					SessionID: sessionID,
+					Role:      "user",
+					Content:   userContent,
+					TS:        time.Now(),
+				}); err != nil {
+					log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
+				}
 			}
 			if e.kagent != nil {
 				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "user", userText))
@@ -416,14 +418,16 @@ func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, 
 
 		if assistantText != "" {
 			assistantContent, _ := json.Marshal(assistantText)
-			if err := e.store.AppendTurn(ctx, session.Turn{
-				ContextID: contextID,
-				SessionID: sessionID,
-				Role:      "assistant",
-				Content:   assistantContent,
-				TS:        time.Now(),
-			}); err != nil {
-				log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
+			if sessionID != "" {
+				if err := e.store.AppendTurn(ctx, session.Turn{
+					ContextID: contextID,
+					SessionID: sessionID,
+					Role:      "assistant",
+					Content:   assistantContent,
+					TS:        time.Now(),
+				}); err != nil {
+					log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
+				}
 			}
 			if e.kagent != nil {
 				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "agent", assistantText))

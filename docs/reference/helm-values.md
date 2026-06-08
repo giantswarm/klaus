@@ -93,7 +93,7 @@ claude:
 session:
   backend: "local"          # local, postgres, or memory
   postgresSecretName: ""    # Kubernetes Secret with Postgres DSN
-  postgresSecretKey: "dsn"
+  postgresSecretKey: "uri"
   dir: ""                   # override for local backend
   contextID: ""             # pre-seed context ID at startup
   sessionID: ""             # pre-seed session ID; --resume in chat mode

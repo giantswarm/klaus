@@ -332,6 +332,19 @@ spec:
             - name: CLAUDE_SESSION_ID
               value: {{ .Values.session.sessionID | quote }}
             {{- end }}
+            # Outbound A2A calls
+            {{- if .Values.a2a.targets }}
+            - name: KKAUS_A2A_TARGETS
+              value: {{ .Values.a2a.targets | toJson | quote }}
+            {{- end }}
+            {{- if .Values.a2a.allowDynamic }}
+            - name: KKAUS_A2A_ALLOW_DYNAMIC
+              value: "true"
+            {{- end }}
+            {{- if .Values.a2a.allowedHosts }}
+            - name: KKAUS_A2A_ALLOWED_HOSTS
+              value: {{ .Values.a2a.allowedHosts | join "," | quote }}
+            {{- end }}
             # kagent integration
             {{- if .Values.kagent.endpoint }}
             - name: KAGENT_API_ENDPOINT

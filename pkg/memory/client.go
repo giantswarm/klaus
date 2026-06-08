@@ -40,7 +40,7 @@ type Chunk struct {
 	// Content is the recalled text to inject into the system prompt.
 	Content string
 	// Score is the cosine similarity score (0–1). Higher is more relevant.
-	Score float32
+	Score float64
 }
 
 // Client retrieves and stores conversation memory for a context.

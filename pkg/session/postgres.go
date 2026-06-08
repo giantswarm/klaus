@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -53,7 +54,7 @@ func (p *PostgresStore) SessionID(ctx context.Context, contextID string) (string
 		`SELECT session_id FROM sessions.bindings WHERE context_id = $1`,
 		contextID,
 	).Scan(&sessionID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
@@ -82,29 +83,31 @@ func (p *PostgresStore) AppendTurn(ctx context.Context, t Turn) error {
 	if t.TS.IsZero() {
 		t.TS = time.Now().UTC()
 	}
-	if t.Seq == 0 {
-		// Auto-assign seq as next available within the context.
-		var maxSeq int
-		err := p.db.QueryRowContext(ctx,
-			`SELECT COALESCE(MAX(seq), 0) FROM sessions.turns WHERE context_id = $1`,
-			t.ContextID,
-		).Scan(&maxSeq)
-		if err != nil {
-			return fmt.Errorf("querying max seq: %w", err)
-		}
-		t.Seq = maxSeq + 1
-	}
 
 	content := t.Content
 	if len(content) == 0 {
 		content = json.RawMessage(`null`)
 	}
 
+	if t.Seq != 0 {
+		_, err := p.db.ExecContext(ctx, `
+			INSERT INTO sessions.turns (context_id, session_id, seq, role, content, ts)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT (context_id, seq) DO NOTHING
+		`, t.ContextID, t.SessionID, t.Seq, t.Role, []byte(content), t.TS)
+		if err != nil {
+			return fmt.Errorf("inserting turn: %w", err)
+		}
+		return nil
+	}
+
+	// Auto-assign seq atomically to avoid a TOCTOU race under concurrent appends.
 	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO sessions.turns (context_id, session_id, seq, role, content, ts)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (context_id, seq) DO NOTHING
-	`, t.ContextID, t.SessionID, t.Seq, t.Role, []byte(content), t.TS)
+		SELECT $1, $2, COALESCE(MAX(seq), 0) + 1, $3, $4, $5
+		FROM sessions.turns
+		WHERE context_id = $1
+	`, t.ContextID, t.SessionID, t.Role, []byte(content), t.TS)
 	if err != nil {
 		return fmt.Errorf("inserting turn: %w", err)
 	}

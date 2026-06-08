@@ -14,8 +14,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -83,6 +85,7 @@ func NewSessionEvent(id, role, text string) SessionEvent {
 // concurrent use. When Endpoint is empty, all methods are no-ops.
 type Client struct {
 	endpoint   string
+	agentRef   string // cached from KAGENT_AGENT_REF at construction
 	httpClient *http.Client
 	log        *slog.Logger
 }
@@ -92,6 +95,7 @@ type Client struct {
 func New(endpoint string) *Client {
 	return &Client{
 		endpoint:   endpoint,
+		agentRef:   os.Getenv(envKagentAgentRef),
 		httpClient: &http.Client{Timeout: defaultTimeout},
 		log:        slog.Default().With("component", "kagentapi"),
 	}
@@ -120,8 +124,8 @@ func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionE
 		return
 	}
 
-	url := fmt.Sprintf("%s/api/sessions/%s/events", c.endpoint, sessionID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	apiURL := fmt.Sprintf("%s/api/sessions/%s/events", c.endpoint, url.PathEscape(sessionID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(body))
 	if err != nil {
 		c.log.ErrorContext(ctx, "kagentapi: build request", "err", err, "session_id", sessionID)
 		return
@@ -137,8 +141,8 @@ func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionE
 	if info.UserSub != "" {
 		req.Header.Set("X-User-Id", info.UserSub)
 	}
-	if agentRef := os.Getenv(envKagentAgentRef); agentRef != "" {
-		req.Header.Set("X-Agent-Name", agentRef)
+	if c.agentRef != "" {
+		req.Header.Set("X-Agent-Name", c.agentRef)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -146,7 +150,8 @@ func (c *Client) PushEvent(ctx context.Context, sessionID string, event SessionE
 		c.log.WarnContext(ctx, "kagentapi: push event failed", "err", err, "session_id", sessionID)
 		return
 	}
-	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		c.log.WarnContext(ctx, "kagentapi: push event non-2xx", "status", resp.StatusCode, "session_id", sessionID)
@@ -206,7 +211,8 @@ func (c *Client) StoreTask(ctx context.Context, taskID, contextID, userText, age
 		c.log.WarnContext(ctx, "kagentapi: store task failed", "err", err, "task_id", taskID)
 		return
 	}
-	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		c.log.WarnContext(ctx, "kagentapi: store task non-2xx", "status", resp.StatusCode, "task_id", taskID)

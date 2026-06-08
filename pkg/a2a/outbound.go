@@ -22,7 +22,7 @@ type Registry struct {
 	allowDynamic bool
 	allowedHosts map[string]struct{} // host[:port] → present; empty = deny all dynamic
 
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	clients map[string]*a2aclient.Client // host[:port] → cached client
 }
 
@@ -138,6 +138,12 @@ func (r *Registry) resolveURL(target string) (string, error) {
 	if err != nil || parsed.Host == "" {
 		return "", fmt.Errorf("invalid A2A target URL %q: must be an absolute URL with a host", target)
 	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("A2A target URL scheme %q is not permitted; only http and https are allowed", parsed.Scheme)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("A2A target URL must not contain userinfo")
+	}
 	host := parsed.Host
 	// Fail-closed: deny all dynamic hosts when allowedHosts is empty.
 	// Config.Validate() rejects allowDynamic=true + empty allowedHosts at startup;
@@ -150,6 +156,8 @@ func (r *Registry) resolveURL(target string) (string, error) {
 
 // clientFor returns a cached a2aclient.Client for baseURL, creating one via
 // agent-card resolution on first access. The cache key is the parsed host.
+// Network I/O happens outside the lock so concurrent calls to different hosts
+// do not serialize behind a slow resolution.
 func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Client, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
@@ -157,10 +165,10 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 	}
 	key := parsed.Host
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if client, ok := r.clients[key]; ok {
+	r.mu.RLock()
+	client, ok := r.clients[key]
+	r.mu.RUnlock()
+	if ok {
 		return client, nil
 	}
 
@@ -169,12 +177,18 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 		return nil, fmt.Errorf("resolving agent card at %q: %w", baseURL, err)
 	}
 
-	client, err := a2aclient.NewFromCard(ctx, card)
+	client, err = a2aclient.NewFromCard(ctx, card)
 	if err != nil {
 		return nil, fmt.Errorf("creating A2A client for %q: %w", baseURL, err)
 	}
 
+	r.mu.Lock()
+	if existing, exists := r.clients[key]; exists {
+		r.mu.Unlock()
+		return existing, nil
+	}
 	r.clients[key] = client
+	r.mu.Unlock()
 	return client, nil
 }
 
