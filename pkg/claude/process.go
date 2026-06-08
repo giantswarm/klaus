@@ -132,8 +132,9 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.ContinueSession {
 		opts.ContinueSession = true
-		// --continue requires the previous session to exist on disk,
-		// so disable --no-session-persistence when continuing (#171).
+	}
+	// Any operation that references a prior session requires the session to be persisted.
+	if opts.SessionID != "" || opts.ContinueSession || opts.Resume != "" {
 		opts.NoSessionPersistence = false
 	}
 	if ro.ForkSession {
