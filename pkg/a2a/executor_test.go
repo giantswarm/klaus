@@ -421,9 +421,10 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 }
 
 // staleResumePrompter simulates the pod-restart / emptyDir scenario:
-//   call 1 (first turn, --session-id): succeeds, emits session "sess-first"
-//   call 2 (second turn, --resume sess-first): fails — session file gone
-//   call 3 (retry of second turn, --session-id): succeeds, emits new session
+//
+//	call 1 (first turn, --session-id): succeeds, emits session "sess-first"
+//	call 2 (second turn, --resume sess-first): fails — session file gone
+//	call 3 (retry of second turn, --session-id): succeeds, emits new session
 type staleResumePrompter struct {
 	*fakePrompter
 	calls int

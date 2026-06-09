@@ -14,6 +14,11 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
 )
 
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+)
+
 // Registry is the outbound A2A call dispatcher. It holds static name→URL
 // targets, an optional dynamic allowlist, and a per-host client cache.
 // A nil *Registry disables the a2a_call MCP tool.
@@ -164,7 +169,7 @@ func (r *Registry) resolveURL(target string) (string, error) {
 	if err != nil || parsed.Host == "" {
 		return "", fmt.Errorf("invalid A2A target URL %q: must be an absolute URL with a host", target)
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if parsed.Scheme != schemeHTTP && parsed.Scheme != schemeHTTPS {
 		return "", fmt.Errorf("A2A target URL scheme %q is not permitted; only http and https are allowed", parsed.Scheme)
 	}
 	if parsed.User != nil {
@@ -240,7 +245,7 @@ func (r *Registry) validateCardInterfaceURL(targetBaseURL, ifaceURL string) erro
 	if err != nil || iface.Host == "" {
 		return fmt.Errorf("invalid interface URL %q", ifaceURL)
 	}
-	if iface.Scheme != "http" && iface.Scheme != "https" {
+	if iface.Scheme != schemeHTTP && iface.Scheme != schemeHTTPS {
 		return fmt.Errorf("interface URL scheme %q is not permitted", iface.Scheme)
 	}
 	ifaceHost := normalizedHost(iface)
@@ -268,11 +273,11 @@ func normalizedHost(u *url.URL) string {
 		return h
 	}
 	switch u.Scheme {
-	case "http":
+	case schemeHTTP:
 		if port == "80" {
 			return h
 		}
-	case "https":
+	case schemeHTTPS:
 		if port == "443" {
 			return h
 		}
