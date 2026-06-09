@@ -41,10 +41,10 @@ func artifactEvent(execCtx *a2asrv.ExecutorContext, text, sessionID string, usag
 		}
 		if usage != nil {
 			ev.Artifact.Metadata["token_usage"] = map[string]any{
-				"input_tokens":               usage.InputTokens,
-				"output_tokens":              usage.OutputTokens,
+				"input_tokens":                usage.InputTokens,
+				"output_tokens":               usage.OutputTokens,
 				"cache_creation_input_tokens": usage.CacheCreationInputTokens,
-				"cache_read_input_tokens":    usage.CacheReadInputTokens,
+				"cache_read_input_tokens":     usage.CacheReadInputTokens,
 			}
 		}
 	}
