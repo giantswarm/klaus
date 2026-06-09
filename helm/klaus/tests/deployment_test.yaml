@@ -863,4 +863,3 @@ tests:
           content:
             name: claude-home
             emptyDir: {}
-
