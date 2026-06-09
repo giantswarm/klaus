@@ -21,6 +21,7 @@ spec:
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- include "klaus.validateReplicaCount" . }}
       {{- include "klaus.validateWorkspaceGit" . }}
       {{- if .Values.workspace.gitRepo }}
       initContainers:

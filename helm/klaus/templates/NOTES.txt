@@ -2,3 +2,9 @@ klaus has been deployed.
 
 To check the status:
   kubectl get pods -l app.kubernetes.io/name=klaus -n {{ .Release.Namespace }}
+{{- if not .Values.claudeHome.enabled }}
+
+WARNING: claudeHome.enabled is false. Claude Code session files are stored on an
+emptyDir and will be lost on every pod restart. --resume will cold-start after any
+restart. Set claudeHome.enabled: true for any install that requires durable sessions.
+{{- end }}
