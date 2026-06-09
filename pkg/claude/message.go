@@ -741,6 +741,26 @@ func Truncate(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
+// CollectTokenUsage sums token counts across all assistant messages in the stream.
+// Returns nil when no usage is present (e.g. synthetic slash-command responses).
+func CollectTokenUsage(messages []StreamMessage) *TokenUsage {
+	var total TokenUsage
+	found := false
+	for _, msg := range messages {
+		if msg.Usage != nil {
+			total.InputTokens += msg.Usage.InputTokens
+			total.OutputTokens += msg.Usage.OutputTokens
+			total.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+			total.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &total
+}
+
 // CollectResultText extracts the result text from a completed set of stream messages.
 // It returns the text from the last result message, falling back to concatenated
 // assistant text messages if no result message contains text.
