@@ -87,23 +87,13 @@ claude:
   retryBaseBackoff: ""    # empty = use default (2s); e.g. "5s"
 ```
 
-## Session store
+## Session
 
 ```yaml
 session:
-  backend: "local"          # local, postgres, or memory
-  postgresSecretName: ""    # Kubernetes Secret with Postgres DSN
-  postgresSecretKey: "uri"
-  dir: ""                   # override for local backend
+  dir: ""                   # override for local session file directory
   contextID: ""             # pre-seed context ID at startup
-  sessionID: ""             # pre-seed session ID; --resume in chat mode
-```
-
-## kagent
-
-```yaml
-kagent:
-  endpoint: ""              # kagent controller URL; enables turn push to kagent UI
+  sessionID: ""             # pre-seed session ID; passed as --resume in chat mode
 ```
 
 ## Memory augmentation

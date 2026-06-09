@@ -74,16 +74,9 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KLAUS_PGSQL_DSN` | PostgreSQL DSN; when set, Postgres is used as the session backend | -- |
 | `KLAUS_SESSION_DIR` | Override directory for the local backend | -- |
 | `CLAUDE_CONTEXT_ID` | Pre-seed context ID at startup | -- |
 | `CLAUDE_SESSION_ID` | Pre-seed session ID at startup; also passed as `--resume` in chat mode | -- |
-
-## kagent
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `KAGENT_API_ENDPOINT` | kagent controller base URL; enables A2A turn push to the kagent UI | -- |
 
 ## Memory augmentation
 
