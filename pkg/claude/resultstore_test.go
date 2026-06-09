@@ -386,7 +386,7 @@ func TestCollectToolCalls_Empty(t *testing.T) {
 func TestPersistResult_NilStore(t *testing.T) {
 	// Should not panic with nil store.
 	rs := resultState{text: "result", completed: true}
-	persistResult(nil, rs, ProcessStatusCompleted, "sess", Float64Ptr(0.1), "", nil)
+	persistResult(nil, rs, ProcessStatusCompleted, "sess", Float64Ptr(0.1), "", nil, "")
 }
 
 func TestPersistResult_IncompleteResult(t *testing.T) {
@@ -395,7 +395,7 @@ func TestPersistResult_IncompleteResult(t *testing.T) {
 
 	// Incomplete result should not be persisted.
 	rs := resultState{text: "partial", completed: false}
-	persistResult(store, rs, ProcessStatusBusy, "sess", nil, "", nil)
+	persistResult(store, rs, ProcessStatusBusy, "sess", nil, "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -415,7 +415,7 @@ func TestPersistResult_CompletedResult(t *testing.T) {
 		messages:  []StreamMessage{{Type: MessageTypeResult, Result: "final result"}},
 		completed: true,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", Float64Ptr(0.50), "", nil)
+	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", Float64Ptr(0.50), "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -563,7 +563,7 @@ func TestPersistResult_WithTokenUsage(t *testing.T) {
 		CacheCreationInputTokens: 5000,
 		CacheReadInputTokens:     3000,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess-tu", Float64Ptr(0.42), "", tu)
+	persistResult(store, rs, ProcessStatusCompleted, "sess-tu", Float64Ptr(0.42), "", tu, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -597,7 +597,7 @@ func TestPersistResult_NilCost(t *testing.T) {
 		text:      "result without cost",
 		completed: true,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess", nil, "", nil)
+	persistResult(store, rs, ProcessStatusCompleted, "sess", nil, "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {

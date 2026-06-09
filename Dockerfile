@@ -75,7 +75,7 @@ WORKDIR /workspace
 ENV PORT=8080
 ENV SHELL=/bin/bash
 ENV GOROOT=/usr/local/go
-ENV GOPATH=/workspace/go
+ENV GOPATH=/home/klaus/go
 ENV PATH="/usr/local/go/bin:${PATH}"
 EXPOSE 8080
 

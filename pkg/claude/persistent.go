@@ -343,22 +343,11 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		sessionID := p.sessionID
 		retryCount := p.retryCount
 		lastStopReason := p.lastStopReason
-		p.mu.Unlock()
-
-		_, exitSpan := telemetry.Tracer("claude.persistent").Start(context.Background(),
-			telemetry.SpanClaudeSubprocessExit,
-			trace.WithAttributes(
-				attribute.String(telemetry.AttrSessionID, sessionID),
-				attribute.String(telemetry.AttrExitCode, exitCode),
-				attribute.String(telemetry.AttrStopReason, string(lastStopReason)),
-				attribute.Int(telemetry.AttrRetryCount, retryCount),
-			))
-		exitSpan.End()
-
-		p.mu.Lock()
 
 		// If there's an active response channel, send a crash error message
 		// so the user sees something instead of silence.
+		// Do this while holding the lock to prevent a concurrent RunWithOptions
+		// from installing a new responseCh between the unlock and re-lock.
 		if p.responseCh != nil && p.status != ProcessStatusStopped {
 			stderrLines := strings.Join(p.stderrTail.contents(), "\n")
 			crashText := fmt.Sprintf(
@@ -397,6 +386,16 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		lastErr := p.lastError
 		close(processDone)
 		p.mu.Unlock()
+
+		_, exitSpan := telemetry.Tracer("claude.persistent").Start(context.Background(),
+			telemetry.SpanClaudeSubprocessExit,
+			trace.WithAttributes(
+				attribute.String(telemetry.AttrSessionID, sessionID),
+				attribute.String(telemetry.AttrExitCode, exitCode),
+				attribute.String(telemetry.AttrStopReason, string(lastStopReason)),
+				attribute.Int(telemetry.AttrRetryCount, retryCount),
+			))
+		exitSpan.End()
 		metrics.SetProcessStatus(string(status))
 		slog.Info("claude: persistent subprocess exited", "wait_err", waitErr, "last_error", lastErr, "status", status)
 	}()
@@ -807,6 +806,7 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		totalCost := p.totalCost
 		costSeen := p.costSeen
 		lastError := p.lastError
+		lastStopReason := p.lastStopReason
 		tu := p.tokenUsage
 		store := p.resultStore
 		p.mu.Unlock()
@@ -819,7 +819,7 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		if tu != (TokenUsage{}) {
 			tuPtr = &tu
 		}
-		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, lastStopReason)
 	})
 }
 

@@ -508,7 +508,7 @@ func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) e
 		if tu != (TokenUsage{}) {
 			tuPtr = &tu
 		}
-		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, "")
 	})
 }
 

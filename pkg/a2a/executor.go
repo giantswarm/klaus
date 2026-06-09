@@ -161,8 +161,9 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 
 		// Stale resume: subprocess exited with no session ID — session file was
 		// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
-		// session seeded from contextID.
-		if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
+		// session seeded from contextID. Skip if ctx is already cancelled (the
+		// channel-close and ctx.Done cases can race in the select above).
+		if ctx.Err() == nil && runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
 			e.prompter.Status().Status == claude.ProcessStatusError {
 			log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
 			retryOpts := &claude.RunOptions{

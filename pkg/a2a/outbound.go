@@ -162,7 +162,8 @@ func (r *Registry) resolveURL(target string) (string, error) {
 }
 
 // clientFor returns a cached a2aclient.Client for baseURL, creating one via
-// agent-card resolution on first access. The cache key is the parsed host.
+// agent-card resolution on first access. The cache key is host+path so two
+// agents at the same host but different paths get independent clients.
 // Network I/O happens outside the lock so concurrent calls to different hosts
 // do not serialize behind a slow resolution.
 func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Client, error) {
@@ -170,7 +171,7 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 	if err != nil {
 		return nil, fmt.Errorf("parsing A2A URL %q: %w", baseURL, err)
 	}
-	key := parsed.Host
+	key := parsed.Host + parsed.Path
 
 	r.mu.RLock()
 	client, ok := r.clients[key]

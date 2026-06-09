@@ -11,12 +11,13 @@ var unsupportedCommands = []string{
 }
 
 // interceptSlashCommand returns the matched command and true when the text
-// starts with a TUI-only slash command. The match is prefix-based so
-// "/help me" also matches "/help".
+// is exactly a TUI-only slash command or the command followed by a space
+// (e.g. "/help me"). A bare prefix without a word boundary is not matched
+// so "/costs" does not intercept "/cost".
 func interceptSlashCommand(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
 	for _, cmd := range unsupportedCommands {
-		if strings.HasPrefix(trimmed, cmd) {
+		if trimmed == cmd || strings.HasPrefix(trimmed, cmd+" ") {
 			return cmd, true
 		}
 	}
