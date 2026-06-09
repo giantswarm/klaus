@@ -278,10 +278,6 @@ func TestExecutor_Cancel(t *testing.T) {
 	assert.True(t, statusEv.Status.State.Terminal())
 }
 
-const (
-	timeout      = 2e9 // 2 seconds
-	pollInterval = 5e6 // 5 ms
-)
 
 // blockingPrompter wraps fakePrompter with a blocking RunWithOptions.
 type blockingPrompter struct {

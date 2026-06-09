@@ -330,7 +330,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
 
-
 	// In chat mode, propagate CLAUDE_SESSION_ID as the startup resume session
 	// so the persistent subprocess continues an existing conversation after a pod restart.
 	if cfg.Claude.Mode == server.ModeChat {
