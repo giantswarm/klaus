@@ -124,7 +124,7 @@ func makeExecCtx(contextID string, text string) *a2asrv.ExecutorContext {
 
 func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	prompter := &fakePrompter{result: "done"}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	execCtx := makeExecCtx("ctx-1", "/clear please clear the context")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -146,7 +146,7 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 
 func TestExecutor_EmptyText(t *testing.T) {
 	prompter := &fakePrompter{}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	execCtx := makeExecCtx("ctx-2", "")
 
@@ -164,7 +164,7 @@ func TestExecutor_EmptyText(t *testing.T) {
 
 func TestExecutor_BusyReturnsRejected(t *testing.T) {
 	prompter := &fakePrompter{runErr: claude.ErrBusy}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	execCtx := makeExecCtx("ctx-3", "hello")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -188,7 +188,7 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 			Result:    "The answer is 42.",
 		},
 	}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	execCtx := makeExecCtx("ctx-4", "What is the answer?")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -214,7 +214,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 		block:        blocked,
 	}
 
-	exec := a2a.New(blocker, a2a.ModeChat, nil)
+	exec := a2a.New(blocker, a2a.ModeChat, nil, nil, 0)
 
 	// First request: holds the lock. Signal when the first event arrives.
 	ctx1, cancel1 := context.WithCancel(t.Context())
@@ -264,7 +264,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 
 func TestExecutor_Cancel(t *testing.T) {
 	prompter := &fakePrompter{}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	execCtx := makeExecCtx("ctx-cancel", "")
 	events, err := collectEvents(t.Context(), exec.Cancel(t.Context(), execCtx))
@@ -302,7 +302,7 @@ func TestExecutor_SubprocessError(t *testing.T) {
 			ErrorMessage: "subprocess exited with code 1",
 		},
 	}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-err", "hello")))
 	require.NoError(t, err)
@@ -325,7 +325,7 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 		messages:  []claude.StreamMessage{resultMsg},
 		statusVal: claude.StatusInfo{Status: claude.ProcessStatusIdle},
 	}
-	exec := a2a.New(prompter, a2a.ModeChat, nil)
+	exec := a2a.New(prompter, a2a.ModeChat, nil, nil, 0)
 
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-fallback", "hello")))
 	require.NoError(t, err)
@@ -354,7 +354,7 @@ func TestExecutor_AgentModeTracksSubprocessSession(t *testing.T) {
 			Result: "turn result",
 		},
 	}
-	exec := a2a.New(prompter, a2a.ModeAgent, nil)
+	exec := a2a.New(prompter, a2a.ModeAgent, nil, nil, 0)
 
 	// First turn: subprocess reports "subprocess-reported-id".
 	prompter.statusVal.SessionID = "subprocess-reported-id"
@@ -389,7 +389,7 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 			Result:    "turn result",
 		},
 	}
-	exec := a2a.New(prompter, a2a.ModeAgent, nil)
+	exec := a2a.New(prompter, a2a.ModeAgent, nil, nil, 0)
 
 	// First turn — no prior session.
 	events1, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-resume", "first")))
@@ -480,7 +480,7 @@ func TestExecutor_ArtifactTokenUsage(t *testing.T) {
 				{Type: claude.MessageTypeResult, Result: "answer"},
 			},
 		}
-		exec := a2a.New(fp, a2a.ModeAgent, nil)
+		exec := a2a.New(fp, a2a.ModeAgent, nil, nil, 0)
 		events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-usage", "what is 2+2?")))
 		require.NoError(t, err)
 
@@ -501,7 +501,7 @@ func TestExecutor_ArtifactTokenUsage(t *testing.T) {
 
 	t.Run("token_usage absent for slash-command response", func(t *testing.T) {
 		fp := &fakePrompter{}
-		exec := a2a.New(fp, a2a.ModeAgent, nil)
+		exec := a2a.New(fp, a2a.ModeAgent, nil, nil, 0)
 		events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-slash", "/clear")))
 		require.NoError(t, err)
 
@@ -523,7 +523,7 @@ func TestExecutor_ArtifactTokenUsage(t *testing.T) {
 func TestExecutor_StaleResumeRetry(t *testing.T) {
 	inner := &fakePrompter{}
 	prompter := &staleResumePrompter{fakePrompter: inner}
-	exec := a2a.New(prompter, a2a.ModeAgent, nil)
+	exec := a2a.New(prompter, a2a.ModeAgent, nil, nil, 0)
 
 	// First turn: fresh start; establishes session "sess-first".
 	_, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-stale", "first message")))

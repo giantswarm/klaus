@@ -349,6 +349,28 @@ spec:
             - name: KAGENT_AGENT_REF
               value: {{ .Values.kagent.agentRef | quote }}
             {{- end }}
+            # cross-session memory
+            {{- if .Values.memory.enabled }}
+            - name: MEMORY_ENABLED
+              value: "true"
+            - name: MEMORY_TOP_K
+              value: {{ .Values.memory.topK | quote }}
+            {{- if .Values.memory.embedding.endpoint }}
+            - name: KLAUS_EMBEDDING_ENDPOINT
+              value: {{ .Values.memory.embedding.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.model }}
+            - name: KLAUS_EMBEDDING_MODEL
+              value: {{ .Values.memory.embedding.model | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.apiKeySecretRef.name }}
+            - name: KLAUS_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.memory.embedding.apiKeySecretRef.name | quote }}
+                  key: {{ .Values.memory.embedding.apiKeySecretRef.key | quote }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: config

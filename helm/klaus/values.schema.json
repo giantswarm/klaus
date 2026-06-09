@@ -482,7 +482,42 @@
         }
       }
     },
-    "memory": {"type": "object"},
+    "memory": {
+      "type": "object",
+      "description": "Per-user cross-session memory via the kagent pgvector API",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable cross-session memory retrieval and recording"
+        },
+        "topK": {
+          "type": "integer",
+          "description": "Maximum number of memory chunks injected per turn",
+          "minimum": 1
+        },
+        "embedding": {
+          "type": "object",
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "description": "OpenAI-compatible embedding base URL"
+            },
+            "model": {
+              "type": "string",
+              "description": "Embedding model name (e.g. text-embedding-3-small)"
+            },
+            "apiKeySecretRef": {
+              "type": "object",
+              "description": "Secret reference for the embedding API key",
+              "properties": {
+                "name": {"type": "string"},
+                "key": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
     "telemetry": {
       "type": "object",
       "description": "OpenTelemetry monitoring and Prometheus metrics configuration",

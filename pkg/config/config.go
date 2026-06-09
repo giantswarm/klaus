@@ -53,6 +53,19 @@ type Config struct {
 
 	// Kagent holds settings for pushing turn history and usage to the kagent-controller.
 	Kagent KagentConfig `yaml:"kagent"`
+
+	// Memory holds settings for per-user cross-session memory.
+	Memory MemoryConfig `yaml:"memory"`
+}
+
+// MemoryConfig holds settings for per-user cross-session memory.
+type MemoryConfig struct {
+	// Enabled turns on cross-session memory retrieval and recording.
+	// Env: MEMORY_ENABLED
+	Enabled bool `yaml:"enabled"`
+	// TopK is the maximum number of memory chunks to inject per turn.
+	// Env: MEMORY_TOP_K (default 5)
+	TopK int `yaml:"topK"`
 }
 
 // KagentConfig holds settings for the kagent REST push client.
@@ -287,6 +300,10 @@ func applyEnvOverrides(cfg *Config) {
 	// kagent history push settings.
 	envOverrideString(&cfg.Kagent.APIEndpoint, "KAGENT_API_ENDPOINT")
 	envOverrideString(&cfg.Kagent.AgentRef, "KAGENT_AGENT_REF")
+
+	// Memory settings.
+	envOverrideBool(&cfg.Memory.Enabled, "MEMORY_ENABLED")
+	envOverrideInt(&cfg.Memory.TopK, "MEMORY_TOP_K")
 
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")
