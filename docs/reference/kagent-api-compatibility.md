@@ -19,4 +19,3 @@ are set. Both endpoints require the `X-User-ID` header.
 Request bodies use caller-supplied 768-dim float32 vectors; kagent does not embed.
 The embedding client (`pkg/memory/embedding.go`) generates vectors via any
 OpenAI-compatible embedding endpoint (`KLAUS_EMBEDDING_ENDPOINT`).
-

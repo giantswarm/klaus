@@ -30,4 +30,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PostgreSQL session store** (`KLAUS_PGSQL_DSN`, `session.postgresSecretName`): Session resumption uses Claude's own session files on the `claudeHome` PVC via `--resume`; no external store needed.
 - **kagent session/task push** (`KAGENT_API_ENDPOINT`): Turn push to the kagent UI is handled by the gateway's `ForwardingExecutor`. `pkg/kagentapi/auth.go` is retained for JWT parsing and per-user memory scoping.
 - **Custom OTel setup** (`pkg/telemetry/Setup()`): Replaced by mcp-toolkit `tracing.Init` which sets the global provider at startup.
-

@@ -278,7 +278,6 @@ func TestExecutor_Cancel(t *testing.T) {
 	assert.True(t, statusEv.Status.State.Terminal())
 }
 
-
 // blockingPrompter wraps fakePrompter with a blocking RunWithOptions.
 type blockingPrompter struct {
 	*fakePrompter
