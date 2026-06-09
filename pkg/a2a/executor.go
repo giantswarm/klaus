@@ -349,7 +349,7 @@ func (e *Executor) pushTurnAsync(ctx context.Context, execCtx *a2asrv.ExecutorCo
 	agentMeta := adkUsageMetadata(claude.CollectTokenUsage(messages))
 
 	go func() {
-		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		pushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
 
 		e.kagent.PushEvent(pushCtx, contextID, kagentapi.NewSessionEvent(taskID+"-user", "user", userText), auth)

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	defaultSATokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	defaultSATokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101 -- in-cluster SA token path, not a credential
 	saTokenCacheTTL    = 5 * time.Minute
 	httpTimeout        = 10 * time.Second
 
@@ -174,7 +174,7 @@ func (c *Client) post(ctx context.Context, endpoint string, body any, auth AuthI
 		slog.WarnContext(ctx, "kagentapi: request failed", "url", endpoint, "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= http.StatusBadRequest {
 		slog.WarnContext(ctx, "kagentapi: unexpected status", "url", endpoint, "status", resp.StatusCode)
 	}
