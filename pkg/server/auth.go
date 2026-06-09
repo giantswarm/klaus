@@ -1,4 +1,4 @@
-package kagentapi
+package server
 
 import (
 	"context"
@@ -10,9 +10,7 @@ import (
 type authContextKey struct{}
 
 // AuthInfo carries the caller's OIDC identity extracted from an incoming HTTP
-// request. It is stored in context by the auth-extract middleware and read by
-// PushEvent to authenticate against the kagent controller (trusted-proxy mode
-// requires a Bearer JWT + the user sub via X-User-Id).
+// request. It is stored in context by the auth-extract middleware.
 type AuthInfo struct {
 	BearerToken string
 	UserSub     string

@@ -7,7 +7,6 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
-	"github.com/giantswarm/klaus/pkg/kagentapi"
 )
 
 // registerA2ARoutes mounts the A2A JSONRPC endpoint and agent-card discovery
@@ -47,8 +46,8 @@ func registerA2ARoutes(mux *http.ServeMux, executor *a2apkg.Executor, protectedM
 func extractCallerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && token != "" {
-			if sub := kagentapi.ParseJWTSub(token); sub != "" {
-				ctx := kagentapi.WithAuthInfo(r.Context(), kagentapi.AuthInfo{
+			if sub := ParseJWTSub(token); sub != "" {
+				ctx := WithAuthInfo(r.Context(), AuthInfo{
 					BearerToken: token,
 					UserSub:     sub,
 				})
