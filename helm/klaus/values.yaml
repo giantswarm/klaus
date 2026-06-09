@@ -352,7 +352,7 @@ memory:
     # Env: KLAUS_EMBEDDING_ENDPOINT (default: https://api.openai.com/v1)
     endpoint: ""
     # model is the embedding model name (e.g. text-embedding-3-small).
-    # Env: Klaus_EMBEDDING_MODEL
+    # Env: KLAUS_EMBEDDING_MODEL
     model: ""
     # apiKey for the embedding endpoint; omit for unauthenticated vLLM endpoints.
     # Env: KLAUS_EMBEDDING_API_KEY
