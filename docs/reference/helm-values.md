@@ -96,20 +96,6 @@ session:
   sessionID: ""             # pre-seed session ID; passed as --resume in chat mode
 ```
 
-## Memory augmentation
-
-```yaml
-memory:
-  kagentEndpoint: ""        # kagent controller URL for memory storage/retrieval
-  agentName: "klaus"
-  userID: "default"
-  embedding:
-    endpoint: ""            # OpenAI-compatible base URL (default: api.openai.com/v1)
-    model: ""               # required to enable memory (e.g. text-embedding-3-small)
-    secretName: ""          # Kubernetes Secret with embedding API key
-    secretKey: "api-key"
-```
-
 ## Workspace
 
 ```yaml

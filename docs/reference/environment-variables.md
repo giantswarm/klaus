@@ -78,19 +78,6 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 | `CLAUDE_CONTEXT_ID` | Pre-seed context ID at startup | -- |
 | `CLAUDE_SESSION_ID` | Pre-seed session ID at startup; also passed as `--resume` in chat mode | -- |
 
-## Memory augmentation
-
-Requires `KAGENT_MEMORY_ENDPOINT` and `KLAUS_EMBEDDING_MODEL` to be set. When either is absent, memory is silently disabled.
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `KAGENT_MEMORY_ENDPOINT` | kagent controller base URL for memory storage/retrieval | -- |
-| `KAGENT_MEMORY_AGENT_NAME` | Agent identifier for memory attribution | `klaus` |
-| `KAGENT_MEMORY_USER_ID` | User identifier for memory attribution | `default` |
-| `KLAUS_EMBEDDING_ENDPOINT` | OpenAI-compatible embedding base URL | `https://api.openai.com/v1` |
-| `KLAUS_EMBEDDING_MODEL` | Embedding model name (e.g. `text-embedding-3-small`); required to enable memory | -- |
-| `KLAUS_EMBEDDING_API_KEY` | API key for the embedding endpoint; omit for unauthenticated endpoints | -- |
-
 ## OTel tracing (server-side)
 
 Klaus exports its own traces (A2A task lifecycle, subprocess restarts) when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. The Claude Code subprocess has its own OTel env vars (see [Telemetry](../telemetry.md)).

@@ -327,34 +327,6 @@ a2a:
   allowedHosts: []
 
 
-# Memory augmentation.
-# Before each A2A turn, relevant chunks from previous sessions are retrieved
-# and prepended to the user prompt. Turns are stored after each round.
-# Requires both kagentEndpoint and embedding.model to be set.
-memory:
-  # kagentEndpoint is the kagent controller base URL for memory storage/retrieval.
-  # Uses the pgvector-backed memory API. Leave empty to disable memory augmentation.
-  kagentEndpoint: ""
-  # agentName is the agent identifier used when storing memory entries.
-  agentName: "klaus"
-  # userID is the user identifier for memory attribution.
-  userID: "default"
-  # embedding configures the OpenAI-compatible embedding endpoint used to generate
-  # 768-dim vectors for similarity search. model is required; endpoint defaults
-  # to the OpenAI API.
-  embedding:
-    # endpoint is the OpenAI-compatible base URL.
-    # Defaults to https://api.openai.com/v1 when empty.
-    endpoint: ""
-    # model is the embedding model name (e.g. "text-embedding-3-small").
-    # Required to enable memory augmentation; leaving this empty disables memory
-    # even when kagentEndpoint is set.
-    model: ""
-    # secretName references a Kubernetes Secret containing the embedding API key.
-    # Leave empty for unauthenticated endpoints (e.g. a local vLLM instance).
-    secretName: ""
-    secretKey: "api-key"
-
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its
 # native telemetry (tokens, cost, sessions, tool events, API requests).

@@ -339,34 +339,6 @@ spec:
             - name: KLAUS_A2A_ALLOWED_HOSTS
               value: {{ .Values.a2a.allowedHosts | join "," | quote }}
             {{- end }}
-            # Memory augmentation
-            {{- if .Values.memory.kagentEndpoint }}
-            - name: KAGENT_MEMORY_ENDPOINT
-              value: {{ .Values.memory.kagentEndpoint | quote }}
-            {{- end }}
-            {{- if .Values.memory.agentName }}
-            - name: KAGENT_MEMORY_AGENT_NAME
-              value: {{ .Values.memory.agentName | quote }}
-            {{- end }}
-            {{- if .Values.memory.userID }}
-            - name: KAGENT_MEMORY_USER_ID
-              value: {{ .Values.memory.userID | quote }}
-            {{- end }}
-            {{- if .Values.memory.embedding.endpoint }}
-            - name: KLAUS_EMBEDDING_ENDPOINT
-              value: {{ .Values.memory.embedding.endpoint | quote }}
-            {{- end }}
-            {{- if .Values.memory.embedding.model }}
-            - name: KLAUS_EMBEDDING_MODEL
-              value: {{ .Values.memory.embedding.model | quote }}
-            {{- end }}
-            {{- if .Values.memory.embedding.secretName }}
-            - name: KLAUS_EMBEDDING_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.memory.embedding.secretName }}
-                  key: {{ .Values.memory.embedding.secretKey }}
-            {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: config

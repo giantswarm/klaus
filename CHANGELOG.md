@@ -28,5 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`/v1/chat/messages` HTTP endpoint**: Conversation history is now available via the MCP messages tool.
 - **PostgreSQL session store** (`KLAUS_PGSQL_DSN`, `session.postgresSecretName`): Session resumption uses Claude's own session files on the `claudeHome` PVC via `--resume`; no external store needed.
-- **kagent session/task push** (`KAGENT_API_ENDPOINT`): Turn push to the kagent UI is handled by the gateway's `ForwardingExecutor`. `pkg/kagentapi/auth.go` is retained for JWT parsing and per-user memory scoping.
+- **kagent session/task push** (`KAGENT_API_ENDPOINT`): Moved to the gateway's `ForwardingExecutor`; `pkg/kagentapi/auth.go` is retained for JWT parsing.
+- **Semantic memory** (`KAGENT_MEMORY_ENDPOINT`, `KLAUS_EMBEDDING_ENDPOINT`): kagent pgvector memory backend and embedding client removed; memory is now a no-op interface reserved for future implementation.
 - **Custom OTel setup** (`pkg/telemetry/Setup()`): Replaced by mcp-toolkit `tracing.Init` which sets the global provider at startup.

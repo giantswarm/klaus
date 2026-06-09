@@ -482,37 +482,7 @@
         }
       }
     },
-    "memory": {
-      "type": "object",
-      "properties": {
-        "kagentEndpoint": {
-          "type": "string"
-        },
-        "agentName": {
-          "type": "string"
-        },
-        "userID": {
-          "type": "string"
-        },
-        "embedding": {
-          "type": "object",
-          "properties": {
-            "endpoint": {
-              "type": "string"
-            },
-            "model": {
-              "type": "string"
-            },
-            "secretName": {
-              "type": "string"
-            },
-            "secretKey": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
+    "memory": {"type": "object"},
     "telemetry": {
       "type": "object",
       "description": "OpenTelemetry monitoring and Prometheus metrics configuration",

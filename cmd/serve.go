@@ -22,7 +22,6 @@ import (
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
-	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
 )
@@ -369,13 +368,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		mode = server.ModeChat
 	}
 
-	// Build memory client. No-op when KAGENT_MEMORY_ENDPOINT or
-	// KLAUS_EMBEDDING_MODEL is unset.
-	memClient := memory.New()
-	if _, ok := memClient.(memory.NoOp); !ok {
-		slog.Info("memory augmentation enabled", "endpoint", os.Getenv("KAGENT_MEMORY_ENDPOINT"))
-	}
-
 	// Build outbound A2A registry for the a2a_call MCP tool.
 	a2aRegistry := a2apkg.NewRegistry(a2apkg.RegistryConfig{
 		Targets:      cfg.A2A.Targets,
@@ -395,7 +387,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.Mode != server.ModeChat {
 		a2aMode = a2apkg.ModeAgent
 	}
-	executor := a2apkg.New(process, a2aMode, memClient)
+	executor := a2apkg.New(process, a2aMode)
 
 	srvCfg := server.Config{
 		Port:         listenPort,

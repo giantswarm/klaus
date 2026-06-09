@@ -17,8 +17,6 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	"github.com/giantswarm/klaus/pkg/claude"
-	"github.com/giantswarm/klaus/pkg/kagentapi"
-	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
@@ -26,57 +24,36 @@ import (
 type Mode string
 
 const (
-	// ModeChat wires A2A to a PersistentProcess. The subprocess maintains the
-	// session and conversation history across turns.
+	// ModeChat wires A2A to a PersistentProcess; the subprocess owns session continuity.
 	ModeChat Mode = "chat"
-	// ModeAgent wires A2A to single-shot Process invocations. Each turn
-	// resumes the session by passing --resume <sessionID>.
+	// ModeAgent wires A2A to single-shot Process invocations, resuming via --resume.
 	ModeAgent Mode = "agent"
 )
 
 // Executor implements a2asrv.AgentExecutor backed by a Klaus Prompter.
-// It is safe for concurrent use from multiple goroutines; requests to the
-// same contextID are serialized, requests from different contextIDs run
-// in parallel.
+// Requests to the same contextID are serialized; different contextIDs run in
+// parallel.
 type Executor struct {
 	prompter claude.Prompter
-	mem      memory.Client
 	mode     Mode
 
-	// mu protects inFlight.
-	mu sync.Mutex
-	// inFlight tracks contextIDs that currently have an Execute in progress.
-	// A second request for the same contextID while one is in flight receives
-	// a rejected event.
+	mu       sync.Mutex
 	inFlight map[string]struct{}
 }
 
 var _ a2asrv.AgentExecutor = (*Executor)(nil)
 
-// New returns an Executor. prompter may be either a *claude.Process (agent
-// mode) or a *claude.PersistentProcess (chat mode). memClient handles semantic
-// memory retrieval and storage; pass memory.NoOp{} to disable it.
-func New(prompter claude.Prompter, mode Mode, memClient memory.Client) *Executor {
-	if memClient == nil {
-		memClient = memory.NoOp{}
-	}
+// New returns an Executor. prompter may be a *claude.Process (agent mode) or a
+// *claude.PersistentProcess (chat mode).
+func New(prompter claude.Prompter, mode Mode) *Executor {
 	return &Executor{
 		prompter: prompter,
-		mem:      memClient,
 		mode:     mode,
 		inFlight: make(map[string]struct{}),
 	}
 }
 
-// Execute implements a2asrv.AgentExecutor. It runs a Klaus prompt for the
-// request and yields A2A events in sequence:
-//
-//  1. working — immediately after lock acquired
-//  2. working (streaming) — for each assistant text chunk
-//  3. artifact with LastChunk=true — full result text when turn completes
-//  4. completed — terminal state
-//
-// If the contextID is already in-flight, a rejected event is yielded instead.
+// Execute implements a2asrv.AgentExecutor.
 func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
 	return func(yield func(a2asdk.Event, error) bool) {
 		contextID := execCtx.ContextID
@@ -88,15 +65,12 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			))
 		span.End()
 
-		// The v2 framework rejects any non-Task event as the first event when
-		// StoredTask is nil. Yield the submitted task before any other event.
 		if execCtx.StoredTask == nil {
 			if !yield(a2asdk.NewSubmittedTask(execCtx, execCtx.Message), nil) {
 				return
 			}
 		}
 
-		// Acquire the per-context in-flight slot; reject if already running.
 		if !e.lockForContext(contextID) {
 			log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
 			yield(rejectedEvent(execCtx, "another request for this context is already in-flight"), nil)
@@ -106,13 +80,6 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		releaseCtx := func() { releaseOnce.Do(func() { e.releaseContext(contextID) }) }
 		defer releaseCtx()
 
-		// Inject the authenticated caller's subject into ctx so memory scopes to
-		// the user rather than the static KAGENT_MEMORY_USER_ID fallback.
-		if authInfo := kagentapi.AuthInfoFromContext(ctx); authInfo.UserSub != "" {
-			ctx = memory.WithUserID(ctx, authInfo.UserSub)
-		}
-
-		// Extract prompt text.
 		text := extractText(execCtx.Message)
 		if text == "" {
 			yield(failedEvent(execCtx, "message contains no text content"), nil)
@@ -121,7 +88,6 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 
 		log.Printf("[a2a] turn start contextID=%q prompt=%q", contextID, claude.Truncate(text, 120))
 
-		// Intercept TUI-only slash commands.
 		if cmd, ok := interceptSlashCommand(text); ok {
 			reply := fmt.Sprintf(
 				"`%s` is not available in this environment — Claude Code is running headless. "+
@@ -133,23 +99,16 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			return
 		}
 
-		// Emit initial working state.
-		if !yield(workingEvent(execCtx, "thinking…"), nil) {
+		if !yield(workingEvent(execCtx, "thinking..."), nil) {
 			return
 		}
 
-		// Look up or build RunOptions based on mode.
 		runOpts, err := e.runOptions(ctx, contextID)
 		if err != nil {
 			log.Printf("[a2a] session lookup failed for contextID %q: %v", contextID, err)
-			// Non-fatal: proceed without resume.
 		}
 
-		// Retrieve semantic memory and prepend relevant past context to the prompt.
-		augmented := e.augmentWithMemory(ctx, contextID, text)
-
-		// Run the prompt.
-		ch, err := e.prompter.RunWithOptions(ctx, augmented, runOpts)
+		ch, err := e.prompter.RunWithOptions(ctx, text, runOpts)
 		if err != nil {
 			if errors.Is(err, claude.ErrBusy) {
 				yield(rejectedEvent(execCtx, "agent subprocess is busy"), nil)
@@ -160,8 +119,6 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			return
 		}
 
-		// Drain the stream, emit working events for text chunks, and collect all
-		// messages for result extraction and session ID discovery.
 		var lastText string
 		var messages []claude.StreamMessage
 		var streamSessionID string
@@ -169,8 +126,6 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		for {
 			select {
 			case <-ctx.Done():
-				// Release before Stop so a concurrent retry can acquire the slot
-				// without waiting for the subprocess to drain (up to 30 s).
 				releaseCtx()
 				_ = e.prompter.Stop()
 				return
@@ -204,9 +159,9 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			}
 		}
 
-		// Stale resume: subprocess exited with no session ID — the session file was
+		// Stale resume: subprocess exited with no session ID — session file was
 		// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
-		// session using the deterministic context-derived ID so the turn succeeds.
+		// session seeded from contextID.
 		if runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
 			e.prompter.Status().Status == claude.ProcessStatusError {
 			log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
@@ -214,7 +169,7 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 				SaveSession: true,
 				SessionID:   sessionIDFromContext(contextID),
 			}
-			if retryCh, retryErr := e.prompter.RunWithOptions(ctx, augmented, retryOpts); retryErr == nil {
+			if retryCh, retryErr := e.prompter.RunWithOptions(ctx, text, retryOpts); retryErr == nil {
 				messages = messages[:0]
 				lastText = ""
 			retryDrainLoop:
@@ -260,21 +215,12 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 
 		log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
 
-		// Derive the result from the stream only. Status().Result is NOT consulted
-		// because RunWithOptions leaves the process Idle; the disk fallback in
-		// Status() would serve a stale result from a previous MCP Submit.
 		result := claude.CollectResultText(messages)
-
 		if result != "" {
 			log.Printf("[a2a] result contextID=%q result=%q", contextID, claude.Truncate(result, 500))
 		}
 
-		// Record user prompt and assistant reply to semantic memory.
-		e.recordTurns(ctx, contextID, text, result)
-
-		// Query status only for error / retry-state detection.
 		status := e.prompter.Status()
-
 		if status.Status == claude.ProcessStatusError {
 			errMsg := status.ErrorMessage
 			if errMsg == "" {
@@ -284,8 +230,6 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			return
 		}
 
-		// If the subprocess is still Busy after the stream closed and we have no
-		// result, it is mid-retry (PersistentProcess recovering from a crash).
 		if result == "" && status.Status == claude.ProcessStatusBusy {
 			retryMsg := fmt.Sprintf("subprocess is recovering (attempt %d); no result produced", status.RetryCount)
 			yield(failedEvent(execCtx, retryMsg), nil)
@@ -302,15 +246,13 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 	}
 }
 
-// Cancel implements a2asrv.AgentExecutor. It stops the Klaus subprocess and
-// yields a canceled terminal event.
+// Cancel implements a2asrv.AgentExecutor.
 func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
 	return func(yield func(a2asdk.Event, error) bool) {
 		if err := e.prompter.Stop(); err != nil {
 			log.Printf("[a2a] Cancel: Stop() error for contextID %q: %v", execCtx.ContextID, err)
 		}
 
-		// Give the subprocess up to 30 s to exit gracefully.
 		done := e.prompter.Done()
 		select {
 		case <-done:
@@ -323,9 +265,8 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 	}
 }
 
-// runOptions builds per-invocation RunOptions for the given contextID.
-// In agent mode it always resumes by the ID derived from contextID; in chat
-// mode session continuity is owned by the PersistentProcess itself.
+// runOptions builds RunOptions for agent mode (resume by contextID-derived session ID).
+// Returns nil in chat mode — the PersistentProcess owns session continuity.
 func (e *Executor) runOptions(_ context.Context, contextID string) (*claude.RunOptions, error) {
 	if e.mode != ModeAgent {
 		return nil, nil
@@ -337,9 +278,7 @@ func (e *Executor) runOptions(_ context.Context, contextID string) (*claude.RunO
 }
 
 // sessionIDFromContext derives a Claude session ID from an A2A contextID.
-// A2A context IDs are typically "ctx-<uuid>"; the UUID part is extracted so
-// the Claude session file is named by the same UUID the kagent UI displays.
-// If contextID is already a plain UUID (no prefix), it is returned as-is.
+// "ctx-<uuid>" -> "<uuid>"; plain UUIDs are returned as-is.
 func sessionIDFromContext(contextID string) string {
 	if after, ok := strings.CutPrefix(contextID, "ctx-"); ok {
 		return after
@@ -347,50 +286,6 @@ func sessionIDFromContext(contextID string) string {
 	return contextID
 }
 
-// augmentWithMemory retrieves relevant memory chunks and prepends them to
-// the prompt text. Returns text unchanged when memory is unavailable or empty.
-func (e *Executor) augmentWithMemory(ctx context.Context, contextID, text string) string {
-	chunks, err := e.mem.Retrieve(ctx, contextID, text, 5)
-	if err != nil {
-		log.Printf("[a2a] memory retrieve failed contextID=%q: %v", contextID, err)
-		return text
-	}
-	if len(chunks) == 0 {
-		return text
-	}
-	var sb strings.Builder
-	sb.WriteString("[Relevant memory from previous sessions]\n")
-	for _, c := range chunks {
-		sb.WriteString("- ")
-		sb.WriteString(c.Content)
-		sb.WriteByte('\n')
-	}
-	sb.WriteString("\n")
-	sb.WriteString(text)
-	return sb.String()
-}
-
-// recordTurns stores the user prompt and assistant reply to semantic memory.
-// Runs asynchronously; failures are logged only.
-func (e *Executor) recordTurns(ctx context.Context, contextID, userText, assistantText string) {
-	go func() {
-		storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		if userText != "" {
-			if err := e.mem.Store(storeCtx, contextID, "user", userText); err != nil {
-				log.Printf("[a2a] memory store user failed contextID=%q: %v", contextID, err)
-			}
-		}
-		if assistantText != "" {
-			if err := e.mem.Store(storeCtx, contextID, "assistant", assistantText); err != nil {
-				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
-			}
-		}
-	}()
-}
-
-// lockForContext marks contextID as in-flight. Returns true if the slot was
-// acquired (caller may proceed), false if contextID was already in-flight.
 func (e *Executor) lockForContext(contextID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -401,7 +296,6 @@ func (e *Executor) lockForContext(contextID string) bool {
 	return true
 }
 
-// releaseContext clears the in-flight marker for contextID.
 func (e *Executor) releaseContext(contextID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
