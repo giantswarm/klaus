@@ -157,8 +157,10 @@ func TestExecutor_EmptyText(t *testing.T) {
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
 	require.NoError(t, err)
 
-	require.Len(t, events, 1)
-	statusEv, ok := events[0].(*a2asdk.TaskStatusUpdateEvent)
+	require.Len(t, events, 2)
+	_, ok := events[0].(*a2asdk.Task)
+	require.True(t, ok, "first event must be *Task")
+	statusEv, ok := events[1].(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateFailed, statusEv.Status.State)
 	assert.True(t, statusEv.Status.State.Terminal())
@@ -265,8 +267,10 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 	events2, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx2))
 	require.NoError(t, err)
 
-	require.Len(t, events2, 1)
-	statusEv, ok := events2[0].(*a2asdk.TaskStatusUpdateEvent)
+	require.Len(t, events2, 2)
+	_, ok := events2[0].(*a2asdk.Task)
+	require.True(t, ok, "first event must be *Task")
+	statusEv, ok := events2[1].(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateRejected, statusEv.Status.State)
 

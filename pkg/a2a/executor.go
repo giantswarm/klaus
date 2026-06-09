@@ -98,6 +98,14 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			))
 		span.End()
 
+		// The v2 framework rejects any non-Task event as the first event when
+		// StoredTask is nil. Yield the submitted task before any other event.
+		if execCtx.StoredTask == nil {
+			if !yield(a2asdk.NewSubmittedTask(execCtx, execCtx.Message), nil) {
+				return
+			}
+		}
+
 		// Acquire the per-context in-flight slot; reject if already running.
 		if !e.lockForContext(contextID) {
 			log.Printf("[a2a] contextID %q already in-flight, rejecting", contextID)
