@@ -289,7 +289,6 @@ workspace:
 # Set enabled: true for any install that must retain sessions across restarts.
 # Keep false only for ephemeral or CI installs where history is intentionally discarded.
 # Note: replicaCount must be 1 (enforced by the chart) while session state is pod-local.
-# When the operator lands this constraint moves to per-pod volumeClaimTemplates.
 claudeHome:
   enabled: true
   storageClass: ""

@@ -389,9 +389,9 @@ spec:
             - name: tmp
               mountPath: /tmp
             - name: claude-home
-              mountPath: /home/klaus
+              mountPath: /home/node/.claude
             - name: npm-cache
-              mountPath: /home/klaus/.npm
+              mountPath: /home/node/.npm
           livenessProbe:
             httpGet:
               path: /healthz

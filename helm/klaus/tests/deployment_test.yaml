@@ -830,6 +830,11 @@ tests:
             name: claude-home
             persistentVolumeClaim:
               claimName: RELEASE-NAME-klaus-claude-home
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: claude-home
+            mountPath: /home/node/.claude
 
   - it: should use existingClaim for claude-home when set
     documentIndex: 0
