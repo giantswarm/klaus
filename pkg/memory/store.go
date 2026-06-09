@@ -38,4 +38,4 @@ type NoOp struct{}
 var _ Store = NoOp{}
 
 func (NoOp) Retrieve(_ context.Context, _, _ string, _ int) ([]Chunk, error) { return nil, nil }
-func (NoOp) Record(_ context.Context, _, _, _ string) error                   { return nil }
+func (NoOp) Record(_ context.Context, _, _, _ string) error                  { return nil }
