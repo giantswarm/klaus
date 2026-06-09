@@ -26,9 +26,7 @@ func workingEvent(execCtx *a2asrv.ExecutorContext, msg string) *a2a.TaskStatusUp
 }
 
 // artifactEvent returns a TaskArtifactUpdateEvent with LastChunk=true carrying
-// the full response text. sessionID and usage are attached as metadata when non-empty/nil.
-// usage is stored under the generic "token_usage" key so callers can translate it to
-// whatever downstream format they need without embedding that knowledge here.
+// the full response text. sessionID and usage are attached as metadata when non-nil/non-empty.
 func artifactEvent(execCtx *a2asrv.ExecutorContext, text, sessionID string, usage *claude.TokenUsage) *a2a.TaskArtifactUpdateEvent {
 	ev := a2a.NewArtifactEvent(execCtx, a2a.NewTextPart(text))
 	ev.LastChunk = true
