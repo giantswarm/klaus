@@ -340,6 +340,15 @@ spec:
             - name: KLAUS_A2A_ALLOWED_HOSTS
               value: {{ .Values.a2a.allowedHosts | join "," | quote }}
             {{- end }}
+            # kagent history push
+            {{- if .Values.kagent.apiEndpoint }}
+            - name: KAGENT_API_ENDPOINT
+              value: {{ .Values.kagent.apiEndpoint | quote }}
+            {{- end }}
+            {{- if .Values.kagent.agentRef }}
+            - name: KAGENT_AGENT_REF
+              value: {{ .Values.kagent.agentRef | quote }}
+            {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: config

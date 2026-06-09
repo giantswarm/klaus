@@ -17,6 +17,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	"github.com/giantswarm/klaus/pkg/claude"
+	"github.com/giantswarm/klaus/pkg/kagentapi"
 	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
@@ -36,6 +37,7 @@ const (
 type Executor struct {
 	prompter claude.Prompter
 	mode     Mode
+	kagent   *kagentapi.Client // nil-safe; no-op when endpoint is unset
 
 	mu       sync.Mutex
 	inFlight map[string]struct{}
@@ -45,11 +47,12 @@ type Executor struct {
 var _ a2asrv.AgentExecutor = (*Executor)(nil)
 
 // New returns an Executor. prompter may be a *claude.Process (agent mode) or a
-// *claude.PersistentProcess (chat mode).
-func New(prompter claude.Prompter, mode Mode) *Executor {
+// *claude.PersistentProcess (chat mode). kagentClient may be nil (no-op).
+func New(prompter claude.Prompter, mode Mode, kagentClient *kagentapi.Client) *Executor {
 	return &Executor{
 		prompter: prompter,
 		mode:     mode,
+		kagent:   kagentClient,
 		inFlight: make(map[string]struct{}),
 		sessions: make(map[string]string),
 	}
@@ -184,6 +187,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 				return
 			}
 		}
+
+		e.pushTurnAsync(ctx, execCtx, extractText(execCtx.Message), result, messages)
 
 		yield(completedEvent(execCtx), nil)
 	}
@@ -326,4 +331,70 @@ func (e *Executor) releaseContext(contextID string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	delete(e.inFlight, contextID)
+}
+
+// pushTurnAsync fires best-effort kagent history + usage push in a goroutine so
+// the A2A response is not delayed. userText and agentText may be empty (no-op).
+func (e *Executor) pushTurnAsync(ctx context.Context, execCtx *a2asrv.ExecutorContext, userText, agentText string, messages []claude.StreamMessage) {
+	if e.kagent == nil || !e.kagent.Enabled() {
+		return
+	}
+	if userText == "" && agentText == "" {
+		return
+	}
+
+	contextID := execCtx.ContextID
+	taskID := string(execCtx.TaskID)
+	auth := authInfoFromA2AContext(ctx)
+	agentMeta := adkUsageMetadata(claude.CollectTokenUsage(messages))
+
+	go func() {
+		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		e.kagent.PushEvent(pushCtx, contextID, kagentapi.NewSessionEvent(taskID+"-user", "user", userText), auth)
+		e.kagent.PushEvent(pushCtx, contextID, kagentapi.NewSessionEventWithMetadata(taskID+"-agent", "agent", agentText, agentMeta), auth)
+		e.kagent.StoreTask(pushCtx, taskID, contextID, userText, agentText, "completed", agentMeta, auth)
+	}()
+}
+
+// authInfoFromA2AContext extracts caller identity from the a2asrv CallContext
+// stored in ctx by the JSON-RPC handler. Falls back to SA-token-only auth when
+// absent (e.g. in tests or non-HTTP paths).
+func authInfoFromA2AContext(ctx context.Context) kagentapi.AuthInfo {
+	callCtx, ok := a2asrv.CallContextFrom(ctx)
+	if !ok {
+		return kagentapi.AuthInfo{}
+	}
+	params := callCtx.ServiceParams()
+	var bearer, userSub string
+	if vals, ok := params.Get("authorization"); ok && len(vals) > 0 {
+		bearer = strings.TrimPrefix(vals[0], "Bearer ")
+		bearer = strings.TrimPrefix(bearer, "bearer ")
+	}
+	if vals, ok := params.Get("x-user-id"); ok && len(vals) > 0 {
+		userSub = vals[0]
+	}
+	return kagentapi.AuthInfo{BearerToken: bearer, UserSub: userSub}
+}
+
+// adkUsageMetadata converts a CollectTokenUsage result to the three-field map
+// that kagent's UI reads under the "adk_usage_metadata" key.
+// Returns nil when usage is nil or both input and output are zero.
+func adkUsageMetadata(usage *claude.TokenUsage) map[string]any {
+	if usage == nil {
+		return nil
+	}
+	input := usage.InputTokens
+	output := usage.OutputTokens
+	if input == 0 && output == 0 {
+		return nil
+	}
+	return map[string]any{
+		"adk_usage_metadata": map[string]any{
+			"totalTokenCount":      input + output,
+			"promptTokenCount":     input,
+			"candidatesTokenCount": output,
+		},
+	}
 }

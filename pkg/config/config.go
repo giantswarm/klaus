@@ -50,6 +50,20 @@ type Config struct {
 
 	// A2A holds settings for outbound A2A calls via the a2a_call MCP tool.
 	A2A A2AConfig `yaml:"a2a"`
+
+	// Kagent holds settings for pushing turn history and usage to the kagent-controller.
+	Kagent KagentConfig `yaml:"kagent"`
+}
+
+// KagentConfig holds settings for the kagent REST push client.
+type KagentConfig struct {
+	// APIEndpoint is the base URL of the kagent-controller REST API.
+	// When empty, push is disabled.
+	// Env: KAGENT_API_ENDPOINT
+	APIEndpoint string `yaml:"apiEndpoint"`
+	// AgentRef is sent as the X-Agent-Name header on push requests.
+	// Env: KAGENT_AGENT_REF
+	AgentRef string `yaml:"agentRef"`
 }
 
 // A2AConfig holds outbound A2A call settings.
@@ -269,6 +283,10 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideA2ATargets(&cfg.A2A.Targets, "KLAUS_A2A_TARGETS")
 	envOverrideBool(&cfg.A2A.AllowDynamic, "KLAUS_A2A_ALLOW_DYNAMIC")
 	envOverrideCSV(&cfg.A2A.AllowedHosts, "KLAUS_A2A_ALLOWED_HOSTS")
+
+	// kagent history push settings.
+	envOverrideString(&cfg.Kagent.APIEndpoint, "KAGENT_API_ENDPOINT")
+	envOverrideString(&cfg.Kagent.AgentRef, "KAGENT_AGENT_REF")
 
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")
