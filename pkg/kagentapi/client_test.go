@@ -1,6 +1,7 @@
 package kagentapi_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -155,7 +156,30 @@ func TestHeaders_Auth(t *testing.T) {
 	require.Equal(t, "my-agent", gotHeaders.Get("X-Agent-Name"))
 }
 
-func TestHeaders_NoUserSub(t *testing.T) {
+func TestHeaders_NoUserSub_PlainToken(t *testing.T) {
+	var gotHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// Plain opaque token — ParseJWTSub returns ""; no X-User-Id is sent.
+	client := kagentapi.New(srv.URL, "")
+	client.PushEvent(t.Context(), "ctx1", kagentapi.NewSessionEvent("id1", "user", "hi"), kagentapi.AuthInfo{BearerToken: "tok"})
+
+	require.Empty(t, gotHeaders.Get("X-User-Id"))
+	require.Empty(t, gotHeaders.Get("X-Agent-Name"))
+	require.Equal(t, "Bearer tok", gotHeaders.Get("Authorization"))
+}
+
+func TestHeaders_UserSubFallbackFromJWT(t *testing.T) {
+	// Build a minimal unsigned JWT with sub="alice@example.com".
+	// kagent requires X-User-Id; the client falls back to ParseJWTSub(token).
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"alice@example.com"}`))
+	jwtToken := header + "." + payload + ".sig"
+
 	var gotHeaders http.Header
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotHeaders = r.Header
@@ -164,11 +188,10 @@ func TestHeaders_NoUserSub(t *testing.T) {
 	defer srv.Close()
 
 	client := kagentapi.New(srv.URL, "")
-	client.PushEvent(t.Context(), "ctx1", kagentapi.NewSessionEvent("id1", "user", "hi"), kagentapi.AuthInfo{BearerToken: "tok"})
+	client.PushEvent(t.Context(), "ctx1", kagentapi.NewSessionEvent("id1", "user", "hi"), kagentapi.AuthInfo{BearerToken: jwtToken})
 
-	require.Empty(t, gotHeaders.Get("X-User-Id"))
-	require.Empty(t, gotHeaders.Get("X-Agent-Name"))
-	require.Equal(t, "Bearer tok", gotHeaders.Get("Authorization"))
+	require.Equal(t, "alice@example.com", gotHeaders.Get("X-User-Id"))
+	require.Equal(t, "Bearer "+jwtToken, gotHeaders.Get("Authorization"))
 }
 
 func TestPushEvent_ContentType(t *testing.T) {

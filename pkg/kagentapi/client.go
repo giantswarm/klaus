@@ -190,8 +190,14 @@ func (c *Client) setHeaders(req *http.Request, auth AuthInfo) {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	if auth.UserSub != "" {
-		req.Header.Set("X-User-Id", auth.UserSub)
+	userSub := auth.UserSub
+	if userSub == "" {
+		// kagent /api/sessions/.../events requires X-User-Id.
+		// Fall back to the sub of whichever bearer token we are sending.
+		userSub = ParseJWTSub(token)
+	}
+	if userSub != "" {
+		req.Header.Set("X-User-Id", userSub)
 	}
 	if c.agentRef != "" {
 		req.Header.Set("X-Agent-Name", c.agentRef)
