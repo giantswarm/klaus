@@ -20,10 +20,10 @@ import (
 type Registry struct {
 	targets      map[string]string // name → base URL
 	allowDynamic bool
-	allowedHosts map[string]struct{} // host[:port] → present; empty = deny all dynamic
+	allowedHosts map[string]struct{} // normalized host[:port] → present; empty = deny all dynamic
 
 	mu      sync.RWMutex
-	clients map[string]*a2aclient.Client // host[:port] → cached client
+	clients map[string]*a2aclient.Client // scheme://host[:port]/path → cached client
 }
 
 // RegistryConfig is the static configuration used to construct a Registry.
@@ -87,12 +87,15 @@ func (r *Registry) Call(ctx context.Context, target, message string) (string, er
 }
 
 // pollTask streams task events via SubscribeToTask until a terminal state is reached.
-// Artifact text is accumulated and used as fallback when the terminal status carries
-// no message — the common case for Klaus agents, which emit output as artifact events.
+// Artifacts are accumulated per artifact ID, honouring the Append flag (false = snapshot,
+// replacing prior content for that artifact ID). When the terminal status carries no
+// message, the accumulated artifact text is returned.
 func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task *a2a.Task, target string) (string, error) {
 	log.Printf("[a2a] task %q submitted to %q, polling until terminal", task.ID, target)
 
-	var artifactText strings.Builder
+	artifacts := make(map[a2a.ArtifactID]*strings.Builder)
+	var artifactOrder []a2a.ArtifactID
+
 	for event, err := range client.SubscribeToTask(ctx, &a2a.SubscribeToTaskRequest{ID: task.ID}) {
 		if err != nil {
 			return "", fmt.Errorf("A2A SubscribeToTask %q: %w", target, err)
@@ -104,14 +107,30 @@ func (r *Registry) pollTask(ctx context.Context, client *a2aclient.Client, task 
 				if text := extractText(e.Status.Message); text != "" {
 					return text, nil
 				}
-				return artifactText.String(), nil
+				var result strings.Builder
+				for _, id := range artifactOrder {
+					if b, ok := artifacts[id]; ok {
+						result.WriteString(b.String())
+					}
+				}
+				return result.String(), nil
 			}
 		case *a2a.TaskArtifactUpdateEvent:
 			if e.Artifact != nil {
+				id := e.Artifact.ID
+				b, exists := artifacts[id]
+				if !exists || !e.Append {
+					// First chunk or snapshot (Append=false replaces previous content).
+					b = &strings.Builder{}
+					artifacts[id] = b
+				}
 				for _, part := range e.Artifact.Parts {
 					if part != nil {
-						artifactText.WriteString(part.Text())
+						b.WriteString(part.Text())
 					}
+				}
+				if !exists {
+					artifactOrder = append(artifactOrder, id)
 				}
 			}
 		}
@@ -151,27 +170,26 @@ func (r *Registry) resolveURL(target string) (string, error) {
 	if parsed.User != nil {
 		return "", fmt.Errorf("A2A target URL must not contain userinfo")
 	}
-	host := parsed.Host
 	// Fail-closed: deny all dynamic hosts when allowedHosts is empty.
 	// Config.Validate() rejects allowDynamic=true + empty allowedHosts at startup;
 	// this guard handles the case where the registry was not validate()d.
-	if _, ok := r.allowedHosts[host]; !ok {
-		return "", fmt.Errorf("A2A target host %q is not in the allowed-hosts list", host)
+	if _, ok := r.allowedHosts[normalizedHost(parsed)]; !ok {
+		return "", fmt.Errorf("A2A target host %q is not in the allowed-hosts list", parsed.Host)
 	}
 	return target, nil
 }
 
 // clientFor returns a cached a2aclient.Client for baseURL, creating one via
-// agent-card resolution on first access. The cache key is host+path so two
-// agents at the same host but different paths get independent clients.
-// Network I/O happens outside the lock so concurrent calls to different hosts
-// do not serialize behind a slow resolution.
+// agent-card resolution on first access. The cache key includes scheme, host,
+// and path so two agents at the same host+path over different schemes get
+// independent clients. Network I/O happens outside the lock so concurrent calls
+// to different hosts do not serialize behind a slow resolution.
 func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Client, error) {
 	parsed, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing A2A URL %q: %w", baseURL, err)
 	}
-	key := parsed.Host + parsed.Path
+	key := parsed.Scheme + "://" + parsed.Host + parsed.Path
 
 	r.mu.RLock()
 	client, ok := r.clients[key]
@@ -183,6 +201,18 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 	card, err := agentcard.DefaultResolver.Resolve(ctx, baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("resolving agent card at %q: %w", baseURL, err)
+	}
+
+	// Validate the card's interface URLs against the allowlist. An allowlisted
+	// host could otherwise return a card that redirects actual traffic to an
+	// internal service.
+	for _, iface := range card.SupportedInterfaces {
+		if iface == nil {
+			continue
+		}
+		if err := r.validateCardInterfaceURL(baseURL, iface.URL); err != nil {
+			return nil, fmt.Errorf("agent card for %q rejected: %w", baseURL, err)
+		}
 	}
 
 	client, err = a2aclient.NewFromCard(ctx, card)
@@ -198,6 +228,56 @@ func (r *Registry) clientFor(ctx context.Context, baseURL string) (*a2aclient.Cl
 	r.clients[key] = client
 	r.mu.Unlock()
 	return client, nil
+}
+
+// validateCardInterfaceURL checks that a card-advertised interface URL is safe
+// to use. When allowedHosts is non-empty (dynamic mode), the interface host
+// must be in the allowlist. When allowedHosts is empty (static-only mode), the
+// interface host must match the original target host to prevent open-redirect
+// attacks via a compromised static target's card.
+func (r *Registry) validateCardInterfaceURL(targetBaseURL, ifaceURL string) error {
+	iface, err := url.Parse(ifaceURL)
+	if err != nil || iface.Host == "" {
+		return fmt.Errorf("invalid interface URL %q", ifaceURL)
+	}
+	if iface.Scheme != "http" && iface.Scheme != "https" {
+		return fmt.Errorf("interface URL scheme %q is not permitted", iface.Scheme)
+	}
+	ifaceHost := normalizedHost(iface)
+	if len(r.allowedHosts) > 0 {
+		if _, ok := r.allowedHosts[ifaceHost]; !ok {
+			return fmt.Errorf("interface host %q is not in the allowed-hosts list", iface.Host)
+		}
+		return nil
+	}
+	// Static-only mode: the interface must stay on the same host as the target.
+	target, _ := url.Parse(targetBaseURL)
+	if ifaceHost != normalizedHost(target) {
+		return fmt.Errorf("interface host %q does not match target host %q", iface.Host, target.Host)
+	}
+	return nil
+}
+
+// normalizedHost returns the host from a parsed URL with default ports stripped
+// (port 80 for http, port 443 for https). This lets allowedHosts entries use
+// bare hostnames regardless of whether the caller included the default port.
+func normalizedHost(u *url.URL) string {
+	h := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		return h
+	}
+	switch u.Scheme {
+	case "http":
+		if port == "80" {
+			return h
+		}
+	case "https":
+		if port == "443" {
+			return h
+		}
+	}
+	return h + ":" + port
 }
 
 // textFromResult extracts concatenated text from a SendMessageResult.

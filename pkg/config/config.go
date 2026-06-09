@@ -298,6 +298,9 @@ func (c *Config) Validate() error {
 	if c.Claude.MaxBudgetUSD < 0 {
 		errs = append(errs, fmt.Errorf("claude.maxBudgetUSD must be >= 0, got %f", c.Claude.MaxBudgetUSD))
 	}
+	if c.Claude.RetryMaxAttempts < 0 {
+		errs = append(errs, fmt.Errorf("claude.retryMaxAttempts must be >= 0, got %d", c.Claude.RetryMaxAttempts))
+	}
 
 	// Validate encryption key format if set.
 	if c.OAuth.Security.EncryptionKey != "" {
@@ -407,12 +410,7 @@ func (a *A2AConfig) validate() error {
 	if a.AllowDynamic && len(a.AllowedHosts) == 0 {
 		return fmt.Errorf("a2a.allowDynamic requires a2a.allowedHosts to be non-empty (fail-closed)")
 	}
-	seen := make(map[string]struct{}, len(a.Targets))
 	for name, rawURL := range a.Targets {
-		if _, dup := seen[name]; dup {
-			return fmt.Errorf("a2a.targets: duplicate target name %q", name)
-		}
-		seen[name] = struct{}{}
 		if _, err := url.ParseRequestURI(rawURL); err != nil {
 			return fmt.Errorf("a2a.targets[%q]: invalid URL %q: %w", name, rawURL, err)
 		}
@@ -422,8 +420,9 @@ func (a *A2AConfig) validate() error {
 
 // envOverrideA2ATargets parses "name=url,name2=url2,..." from the env var key
 // into a map. Each pair is split on the first '=' only; entries without '=' are
-// silently skipped with a warning. Existing map values are preserved when the
-// env var is unset.
+// silently skipped with a warning. When the env var is set (even if all pairs
+// are malformed), the parsed map replaces any file-configured targets so the
+// env var acts as a full override.
 func envOverrideA2ATargets(target *map[string]string, key string) {
 	v := os.Getenv(key)
 	if v == "" {
@@ -438,9 +437,7 @@ func envOverrideA2ATargets(target *map[string]string, key string) {
 		}
 		m[pair[:idx]] = pair[idx+1:]
 	}
-	if len(m) > 0 {
-		*target = m
-	}
+	*target = m
 }
 
 // parseBool returns true for "true", "1", "yes" (case-insensitive).

@@ -343,36 +343,42 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 	assert.True(t, artifactEv.LastChunk)
 }
 
-func TestExecutor_ResumeAlwaysDerivedFromContextID(t *testing.T) {
-	// Both turns must use --resume derived from the A2A contextID, regardless
-	// of what session ID the subprocess emits. The store is never consulted.
+func TestExecutor_AgentModeTracksSubprocessSession(t *testing.T) {
+	// First turn must use --session-id derived from contextID (no prior session).
+	// Second turn must use --resume with the session ID the subprocess actually reported,
+	// not always the derived ID.
 	prompter := &fakePrompter{
 		result: "turn result",
 		statusVal: claude.StatusInfo{
-			Status:    claude.ProcessStatusCompleted,
-			SessionID: "subprocess-reported-id",
-			Result:    "turn result",
+			Status: claude.ProcessStatusCompleted,
+			Result: "turn result",
 		},
 	}
 	exec := a2a.New(prompter, a2a.ModeAgent)
 
+	// First turn: subprocess reports "subprocess-reported-id".
+	prompter.statusVal.SessionID = "subprocess-reported-id"
 	_, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-derived", "first")))
 	require.NoError(t, err)
 
-	// Second turn: subprocess reports a different session ID — must not affect RunOptions.
+	// Second turn: executor must resume with the session ID the subprocess emitted,
+	// not re-derive it from contextID.
 	prompter.statusVal.SessionID = "different-session-id"
 	_, err = collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-derived", "second")))
 	require.NoError(t, err)
 
 	require.Len(t, prompter.capturedOpts, 2)
-	assert.Equal(t, "derived", prompter.capturedOpts[0].Resume)
-	assert.Equal(t, "derived", prompter.capturedOpts[1].Resume)
-	assert.Empty(t, prompter.capturedOpts[0].SessionID)
-	assert.Empty(t, prompter.capturedOpts[1].SessionID)
+	// First turn: no prior session → --session-id from contextID.
+	assert.Equal(t, "derived", prompter.capturedOpts[0].SessionID, "first turn must derive --session-id from contextID")
+	assert.Empty(t, prompter.capturedOpts[0].Resume, "first turn must not pass --resume")
+	// Second turn: resume with what the subprocess actually reported.
+	assert.Equal(t, "subprocess-reported-id", prompter.capturedOpts[1].Resume, "second turn must resume with subprocess-reported session ID")
+	assert.Empty(t, prompter.capturedOpts[1].SessionID, "second turn must not set --session-id")
 }
 
-// TestExecutor_AgentModeResume verifies that the second turn in agent mode
-// passes only --resume (not --session-id), which is what the claude CLI requires.
+// TestExecutor_AgentModeResume verifies the session handoff across two turns in
+// agent mode: first turn seeds a new session via --session-id, second turn
+// resumes the session the subprocess actually reported.
 func TestExecutor_AgentModeResume(t *testing.T) {
 	const sessionID = "sess-resume-test"
 	prompter := &fakePrompter{
@@ -391,32 +397,33 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 	last1 := events1[len(events1)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last1.Status.State)
 
-	// First turn RunOptions: Resume is derived from contextID; SessionID is not set.
+	// First turn RunOptions: no prior session → seeds via --session-id derived from contextID.
 	require.Len(t, prompter.capturedOpts, 1)
 	opts1 := prompter.capturedOpts[0]
 	require.NotNil(t, opts1)
-	assert.Equal(t, "resume", opts1.Resume, "first turn derives --resume from contextID")
-	assert.Empty(t, opts1.SessionID, "first turn must not set --session-id")
+	assert.Equal(t, "resume", opts1.SessionID, "first turn derives --session-id from contextID")
+	assert.Empty(t, opts1.Resume, "first turn must not set --resume")
 	assert.True(t, opts1.SaveSession, "first turn must set SaveSession so the conversation is persisted")
 
-	// Second turn — session ID is always derived from contextID, not from store.
+	// Second turn — executor has recorded the session the subprocess reported.
 	events2, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-resume", "second")))
 	require.NoError(t, err)
 	last2 := events2[len(events2)-1].(*a2asdk.TaskStatusUpdateEvent)
 	assert.Equal(t, a2asdk.TaskStateCompleted, last2.Status.State)
 
-	// Second turn RunOptions: same derived Resume, no SessionID.
+	// Second turn RunOptions: resume with the actual session ID the subprocess reported.
 	require.Len(t, prompter.capturedOpts, 2)
 	opts2 := prompter.capturedOpts[1]
 	require.NotNil(t, opts2)
-	assert.Equal(t, "resume", opts2.Resume, "second turn derives --resume from contextID")
+	assert.Equal(t, sessionID, opts2.Resume, "second turn resumes with subprocess-reported session ID")
 	assert.Empty(t, opts2.SessionID, "second turn must not pass --session-id")
 	assert.True(t, opts2.SaveSession, "second turn must set SaveSession")
 }
 
-// staleResumePrompter simulates a subprocess that fails on the first (resume)
-// call but succeeds on the retry (fresh session). Used to test stale-resume
-// detection after pod restart with emptyDir workspace.
+// staleResumePrompter simulates the pod-restart / emptyDir scenario:
+//   call 1 (first turn, --session-id): succeeds, emits session "sess-first"
+//   call 2 (second turn, --resume sess-first): fails — session file gone
+//   call 3 (retry of second turn, --session-id): succeeds, emits new session
 type staleResumePrompter struct {
 	*fakePrompter
 	calls int
@@ -426,14 +433,20 @@ func (p *staleResumePrompter) RunWithOptions(_ context.Context, _ string, opts *
 	p.calls++
 	p.capturedOpts = append(p.capturedOpts, opts)
 	var msgs []claude.StreamMessage
-	if p.calls >= 2 {
-		// Retry succeeds: emit session + result.
+	switch p.calls {
+	case 1:
 		msgs = []claude.StreamMessage{
-			{Type: claude.MessageTypeSystem, SessionID: "new-session-id"},
+			{Type: claude.MessageTypeSystem, SessionID: "sess-first"},
+			{Type: claude.MessageTypeResult, Result: "first turn ok"},
+		}
+	case 2:
+		// Stale --resume: empty channel, no session ID, subprocess exits with error.
+	case 3:
+		msgs = []claude.StreamMessage{
+			{Type: claude.MessageTypeSystem, SessionID: "sess-new"},
 			{Type: claude.MessageTypeResult, Result: "retry succeeded"},
 		}
 	}
-	// First call: empty channel — no session ID emitted, simulates failed resume.
 	ch := make(chan claude.StreamMessage, len(msgs)+1)
 	for _, m := range msgs {
 		ch <- m
@@ -443,35 +456,40 @@ func (p *staleResumePrompter) RunWithOptions(_ context.Context, _ string, opts *
 }
 
 func (p *staleResumePrompter) Status() claude.StatusInfo {
-	if p.calls <= 1 {
-		// After first (failed) call: subprocess error.
+	if p.calls == 2 {
 		return claude.StatusInfo{Status: claude.ProcessStatusError, ErrorMessage: "exit status 1"}
 	}
 	return claude.StatusInfo{Status: claude.ProcessStatusIdle}
 }
 
 // TestExecutor_StaleResumeRetry verifies that when --resume fails (session file
-// gone after pod restart), the executor retries with a fresh session and the
-// turn completes rather than failing.
+// gone after pod restart), the executor retries with a fresh --session-id and the
+// turn completes rather than failing. Stale resume is only triggered on the second+
+// turn (when a prior session was recorded).
 func TestExecutor_StaleResumeRetry(t *testing.T) {
 	inner := &fakePrompter{}
 	prompter := &staleResumePrompter{fakePrompter: inner}
-
 	exec := a2a.New(prompter, a2a.ModeAgent)
 
+	// First turn: fresh start; establishes session "sess-first".
+	_, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-stale", "first message")))
+	require.NoError(t, err)
+	require.Len(t, prompter.capturedOpts, 1)
+	assert.Equal(t, "stale", prompter.capturedOpts[0].SessionID, "first turn seeds --session-id from contextID")
+	assert.Empty(t, prompter.capturedOpts[0].Resume)
+
+	// Second turn: --resume sess-first fails (stale); executor retries with --session-id.
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-stale", "hello after restart")))
 	require.NoError(t, err)
 
-	// Turn must succeed, not fail.
 	last := events[len(events)-1]
 	statusEv, ok := last.(*a2asdk.TaskStatusUpdateEvent)
 	require.True(t, ok)
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State, "stale resume should retry and complete")
-	assert.True(t, statusEv.Status.State.Terminal())
 
-	// Two RunWithOptions calls: first with Resume derived from contextID, second fresh with SessionID.
-	require.Len(t, prompter.capturedOpts, 2, "expected exactly two RunWithOptions calls")
-	assert.Equal(t, "stale", prompter.capturedOpts[0].Resume, "first call must derive --resume from contextID")
-	assert.Empty(t, prompter.capturedOpts[1].Resume, "retry call must not pass --resume")
-	assert.Equal(t, "stale", prompter.capturedOpts[1].SessionID, "retry must seed session ID from contextID")
+	require.Len(t, prompter.capturedOpts, 3, "expected 3 RunWithOptions calls: turn1, stale-attempt, retry")
+	assert.Equal(t, "sess-first", prompter.capturedOpts[1].Resume, "second turn uses stored --resume")
+	assert.Empty(t, prompter.capturedOpts[1].SessionID)
+	assert.Empty(t, prompter.capturedOpts[2].Resume, "retry must not pass --resume")
+	assert.Equal(t, "stale", prompter.capturedOpts[2].SessionID, "retry seeds --session-id from contextID")
 }

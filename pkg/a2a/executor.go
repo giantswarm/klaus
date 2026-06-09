@@ -39,6 +39,7 @@ type Executor struct {
 
 	mu       sync.Mutex
 	inFlight map[string]struct{}
+	sessions map[string]string // contextID → session ID established in prior turn
 }
 
 var _ a2asrv.AgentExecutor = (*Executor)(nil)
@@ -50,6 +51,7 @@ func New(prompter claude.Prompter, mode Mode) *Executor {
 		prompter: prompter,
 		mode:     mode,
 		inFlight: make(map[string]struct{}),
+		sessions: make(map[string]string),
 	}
 }
 
@@ -119,50 +121,15 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			return
 		}
 
-		var lastText string
-		var messages []claude.StreamMessage
-		var streamSessionID string
-	drainLoop:
-		for {
-			select {
-			case <-ctx.Done():
-				releaseCtx()
-				_ = e.prompter.Stop()
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					break drainLoop
-				}
-				messages = append(messages, msg)
-				if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
-					streamSessionID = msg.SessionID
-					log.Printf("[a2a] session contextID=%q sessionID=%q", contextID, msg.SessionID)
-				}
-				if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
-					log.Printf("[a2a] tool_use contextID=%q tool=%q", contextID, msg.ToolName)
-					if !yield(workingEvent(execCtx, "using tool: "+msg.ToolName), nil) {
-						releaseCtx()
-						_ = e.prompter.Stop()
-						return
-					}
-				}
-				if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
-					if msg.Text != "" && msg.Text != lastText {
-						lastText = msg.Text
-						if !yield(workingEvent(execCtx, claude.Truncate(msg.Text, 200)), nil) {
-							releaseCtx()
-							_ = e.prompter.Stop()
-							return
-						}
-					}
-				}
-			}
+		messages, streamSessionID, cancelled := e.drainStream(ctx, execCtx, ch, releaseCtx, yield, "")
+		if cancelled {
+			return
 		}
 
-		// Stale resume: subprocess exited with no session ID — session file was
-		// lost (e.g. pod restart with emptyDir workspace). Retry once with a fresh
-		// session seeded from contextID. Skip if ctx is already cancelled (the
-		// channel-close and ctx.Done cases can race in the select above).
+		// Stale resume: subprocess exited with no session ID — session file was lost
+		// (e.g. pod restart with emptyDir workspace). Retry once with a fresh session
+		// seeded from contextID. Skip if ctx is already cancelled (the channel-close
+		// and ctx.Done cases can race in the drain loop).
 		if ctx.Err() == nil && runOpts != nil && runOpts.Resume != "" && streamSessionID == "" &&
 			e.prompter.Status().Status == claude.ProcessStatusError {
 			log.Printf("[a2a] stale session resume contextID=%q, retrying fresh", contextID)
@@ -171,47 +138,21 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 				SessionID:   sessionIDFromContext(contextID),
 			}
 			if retryCh, retryErr := e.prompter.RunWithOptions(ctx, text, retryOpts); retryErr == nil {
-				messages = messages[:0]
-				lastText = ""
-			retryDrainLoop:
-				for {
-					select {
-					case <-ctx.Done():
-						releaseCtx()
-						_ = e.prompter.Stop()
-						return
-					case msg, ok := <-retryCh:
-						if !ok {
-							break retryDrainLoop
-						}
-						messages = append(messages, msg)
-						if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
-							streamSessionID = msg.SessionID
-							log.Printf("[a2a] retry session contextID=%q sessionID=%q", contextID, msg.SessionID)
-						}
-						if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
-							log.Printf("[a2a] tool_use (retry) contextID=%q tool=%q", contextID, msg.ToolName)
-							if !yield(workingEvent(execCtx, "using tool: "+msg.ToolName), nil) {
-								releaseCtx()
-								_ = e.prompter.Stop()
-								return
-							}
-						}
-						if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
-							if msg.Text != "" && msg.Text != lastText {
-								lastText = msg.Text
-								if !yield(workingEvent(execCtx, claude.Truncate(msg.Text, 200)), nil) {
-									releaseCtx()
-									_ = e.prompter.Stop()
-									return
-								}
-							}
-						}
-					}
+				var retryMessages []claude.StreamMessage
+				retryMessages, streamSessionID, cancelled = e.drainStream(ctx, execCtx, retryCh, releaseCtx, yield, "(retry) ")
+				if cancelled {
+					return
 				}
+				messages = retryMessages
 			} else {
 				log.Printf("[a2a] retry RunWithOptions failed contextID=%q: %v", contextID, retryErr)
 			}
+		}
+
+		// Record the session so the next turn can resume without a redundant
+		// failed subprocess spawn.
+		if streamSessionID != "" {
+			e.noteSession(contextID, streamSessionID)
 		}
 
 		log.Printf("[a2a] turn done contextID=%q messages=%d", contextID, len(messages))
@@ -247,6 +188,68 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 	}
 }
 
+// drainStream reads from ch until it closes or ctx is cancelled. It yields A2A
+// working events for tool-use and streaming text. Returns (messages, sessionID,
+// cancelled). cancelled=true means ctx was cancelled mid-drain; the caller should
+// return immediately without producing a result event.
+//
+// In chat mode the shared PersistentProcess is never stopped on context
+// cancellation — only the drain is abandoned. In agent mode the single-shot
+// subprocess is stopped so it doesn't orphan.
+func (e *Executor) drainStream(
+	ctx context.Context,
+	execCtx *a2asrv.ExecutorContext,
+	ch <-chan claude.StreamMessage,
+	releaseCtx func(),
+	yield func(a2asdk.Event, error) bool,
+	logTag string,
+) (messages []claude.StreamMessage, sessionID string, cancelled bool) {
+	contextID := execCtx.ContextID
+	var lastText string
+
+	for {
+		select {
+		case <-ctx.Done():
+			releaseCtx()
+			if e.mode == ModeAgent {
+				_ = e.prompter.Stop()
+			}
+			return messages, sessionID, true
+		case msg, ok := <-ch:
+			if !ok {
+				return messages, sessionID, false
+			}
+			messages = append(messages, msg)
+			if msg.Type == claude.MessageTypeSystem && msg.SessionID != "" {
+				sessionID = msg.SessionID
+				log.Printf("[a2a] %ssession contextID=%q sessionID=%q", logTag, contextID, msg.SessionID)
+			}
+			if msg.Type == claude.MessageTypeAssistant && msg.Subtype == claude.SubtypeToolUse {
+				log.Printf("[a2a] %stool_use contextID=%q tool=%q", logTag, contextID, msg.ToolName)
+				if !yield(workingEvent(execCtx, "using tool: "+msg.ToolName), nil) {
+					releaseCtx()
+					if e.mode == ModeAgent {
+						_ = e.prompter.Stop()
+					}
+					return messages, sessionID, true
+				}
+			}
+			if msg.Type == claude.MessageTypeStreamEvent || msg.Type == claude.MessageTypeAssistant {
+				if msg.Text != "" && msg.Text != lastText {
+					lastText = msg.Text
+					if !yield(workingEvent(execCtx, claude.Truncate(msg.Text, 200)), nil) {
+						releaseCtx()
+						if e.mode == ModeAgent {
+							_ = e.prompter.Stop()
+						}
+						return messages, sessionID, true
+					}
+				}
+			}
+		}
+	}
+}
+
 // Cancel implements a2asrv.AgentExecutor.
 func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
 	return func(yield func(a2asdk.Event, error) bool) {
@@ -266,16 +269,37 @@ func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) 
 	}
 }
 
-// runOptions builds RunOptions for agent mode (resume by contextID-derived session ID).
+// runOptions builds RunOptions for agent mode. Uses --resume when a session has
+// been established for this contextID; otherwise uses --session-id with the same
+// derived value so the first turn creates the session deterministically, avoiding
+// a wasted subprocess spawn from a failed --resume.
 // Returns nil in chat mode — the PersistentProcess owns session continuity.
 func (e *Executor) runOptions(_ context.Context, contextID string) (*claude.RunOptions, error) {
 	if e.mode != ModeAgent {
 		return nil, nil
 	}
+	derivedID := sessionIDFromContext(contextID)
+	e.mu.Lock()
+	knownSession := e.sessions[contextID]
+	e.mu.Unlock()
+	if knownSession != "" {
+		return &claude.RunOptions{
+			SaveSession: true,
+			Resume:      knownSession,
+		}, nil
+	}
 	return &claude.RunOptions{
 		SaveSession: true,
-		Resume:      sessionIDFromContext(contextID),
+		SessionID:   derivedID,
 	}, nil
+}
+
+// noteSession records that a session was established for contextID so subsequent
+// turns can resume it directly.
+func (e *Executor) noteSession(contextID, sessionID string) {
+	e.mu.Lock()
+	e.sessions[contextID] = sessionID
+	e.mu.Unlock()
 }
 
 // sessionIDFromContext derives a Claude session ID from an A2A contextID.

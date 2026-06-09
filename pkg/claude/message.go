@@ -80,10 +80,11 @@ type StreamMessage struct {
 	Usage *TokenUsage `json:"usage,omitempty"`
 
 	// Fields present on "result" messages.
-	Result   string  `json:"result,omitempty"`
-	Duration float64 `json:"duration_ms,omitempty"`
-	Cost     float64 `json:"cost_usd,omitempty"`
-	IsError  bool    `json:"is_error,omitempty"`
+	Result     string  `json:"result,omitempty"`
+	Duration   float64 `json:"duration_ms,omitempty"`
+	Cost       float64 `json:"cost_usd,omitempty"`
+	IsError    bool    `json:"is_error,omitempty"`
+	StopReason string  `json:"stop_reason,omitempty"`
 
 	// TotalCost tracks the running total cost of the session.
 	TotalCost float64 `json:"total_cost_usd,omitempty"`

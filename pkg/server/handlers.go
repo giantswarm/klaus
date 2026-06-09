@@ -100,12 +100,13 @@ func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, m
 	mux.Handle("/", rootHandler(a2aHandler))
 }
 
-// rootHandler returns a catch-all handler that dispatches POST requests to
-// a2aHandler when set. kagent constructs agent URLs as http://{name}.{ns}:8080
-// with no path, so POST / must reach the A2A JSON-RPC handler.
+// rootHandler returns a catch-all handler that dispatches POST / to a2aHandler
+// when set. kagent constructs agent URLs as http://{name}.{ns}:8080 with no
+// path, so POST / must reach the A2A JSON-RPC handler. Any other path falls
+// through to handleRoot (which returns 404 for unmatched paths).
 func rootHandler(a2aHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a2aHandler != nil && r.Method == http.MethodPost {
+		if a2aHandler != nil && r.Method == http.MethodPost && r.URL.Path == "/" {
 			a2aHandler.ServeHTTP(w, r)
 			return
 		}

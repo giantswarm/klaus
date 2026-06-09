@@ -29,8 +29,8 @@ func TestNewPersistentProcess_InitialState(t *testing.T) {
 	if status.ToolCallCount != 0 {
 		t.Errorf("expected 0 tool call count, got %d", status.ToolCallCount)
 	}
-	if status.ToolCalls != nil {
-		t.Errorf("expected nil tool calls, got %v", status.ToolCalls)
+	if len(status.ToolCalls) != 0 {
+		t.Errorf("expected empty tool calls, got %v", status.ToolCalls)
 	}
 	if status.LastMessage != "" {
 		t.Errorf("expected empty last message, got %q", status.LastMessage)

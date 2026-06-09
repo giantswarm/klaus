@@ -115,6 +115,8 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
 		toolUseIDs:  make(map[string]string),
+		toolCalls:   make(map[string]int),
+		modelUsage:  make(map[string]int),
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
@@ -543,9 +545,7 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 					p.status = ProcessStatusIdle
 				}
 
-				// Detect budget exhaustion: the CLI emits is_error=true with
-				// "budget" in the result text when --max-budget-usd is exceeded.
-				if msg.IsError && strings.Contains(strings.ToLower(msg.Result), "budget") {
+				if isBudgetError(msg) {
 					p.lastStopReason = StopReasonBudget
 				} else if msg.IsError {
 					p.lastStopReason = StopReasonError
@@ -746,12 +746,12 @@ loop:
 // Stop sends SIGTERM to the persistent subprocess and waits for it to exit.
 // It also cancels the background watchdog to prevent auto-restart.
 func (p *PersistentProcess) Stop() error {
-	// Cancel the watchdog first to prevent restart during shutdown.
+	p.mu.Lock()
+	// Cancel the watchdog under the lock: startWatchdog writes watchdogCancel
+	// under mu, so reading it here outside the lock is a data race.
 	if p.watchdogCancel != nil {
 		p.watchdogCancel()
 	}
-
-	p.mu.Lock()
 	cmd := p.cmd
 	processDone := p.processDone
 	if cmd == nil || cmd.Process == nil {
@@ -1081,4 +1081,18 @@ func (r *ringBuffer) contents() []string {
 	result = append(result, r.lines[r.pos:]...)
 	result = append(result, r.lines[:r.pos]...)
 	return result
+}
+
+// isBudgetError reports whether a result message indicates budget exhaustion.
+// The CLI sets stop_reason on result messages; "max_budget" is the structured
+// signal. The text fallback handles older CLI versions where the structured
+// field may be absent.
+func isBudgetError(msg StreamMessage) bool {
+	if !msg.IsError {
+		return false
+	}
+	if msg.StopReason == "max_budget" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(msg.Result), "budget")
 }

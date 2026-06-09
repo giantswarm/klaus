@@ -394,7 +394,12 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		Mode:         mode,
 		OwnerSubject: cfg.Server.OwnerSubject,
 		Executor:     executor,
-		A2ACaller:    a2aRegistry,
+	}
+	// Assign the concrete *Registry only when non-nil: assigning a nil pointer
+	// to an interface field produces a typed-nil that bypasses the nil check in
+	// RegisterTools, causing a panic on the first a2a_call invocation.
+	if a2aRegistry != nil {
+		srvCfg.A2ACaller = a2aRegistry
 	}
 
 	if enableOAuth {
