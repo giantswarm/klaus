@@ -2,7 +2,6 @@ package a2a
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -16,12 +15,10 @@ import (
 
 	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
-	"github.com/google/uuid"
 
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/kagentapi"
 	"github.com/giantswarm/klaus/pkg/memory"
-	"github.com/giantswarm/klaus/pkg/session"
 	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
@@ -43,8 +40,6 @@ const (
 // in parallel.
 type Executor struct {
 	prompter claude.Prompter
-	store    session.Store
-	kagent   *kagentapi.Client
 	mem      memory.Client
 	mode     Mode
 
@@ -59,19 +54,14 @@ type Executor struct {
 var _ a2asrv.AgentExecutor = (*Executor)(nil)
 
 // New returns an Executor. prompter may be either a *claude.Process (agent
-// mode) or a *claude.PersistentProcess (chat mode). store persists
-// contextID→sessionID bindings across turns. kagentClient may be nil; when
-// non-nil and enabled, completed turns are pushed to the kagent UI.
-// memClient handles semantic memory retrieval and storage; pass memory.NoOp{}
-// to disable memory augmentation.
-func New(prompter claude.Prompter, store session.Store, mode Mode, kagentClient *kagentapi.Client, memClient memory.Client) *Executor {
+// mode) or a *claude.PersistentProcess (chat mode). memClient handles semantic
+// memory retrieval and storage; pass memory.NoOp{} to disable it.
+func New(prompter claude.Prompter, mode Mode, memClient memory.Client) *Executor {
 	if memClient == nil {
 		memClient = memory.NoOp{}
 	}
 	return &Executor{
 		prompter: prompter,
-		store:    store,
-		kagent:   kagentClient,
 		mem:      memClient,
 		mode:     mode,
 		inFlight: make(map[string]struct{}),
@@ -279,14 +269,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			log.Printf("[a2a] result contextID=%q result=%q", contextID, claude.Truncate(result, 500))
 		}
 
-		// Use the sessionID observed in this run's stream. Status().SessionID is
-		// NOT consulted because p.sessionID is reset at run start but may still
-		// carry a prior value if no system message arrives (e.g. early crash).
-		sessionID := streamSessionID
-
-		// Record user prompt and assistant reply as conversation turns. Both
-		// writes are async and best-effort so they never block the response path.
-		e.recordTurns(ctx, contextID, sessionID, text, result)
+		// Record user prompt and assistant reply to semantic memory.
+		e.recordTurns(ctx, contextID, text, result)
 
 		// Query status only for error / retry-state detection.
 		status := e.prompter.Status()
@@ -309,7 +293,7 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		}
 
 		if result != "" {
-			if !yield(artifactEvent(execCtx, result, sessionID), nil) {
+			if !yield(artifactEvent(execCtx, result, streamSessionID), nil) {
 				return
 			}
 		}
@@ -386,68 +370,21 @@ func (e *Executor) augmentWithMemory(ctx context.Context, contextID, text string
 	return sb.String()
 }
 
-// recordTurns persists the user prompt and assistant reply as conversation
-// turns in the store, then pushes them to the kagent UI. Both operations are
-// async and best-effort: failures are logged only, never returned.
-//
-// parentCtx carries the caller's OIDC AuthInfo (set by extractCallerAuth
-// middleware). It is captured before the goroutine so the goroutine can
-// re-inject it into the detached timeout context for kagent auth.
-func (e *Executor) recordTurns(parentCtx context.Context, contextID, sessionID, userText, assistantText string) {
-	authInfo := kagentapi.AuthInfoFromContext(parentCtx)
+// recordTurns stores the user prompt and assistant reply to semantic memory.
+// Runs asynchronously; failures are logged only.
+func (e *Executor) recordTurns(ctx context.Context, contextID, userText, assistantText string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), 10*time.Second)
+		storeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if authInfo.BearerToken != "" {
-			ctx = kagentapi.WithAuthInfo(ctx, authInfo)
-		}
-
 		if userText != "" {
-			userContent, _ := json.Marshal(userText)
-			if sessionID != "" {
-				if err := e.store.AppendTurn(ctx, session.Turn{
-					ContextID: contextID,
-					SessionID: sessionID,
-					Role:      "user",
-					Content:   userContent,
-					TS:        time.Now(),
-				}); err != nil {
-					log.Printf("[a2a] AppendTurn user failed contextID=%q: %v", contextID, err)
-				}
-			}
-			if e.kagent != nil {
-				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "user", userText))
-			}
-			if err := e.mem.Store(ctx, contextID, "user", userText); err != nil {
+			if err := e.mem.Store(storeCtx, contextID, "user", userText); err != nil {
 				log.Printf("[a2a] memory store user failed contextID=%q: %v", contextID, err)
 			}
 		}
-
 		if assistantText != "" {
-			assistantContent, _ := json.Marshal(assistantText)
-			if sessionID != "" {
-				if err := e.store.AppendTurn(ctx, session.Turn{
-					ContextID: contextID,
-					SessionID: sessionID,
-					Role:      "assistant",
-					Content:   assistantContent,
-					TS:        time.Now(),
-				}); err != nil {
-					log.Printf("[a2a] AppendTurn assistant failed contextID=%q: %v", contextID, err)
-				}
-			}
-			if e.kagent != nil {
-				e.kagent.PushEvent(ctx, contextID, kagentapi.NewSessionEvent(newEventID(), "agent", assistantText))
-			}
-			if err := e.mem.Store(ctx, contextID, "assistant", assistantText); err != nil {
+			if err := e.mem.Store(storeCtx, contextID, "assistant", assistantText); err != nil {
 				log.Printf("[a2a] memory store assistant failed contextID=%q: %v", contextID, err)
 			}
-		}
-
-		// Store the turn as a completed A2A task so the kagent UI can render
-		// conversation history on reload.
-		if e.kagent != nil && userText != "" && assistantText != "" {
-			e.kagent.StoreTask(ctx, newEventID(), contextID, userText, assistantText)
 		}
 	}()
 }
@@ -470,5 +407,3 @@ func (e *Executor) releaseContext(contextID string) {
 	defer e.mu.Unlock()
 	delete(e.inFlight, contextID)
 }
-
-func newEventID() string { return uuid.New().String() }

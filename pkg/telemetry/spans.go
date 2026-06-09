@@ -1,5 +1,16 @@
 package telemetry
 
+import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// Tracer returns a named tracer from the global provider set by
+// mcp-toolkit/tracing.Init during server startup.
+func Tracer(name string) trace.Tracer {
+	return otel.GetTracerProvider().Tracer(name)
+}
+
 // Span names used across the Klaus packages.
 const (
 	SpanA2ATaskReceived       = "a2a.task.received"

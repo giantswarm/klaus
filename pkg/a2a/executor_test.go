@@ -15,7 +15,6 @@ import (
 	"github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/memory"
-	"github.com/giantswarm/klaus/pkg/session"
 )
 
 // fakePrompter is a minimal claude.Prompter for testing.
@@ -126,8 +125,7 @@ func makeExecCtx(contextID string, text string) *a2asrv.ExecutorContext {
 
 func TestExecutor_SlashCommandIntercept(t *testing.T) {
 	prompter := &fakePrompter{result: "done"}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	execCtx := makeExecCtx("ctx-1", "/clear please clear the context")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -149,8 +147,7 @@ func TestExecutor_SlashCommandIntercept(t *testing.T) {
 
 func TestExecutor_EmptyText(t *testing.T) {
 	prompter := &fakePrompter{}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	execCtx := makeExecCtx("ctx-2", "")
 
@@ -168,8 +165,7 @@ func TestExecutor_EmptyText(t *testing.T) {
 
 func TestExecutor_BusyReturnsRejected(t *testing.T) {
 	prompter := &fakePrompter{runErr: claude.ErrBusy}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	execCtx := makeExecCtx("ctx-3", "hello")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -193,8 +189,7 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 			Result:    "The answer is 42.",
 		},
 	}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	execCtx := makeExecCtx("ctx-4", "What is the answer?")
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), execCtx))
@@ -210,17 +205,6 @@ func TestExecutor_SuccessfulTurn(t *testing.T) {
 	assert.Equal(t, a2asdk.TaskStateCompleted, statusEv.Status.State)
 	assert.True(t, statusEv.Status.State.Terminal())
 
-	// Conversation turns are recorded asynchronously; give them time to land.
-	require.Eventually(t, func() bool {
-		turns, histErr := store.History(t.Context(), "ctx-4")
-		return histErr == nil && len(turns) >= 2
-	}, 2*time.Second, 5*time.Millisecond)
-
-	turns, err := store.History(t.Context(), "ctx-4")
-	require.NoError(t, err)
-	require.Len(t, turns, 2)
-	assert.Equal(t, "user", turns[0].Role)
-	assert.Equal(t, "assistant", turns[1].Role)
 }
 
 func TestExecutor_ConcurrentContextRejected(t *testing.T) {
@@ -231,8 +215,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 		block:        blocked,
 	}
 
-	store := session.NewMemoryStore()
-	exec := a2a.New(blocker, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(blocker, a2a.ModeChat, memory.NoOp{})
 
 	// First request: holds the lock. Signal when the first event arrives.
 	ctx1, cancel1 := context.WithCancel(t.Context())
@@ -282,8 +265,7 @@ func TestExecutor_ConcurrentContextRejected(t *testing.T) {
 
 func TestExecutor_Cancel(t *testing.T) {
 	prompter := &fakePrompter{}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	execCtx := makeExecCtx("ctx-cancel", "")
 	events, err := collectEvents(t.Context(), exec.Cancel(t.Context(), execCtx))
@@ -326,8 +308,7 @@ func TestExecutor_SubprocessError(t *testing.T) {
 			ErrorMessage: "subprocess exited with code 1",
 		},
 	}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-err", "hello")))
 	require.NoError(t, err)
@@ -350,8 +331,7 @@ func TestExecutor_CollectResultTextFallback(t *testing.T) {
 		messages:  []claude.StreamMessage{resultMsg},
 		statusVal: claude.StatusInfo{Status: claude.ProcessStatusIdle},
 	}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeChat, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeChat, memory.NoOp{})
 
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-fallback", "hello")))
 	require.NoError(t, err)
@@ -380,8 +360,7 @@ func TestExecutor_ResumeAlwaysDerivedFromContextID(t *testing.T) {
 			Result:    "turn result",
 		},
 	}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeAgent, memory.NoOp{})
 
 	_, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-derived", "first")))
 	require.NoError(t, err)
@@ -410,8 +389,7 @@ func TestExecutor_AgentModeResume(t *testing.T) {
 			Result:    "turn result",
 		},
 	}
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeAgent, memory.NoOp{})
 
 	// First turn — no prior session.
 	events1, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-resume", "first")))
@@ -485,8 +463,7 @@ func TestExecutor_StaleResumeRetry(t *testing.T) {
 	inner := &fakePrompter{}
 	prompter := &staleResumePrompter{fakePrompter: inner}
 
-	store := session.NewMemoryStore()
-	exec := a2a.New(prompter, store, a2a.ModeAgent, nil, memory.NoOp{})
+	exec := a2a.New(prompter, a2a.ModeAgent, memory.NoOp{})
 
 	events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-stale", "hello after restart")))
 	require.NoError(t, err)

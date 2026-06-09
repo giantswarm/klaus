@@ -314,13 +314,6 @@ spec:
             {{- end }}
             {{- end }}
             # Session store
-            {{- if .Values.session.postgresSecretName }}
-            - name: KLAUS_PGSQL_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.session.postgresSecretName }}
-                  key: {{ .Values.session.postgresSecretKey }}
-            {{- end }}
             {{- if .Values.session.dir }}
             - name: KLAUS_SESSION_DIR
               value: {{ .Values.session.dir | quote }}
@@ -345,11 +338,6 @@ spec:
             {{- if .Values.a2a.allowedHosts }}
             - name: KLAUS_A2A_ALLOWED_HOSTS
               value: {{ .Values.a2a.allowedHosts | join "," | quote }}
-            {{- end }}
-            # kagent integration
-            {{- if .Values.kagent.endpoint }}
-            - name: KAGENT_API_ENDPOINT
-              value: {{ .Values.kagent.endpoint | quote }}
             {{- end }}
             # Memory augmentation
             {{- if .Values.memory.kagentEndpoint }}

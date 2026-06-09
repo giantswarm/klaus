@@ -13,16 +13,13 @@ import (
 	"github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/memory"
-	"github.com/giantswarm/klaus/pkg/session"
 )
 
 // newTestExecutor returns a minimal *a2a.Executor for route tests.
 func newTestExecutor() *a2a.Executor {
 	return a2a.New(
 		&mockPrompter{status: claude.StatusInfo{Status: claude.ProcessStatusIdle}},
-		session.NewMemoryStore(),
 		a2a.ModeChat,
-		nil,
 		memory.NoOp{},
 	)
 }

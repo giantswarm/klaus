@@ -22,11 +22,9 @@ import (
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
-	"github.com/giantswarm/klaus/pkg/kagentapi"
 	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
-	"github.com/giantswarm/klaus/pkg/session"
 )
 
 const (
@@ -332,20 +330,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
 	}
 
-	// Build the session store. Uses Postgres when KLAUS_PGSQL_DSN is set,
-	// otherwise falls back to a local file store under ~/.klaus/sessions.
-	sessionStore, err := session.NewStore(context.Background())
-	if err != nil {
-		return fmt.Errorf("initialising session store: %w", err)
-	}
-	if closer, ok := sessionStore.(interface{ Close() error }); ok {
-		defer func() {
-			if cerr := closer.Close(); cerr != nil {
-				slog.Warn("session store close error", "error", cerr)
-			}
-		}()
-	}
-	slog.Info("session store ready", "type", fmt.Sprintf("%T", sessionStore))
 
 	// In chat mode, propagate CLAUDE_SESSION_ID as the startup resume session
 	// so the persistent subprocess continues an existing conversation after a pod restart.
@@ -386,17 +370,6 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		mode = server.ModeChat
 	}
 
-	// Build kagent client. Gated behind KLAUS_KAGENT_PUSH_ENABLED (default
-	// false) because the push migrates to the gateway; the client is a
-	// testing-branch bridge that must not run on main.
-	var kagentClient *kagentapi.Client
-	if cfg.Server.KagentPushEnabled {
-		kagentClient = kagentapi.New(os.Getenv("KAGENT_API_ENDPOINT"))
-		if kagentClient.Enabled() {
-			slog.Info("kagent session-events push enabled", "endpoint", os.Getenv("KAGENT_API_ENDPOINT"))
-		}
-	}
-
 	// Build memory client. No-op when KAGENT_MEMORY_ENDPOINT or
 	// KLAUS_EMBEDDING_MODEL is unset.
 	memClient := memory.New()
@@ -423,7 +396,7 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.Mode != server.ModeChat {
 		a2aMode = a2apkg.ModeAgent
 	}
-	executor := a2apkg.New(process, sessionStore, a2aMode, kagentClient, memClient)
+	executor := a2apkg.New(process, a2aMode, memClient)
 
 	srvCfg := server.Config{
 		Port:         listenPort,

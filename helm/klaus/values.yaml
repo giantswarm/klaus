@@ -297,11 +297,6 @@ claudeHome:
 # Session store configuration.
 # Maps A2A context IDs to Claude session IDs and stores conversation turn history.
 session:
-  # postgresSecretName references a Kubernetes Secret containing the Postgres DSN
-  # under postgresSecretKey. When set, Postgres is used; otherwise the local
-  # file store under KLAUS_SESSION_DIR (or ~/.klaus/sessions) is used.
-  postgresSecretName: ""
-  postgresSecretKey: "uri"
   # dir overrides the directory used by the local backend.
   # Defaults to $HOME/.claude/projects when empty.
   dir: ""
@@ -331,12 +326,6 @@ a2a:
   #     - agent2.example.com:8080
   allowedHosts: []
 
-# kagent integration.
-# When endpoint is set, completed A2A turns are pushed to the kagent
-# session-events API so that conversations appear in the kagent UI.
-kagent:
-  # endpoint is the kagent controller base URL (e.g. http://kagent.kagent.svc).
-  endpoint: ""
 
 # Memory augmentation.
 # Before each A2A turn, relevant chunks from previous sessions are retrieved

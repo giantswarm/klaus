@@ -35,7 +35,14 @@
         "permissionMode": {
           "type": "string",
           "description": "Permission mode for tool usage",
-          "enum": ["default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "delegate"]
+          "enum": [
+            "default",
+            "acceptEdits",
+            "bypassPermissions",
+            "dontAsk",
+            "plan",
+            "delegate"
+          ]
         },
         "systemPrompt": {
           "type": "string",
@@ -75,7 +82,10 @@
                 }
               }
             },
-            "required": ["secretName", "env"]
+            "required": [
+              "secretName",
+              "env"
+            ]
           }
         },
         "mcpTimeout": {
@@ -97,7 +107,12 @@
         "effort": {
           "type": "string",
           "description": "Effort level for responses",
-          "enum": ["", "low", "medium", "high"]
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high"
+          ]
         },
         "fallbackModel": {
           "type": "string",
@@ -189,7 +204,9 @@
                 "type": "string"
               }
             },
-            "required": ["content"]
+            "required": [
+              "content"
+            ]
           }
         },
         "agentFiles": {
@@ -202,7 +219,9 @@
                 "type": "string"
               }
             },
-            "required": ["content"]
+            "required": [
+              "content"
+            ]
           }
         },
         "hooks": {
@@ -224,7 +243,9 @@
                     "properties": {
                       "type": {
                         "type": "string",
-                        "enum": ["command"]
+                        "enum": [
+                          "command"
+                        ]
                       },
                       "command": {
                         "type": "string",
@@ -235,11 +256,16 @@
                         "description": "Timeout in milliseconds for the hook command"
                       }
                     },
-                    "required": ["type", "command"]
+                    "required": [
+                      "type",
+                      "command"
+                    ]
                   }
                 }
               },
-              "required": ["hooks"]
+              "required": [
+                "hooks"
+              ]
             }
           }
         },
@@ -269,7 +295,9 @@
                 "description": "Image digest (mutually exclusive with tag)"
               }
             },
-            "required": ["repository"]
+            "required": [
+              "repository"
+            ]
           }
         },
         "agents": {
@@ -307,7 +335,14 @@
               "permissionMode": {
                 "type": "string",
                 "description": "Permission mode override for the subagent",
-                "enum": ["default", "acceptEdits", "dontAsk", "delegate", "bypassPermissions", "plan"]
+                "enum": [
+                  "default",
+                  "acceptEdits",
+                  "dontAsk",
+                  "delegate",
+                  "bypassPermissions",
+                  "plan"
+                ]
               },
               "maxTurns": {
                 "type": "integer",
@@ -331,10 +366,17 @@
               "memory": {
                 "type": "string",
                 "description": "Persistent memory scope: user, project, or local",
-                "enum": ["user", "project", "local"]
+                "enum": [
+                  "user",
+                  "project",
+                  "local"
+                ]
               }
             },
-            "required": ["description", "prompt"]
+            "required": [
+              "description",
+              "prompt"
+            ]
           }
         },
         "activeAgent": {
@@ -348,7 +390,10 @@
         "mode": {
           "type": "string",
           "description": "Operating mode: agent (single-shot, no session persistence) or chat (persistent subprocess, sessions saved to disk). Default: agent.",
-          "enum": ["agent", "chat"],
+          "enum": [
+            "agent",
+            "chat"
+          ],
           "default": "agent"
         },
         "retryMaxAttempts": {
@@ -392,49 +437,78 @@
     "claudeHome": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "storageClass": { "type": "string" },
-        "size": { "type": "string" },
-        "existingClaim": { "type": "string" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "storageClass": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "existingClaim": {
+          "type": "string"
+        }
       }
     },
     "session": {
       "type": "object",
       "properties": {
-        "postgresSecretName": { "type": "string" },
-        "postgresSecretKey": { "type": "string" },
-        "dir": { "type": "string" },
-        "contextID": { "type": "string" },
-        "sessionID": { "type": "string" }
+        "dir": {
+          "type": "string"
+        },
+        "contextID": {
+          "type": "string"
+        },
+        "sessionID": {
+          "type": "string"
+        }
       }
     },
     "a2a": {
       "type": "object",
       "properties": {
-        "targets": { "type": "object" },
-        "allowDynamic": { "type": "boolean" },
-        "allowedHosts": { "type": "array", "items": { "type": "string" } }
-      }
-    },
-    "kagent": {
-      "type": "object",
-      "properties": {
-        "endpoint": { "type": "string" }
+        "targets": {
+          "type": "object"
+        },
+        "allowDynamic": {
+          "type": "boolean"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "memory": {
       "type": "object",
       "properties": {
-        "kagentEndpoint": { "type": "string" },
-        "agentName": { "type": "string" },
-        "userID": { "type": "string" },
+        "kagentEndpoint": {
+          "type": "string"
+        },
+        "agentName": {
+          "type": "string"
+        },
+        "userID": {
+          "type": "string"
+        },
         "embedding": {
           "type": "object",
           "properties": {
-            "endpoint": { "type": "string" },
-            "model": { "type": "string" },
-            "secretName": { "type": "string" },
-            "secretKey": { "type": "string" }
+            "endpoint": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "secretName": {
+              "type": "string"
+            },
+            "secretKey": {
+              "type": "string"
+            }
           }
         }
       }
@@ -450,12 +524,19 @@
         "metricsExporter": {
           "type": "string",
           "description": "Metrics exporter for Claude Code telemetry",
-          "enum": ["otlp", "prometheus", "console"]
+          "enum": [
+            "otlp",
+            "prometheus",
+            "console"
+          ]
         },
         "logsExporter": {
           "type": "string",
           "description": "Logs/events exporter for Claude Code telemetry",
-          "enum": ["otlp", "console"]
+          "enum": [
+            "otlp",
+            "console"
+          ]
         },
         "otlp": {
           "type": "object",
@@ -464,7 +545,10 @@
             "protocol": {
               "type": "string",
               "description": "OTLP transport protocol",
-              "enum": ["grpc", "http/protobuf"]
+              "enum": [
+                "grpc",
+                "http/protobuf"
+              ]
             },
             "endpoint": {
               "type": "string",
