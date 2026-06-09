@@ -94,7 +94,7 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 			reply := fmt.Sprintf(
 				"`%s` is not available in this environment — Claude Code is running headless. "+
 					"Model and configuration are controlled via environment variables (CLAUDE_MODEL, etc.).", cmd)
-			if !yield(artifactEvent(execCtx, reply, ""), nil) {
+			if !yield(artifactEvent(execCtx, reply, "", nil), nil) {
 				return
 			}
 			yield(completedEvent(execCtx), nil)
@@ -179,7 +179,8 @@ func (e *Executor) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext)
 		}
 
 		if result != "" {
-			if !yield(artifactEvent(execCtx, result, streamSessionID), nil) {
+			usage := claude.CollectTokenUsage(messages)
+			if !yield(artifactEvent(execCtx, result, streamSessionID, usage), nil) {
 				return
 			}
 		}

@@ -463,6 +463,59 @@ func (p *staleResumePrompter) Status() claude.StatusInfo {
 	return claude.StatusInfo{Status: claude.ProcessStatusIdle}
 }
 
+// TestExecutor_ArtifactTokenUsage verifies that token_usage is attached to the
+// final artifact when the prompter emits assistant messages with usage data, and
+// absent for synthetic responses (slash commands) where no usage is present.
+func TestExecutor_ArtifactTokenUsage(t *testing.T) {
+	t.Run("token_usage present when prompter emits usage", func(t *testing.T) {
+		fp := &fakePrompter{
+			messages: []claude.StreamMessage{
+				{Type: claude.MessageTypeSystem, SessionID: "sess-1"},
+				{
+					Type:    claude.MessageTypeAssistant,
+					Subtype: claude.SubtypeText,
+					Text:    "answer",
+					Usage:   &claude.TokenUsage{InputTokens: 100, OutputTokens: 50},
+				},
+				{Type: claude.MessageTypeResult, Result: "answer"},
+			},
+		}
+		exec := a2a.New(fp, a2a.ModeAgent)
+		events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-usage", "what is 2+2?")))
+		require.NoError(t, err)
+
+		var artifact *a2asdk.TaskArtifactUpdateEvent
+		for _, ev := range events {
+			if a, ok := ev.(*a2asdk.TaskArtifactUpdateEvent); ok {
+				artifact = a
+			}
+		}
+		require.NotNil(t, artifact, "expected an artifact event")
+		require.NotNil(t, artifact.Artifact.Metadata, "artifact must carry metadata")
+
+		usage, ok := artifact.Artifact.Metadata["token_usage"].(map[string]any)
+		require.True(t, ok, "token_usage must be a map[string]any")
+		assert.EqualValues(t, int64(100), usage["input_tokens"])
+		assert.EqualValues(t, int64(50), usage["output_tokens"])
+	})
+
+	t.Run("token_usage absent for slash-command response", func(t *testing.T) {
+		fp := &fakePrompter{}
+		exec := a2a.New(fp, a2a.ModeAgent)
+		events, err := collectEvents(t.Context(), exec.Execute(t.Context(), makeExecCtx("ctx-slash", "/clear")))
+		require.NoError(t, err)
+
+		for _, ev := range events {
+			if a, ok := ev.(*a2asdk.TaskArtifactUpdateEvent); ok {
+				if a.Artifact != nil && a.Artifact.Metadata != nil {
+					_, hasUsage := a.Artifact.Metadata["token_usage"]
+					assert.False(t, hasUsage, "slash-command artifact must not carry token_usage")
+				}
+			}
+		}
+	})
+}
+
 // TestExecutor_StaleResumeRetry verifies that when --resume fails (session file
 // gone after pod restart), the executor retries with a fresh --session-id and the
 // turn completes rather than failing. Stale resume is only triggered on the second+

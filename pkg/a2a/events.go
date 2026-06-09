@@ -11,6 +11,8 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+
+	"github.com/giantswarm/klaus/pkg/claude"
 )
 
 // workingEvent returns a TaskStateWorking status update with an optional
@@ -24,15 +26,27 @@ func workingEvent(execCtx *a2asrv.ExecutorContext, msg string) *a2a.TaskStatusUp
 }
 
 // artifactEvent returns a TaskArtifactUpdateEvent with LastChunk=true carrying
-// the full response text. sessionID is attached as metadata when non-empty.
-func artifactEvent(execCtx *a2asrv.ExecutorContext, text, sessionID string) *a2a.TaskArtifactUpdateEvent {
+// the full response text. sessionID and usage are attached as metadata when non-empty/nil.
+// usage is stored under the generic "token_usage" key so callers can translate it to
+// whatever downstream format they need without embedding that knowledge here.
+func artifactEvent(execCtx *a2asrv.ExecutorContext, text, sessionID string, usage *claude.TokenUsage) *a2a.TaskArtifactUpdateEvent {
 	ev := a2a.NewArtifactEvent(execCtx, a2a.NewTextPart(text))
 	ev.LastChunk = true
-	if sessionID != "" {
+	if sessionID != "" || usage != nil {
 		if ev.Artifact.Metadata == nil {
 			ev.Artifact.Metadata = map[string]any{}
 		}
-		ev.Artifact.Metadata["session_id"] = sessionID
+		if sessionID != "" {
+			ev.Artifact.Metadata["session_id"] = sessionID
+		}
+		if usage != nil {
+			ev.Artifact.Metadata["token_usage"] = map[string]any{
+				"input_tokens":               usage.InputTokens,
+				"output_tokens":              usage.OutputTokens,
+				"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+				"cache_read_input_tokens":    usage.CacheReadInputTokens,
+			}
+		}
 	}
 	return ev
 }
