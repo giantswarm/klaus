@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
@@ -23,12 +24,15 @@ func registerA2ARoutes(mux *http.ServeMux, executor *a2apkg.Executor, protectedM
 	}
 
 	card := a2apkg.AgentCard()
-	cardHandler := a2asrv.NewStaticAgentCardHandler(card)
+	cardHandler := a2asrv.NewAgentCardHandler(a2av0.NewStaticAgentCardProducer(card))
 	mux.Handle("/.well-known/agent.json", cardHandler)
 	mux.Handle("/.well-known/agent-card.json", cardHandler)
 
 	requestHandler := a2asrv.NewHandler(executor)
-	jsonRPCHandler := a2asrv.NewJSONRPCHandler(requestHandler)
+	// a2av0.NewJSONRPCHandler accepts the A2A v0.3 JSON-RPC method names
+	// ("message/send", "message/stream") that kagent-controller sends, and
+	// translates the v0.3 request body shape to the v1.0 types the executor expects.
+	jsonRPCHandler := a2av0.NewJSONRPCHandler(requestHandler)
 	protected := protectedMW(jsonRPCHandler)
 	mux.Handle("/a2a", protected)
 	mux.Handle("/a2a/", protected)

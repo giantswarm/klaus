@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 
 	"github.com/giantswarm/klaus/pkg/project"
 )
@@ -39,7 +40,8 @@ func AgentCard() *a2a.AgentCard {
 			{
 				URL:             url,
 				ProtocolBinding: a2a.TransportProtocolJSONRPC,
-				ProtocolVersion: a2a.Version,
+				// kagent-controller speaks the v0.3 JSON-RPC wire format.
+				ProtocolVersion: a2av0.Version,
 			},
 		},
 		DefaultInputModes:  []string{mimeTextPlain},
