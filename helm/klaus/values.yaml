@@ -19,8 +19,8 @@ toolchainImage: ""
 
 # Claude Code agent configuration.
 claude:
-  # model is the Claude model to use (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
-  # Empty string uses the Claude CLI default.
+  # model is the Claude model to use (e.g. "claude-fable-5", "fable", "sonnet", "opus").
+  # Empty string uses the klaus default ("fable", the latest Claude Fable model).
   model: ""
   # maxTurns limits the number of agentic turns per prompt.
   # 0 means no limit.

@@ -30,6 +30,11 @@ const (
 
 	// maxConfigFileSize is the maximum allowed size for a config file (1 MiB).
 	maxConfigFileSize = 1 << 20
+
+	// DefaultModel is the model used when neither the config file nor the
+	// CLAUDE_MODEL env var selects one. The "fable" alias tracks the latest
+	// Claude Fable model (requires Claude Code >= 2.1.170).
+	DefaultModel = "fable"
 )
 
 // Config is the top-level configuration for the klaus server.
@@ -64,7 +69,8 @@ type A2AConfig struct {
 // ClaudeConfig holds settings that are forwarded to the Claude Code CLI.
 // These map directly to claude CLI flags and are not consumed by klaus itself.
 type ClaudeConfig struct {
-	// Model selects the Claude model (e.g. "claude-sonnet-4-20250514", "sonnet", "opus").
+	// Model selects the Claude model (e.g. "claude-fable-5", "fable", "sonnet", "opus").
+	// Defaults to DefaultModel when left empty.
 	Model string `yaml:"model"`
 	// SystemPrompt overrides the default system prompt entirely.
 	SystemPrompt string `yaml:"systemPrompt"`
@@ -216,6 +222,11 @@ func Load(path string) (Config, error) {
 
 	// Apply environment variable overrides.
 	applyEnvOverrides(&cfg)
+
+	// Apply global defaults for settings left empty by both YAML and env.
+	if cfg.Claude.Model == "" {
+		cfg.Claude.Model = DefaultModel
+	}
 
 	return cfg, nil
 }
