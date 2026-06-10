@@ -27,8 +27,8 @@ When run without subcommands, it starts the server (equivalent to 'klaus serve')
 
 // SetBuildInfo propagates build-time metadata to the root command and pkg/project.
 func SetBuildInfo(version, commit, date string) {
-	rootCmd.Version = version
 	project.SetBuildInfo(version, commit, date)
+	rootCmd.Version = project.Version()
 }
 
 // Execute runs the root command and exits on error.

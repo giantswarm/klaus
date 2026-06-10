@@ -1,5 +1,12 @@
 package project
 
+// Populated at link time via `-X` ldflags. Two injection paths:
+//
+//   - goreleaser (release archives) sets main.version/commit/date, which are
+//     propagated here through cmd.SetBuildInfo.
+//   - architect-orb's go-build job (container images) sets gitSHA and
+//     buildTimestamp directly; version stays at its default because no tag
+//     is plumbed through.
 var (
 	buildTimestamp string
 	gitSHA         string
@@ -38,7 +45,14 @@ func SetBuildInfo(v, commit, date string) {
 	}
 }
 
-// Version returns the application version set at compile time.
+// Version returns the best human-readable build identifier available: the
+// release tag if one was injected, otherwise the commit SHA, otherwise "dev".
 func Version() string {
-	return version
+	if version != "dev" && version != "" {
+		return version
+	}
+	if gitSHA != "" {
+		return gitSHA
+	}
+	return "dev"
 }

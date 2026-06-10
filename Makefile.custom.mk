@@ -14,15 +14,25 @@ release-local: ## Create a release locally
 
 ##@ Docker
 
-.PHONY: docker-build docker-build-alpine docker-build-debian generate-dockerfile-debian
+.PHONY: docker-build docker-build-alpine docker-build-debian docker-binary generate-dockerfile-debian
 
 docker-build: docker-build-alpine docker-build-debian ## Build both Alpine and Debian Docker images
 
-docker-build-alpine: ## Build Alpine Docker image (default)
+# The Dockerfile copies a prebuilt klaus-<os>-<arch> binary (built by CI in
+# the architect/go-build job); build it locally before the image build.
+docker-binary:
+	@echo "Building klaus-linux-$$(go env GOARCH)..."
+	@CGO_ENABLED=0 GOOS=linux go build -trimpath \
+		-ldflags "-w -extldflags '-static' \
+		-X 'github.com/giantswarm/klaus/pkg/project.gitSHA=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown)' \
+		-X 'github.com/giantswarm/klaus/pkg/project.buildTimestamp=$$(date -u +%Y-%m-%dT%H:%M:%SZ)'" \
+		-o klaus-linux-$$(go env GOARCH) .
+
+docker-build-alpine: docker-binary ## Build Alpine Docker image (default)
 	@echo "Building Alpine image..."
 	@docker build -t klaus:alpine .
 
-docker-build-debian: ## Build Debian Docker image
+docker-build-debian: docker-binary ## Build Debian Docker image
 	@echo "Building Debian image..."
 	@docker build -f Dockerfile.debian -t klaus:debian .
 
@@ -35,7 +45,7 @@ generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (onl
 .PHONY: lint-yaml
 lint-yaml: ## Run YAML linter
 	@echo "Running YAML linter..."
-	@yamllint .github/workflows/auto-release.yaml .github/workflows/ci.yaml .goreleaser.yaml .goreleaser.ci.yaml
+	@yamllint .github/workflows/ci.yaml .goreleaser.yaml .goreleaser.ci.yaml
 
 .PHONY: check
 check: lint-yaml test-vet ## Run YAML linter and Go tests
