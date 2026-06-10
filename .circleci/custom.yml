@@ -1,0 +1,279 @@
+# Repo-specific CircleCI jobs. The dynamic-config setup workflow in
+# .circleci/config.yml deep-merges this file into the generated
+# .circleci/workflows.yml at pipeline runtime (yq `*+`: maps merge, job lists
+# append). devctl never touches this file.
+#
+# Generated job names referenced in `requires` below: go-build,
+# push-to-registries-release, execute-chart-tests.
+#
+# What this file carries beyond the golden pipeline:
+#   - 3 extra image variants (klaus-debian, klaus-toolchains/base,
+#     klaus-toolchains/base-debian) on branches, main (:latest) and tags
+#   - :latest tagging on main for all 4 variants
+#   - Aliyun mirrors (sync-china-registry) for the 3 extra variants
+#   - notify-downstream repository_dispatch to the toolchain repos on release
+#   - branch dev-chart push (the golden pipeline only builds + tests on branches)
+version: 2.1
+
+jobs:
+  notify-downstream:
+    docker:
+    - image: cimg/base:2026.06
+    steps:
+    - run:
+        name: Notify downstream repos of new release
+        command: |
+          VERSION="${CIRCLE_TAG}"
+          if [ -z "$VERSION" ]; then
+            echo "CIRCLE_TAG is empty -- aborting" >&2
+            exit 1
+          fi
+          if [ -z "$DOWNSTREAM_DISPATCH_TOKEN" ]; then
+            echo "DOWNSTREAM_DISPATCH_TOKEN not set -- aborting" >&2
+            exit 1
+          fi
+
+          PAYLOAD=$(jq -cn --arg v "$VERSION" \
+            '{"event_type":"klaus-release","client_payload":{"version":$v}}')
+
+          DOWNSTREAM_REPOS=(
+            "giantswarm/klaus-toolchains"
+            "giantswarm/klaus-toolchains-internal"
+          )
+          FAILED=0
+          for repo in "${DOWNSTREAM_REPOS[@]}"; do
+            echo "Dispatching to $repo ($VERSION)"
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${DOWNSTREAM_DISPATCH_TOKEN}" \
+              "https://api.github.com/repos/${repo}/dispatches" \
+              -d "$PAYLOAD") || true
+            if [ -z "$HTTP_CODE" ]; then
+              echo "  -> curl failed for $repo (network error)" >&2
+              FAILED=1
+            elif [ "$HTTP_CODE" = "204" ]; then
+              echo "  -> Notified $repo"
+            else
+              echo "  -> Failed to notify $repo (HTTP $HTTP_CODE)" >&2
+              FAILED=1
+            fi
+          done
+          exit $FAILED
+
+workflows:
+  build:
+    jobs:
+    # ---- Branch builds: amd64 dev images for PR validation ----
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries
+        platforms: "linux/amd64"
+        resource_class: medium
+        requires:
+        - go-build
+        filters:
+          branches:
+            ignore:
+            - main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-debian
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        platforms: "linux/amd64"
+        resource_class: medium
+        requires:
+        - go-build
+        filters:
+          branches:
+            ignore:
+            - main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains
+        image: giantswarm/klaus-toolchains/base
+        platforms: "linux/amd64"
+        resource_class: medium
+        requires:
+        - go-build
+        filters:
+          branches:
+            ignore:
+            - main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains-debian
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platforms: "linux/amd64"
+        resource_class: medium
+        requires:
+        - go-build
+        filters:
+          branches:
+            ignore:
+            - main
+
+    # ---- Main branch: tag all image variants as :latest ----
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-latest
+        tag-latest-branch: main
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-debian-latest
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        tag-latest-branch: main
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains-latest
+        image: giantswarm/klaus-toolchains/base
+        tag-latest-branch: main
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains-debian-latest
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        tag-latest-branch: main
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+
+    # ---- Tag builds: the 3 extra image variants (the klaus image itself is
+    #      pushed by the generated push-to-registries-release job) ----
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-debian-release
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains-release
+        image: giantswarm/klaus-toolchains/base
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-toolchains-debian-release
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # ---- Aliyun mirrors for the 3 extra variants (the klaus image is
+    #      mirrored by the generated sync-china-registry job) ----
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-klaus-debian
+        image: giantswarm/klaus-debian
+        requires:
+        - push-to-registries-debian-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-toolchains-base
+        image: giantswarm/klaus-toolchains/base
+        requires:
+        - push-to-toolchains-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/sync-china-registry:
+        context: architect
+        name: sync-china-registry-toolchains-base-debian
+        image: giantswarm/klaus-toolchains/base-debian
+        requires:
+        - push-to-toolchains-debian-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # ---- Tag builds: notify downstream after all images are pushed ----
+    - notify-downstream:
+        context: architect
+        requires:
+        - push-to-registries-release
+        - push-to-registries-debian-release
+        - push-to-toolchains-release
+        - push-to-toolchains-debian-release
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # ---- Branch: push dev chart after tests + the amd64 dev images ----
+    - architect/push-to-app-catalog:
+        executor: app-build-suite
+        context: architect
+        name: push-klaus-to-giantswarm-app-catalog
+        app_catalog: giantswarm-catalog
+        app_catalog_test: giantswarm-test-catalog
+        chart: klaus
+        requires:
+        - execute-chart-tests
+        - push-to-registries
+        - push-to-registries-debian
+        - push-to-toolchains
+        - push-to-toolchains-debian
+        filters:
+          branches:
+            ignore:
+            - main
