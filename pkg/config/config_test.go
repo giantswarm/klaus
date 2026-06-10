@@ -150,6 +150,17 @@ func TestLoad_FileNotFound_EnvOnly(t *testing.T) {
 	assertEqual(t, "server.ownerSubject", "admin@example.com", cfg.Server.OwnerSubject)
 }
 
+func TestLoad_DefaultModel(t *testing.T) {
+	t.Setenv("CLAUDE_MODEL", "")
+
+	cfg, err := Load("/nonexistent/config.yaml")
+	if err != nil {
+		t.Fatalf("Load with missing file: %v", err)
+	}
+
+	assertEqual(t, "claude.model", DefaultModel, cfg.Claude.Model)
+}
+
 func TestLoad_EnvOverridesYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
