@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -192,6 +194,28 @@ func TestHeaders_UserSubFallbackFromJWT(t *testing.T) {
 
 	require.Equal(t, "alice@example.com", gotHeaders.Get("X-User-Id"))
 	require.Equal(t, "Bearer "+jwtToken, gotHeaders.Get("Authorization"))
+}
+
+func TestSATokenPath_FromEnv(t *testing.T) {
+	// Write a token to a temp file and point KAGENT_SA_TOKEN_PATH at it.
+	// New() must read from that path instead of the default SA token path.
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("projected-kagent-token"), 0600))
+
+	t.Setenv("KAGENT_SA_TOKEN_PATH", tokenFile)
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// No BearerToken supplied — must fall back to the SA token file.
+	kagentapi.New(srv.URL, "").PushEvent(t.Context(), "ctx", kagentapi.NewSessionEvent("id", "user", "x"), kagentapi.AuthInfo{})
+
+	require.Equal(t, "Bearer projected-kagent-token", gotAuth)
 }
 
 func TestPushEvent_ContentType(t *testing.T) {

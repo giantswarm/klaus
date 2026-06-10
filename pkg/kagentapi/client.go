@@ -41,12 +41,21 @@ type Client struct {
 
 // New returns a Client. When endpoint is empty the client is disabled and all
 // methods are no-ops.
+//
+// If the environment variable KAGENT_SA_TOKEN_PATH is set, its value overrides
+// the default SA token path. Set it to the mount point of a projected
+// ServiceAccountToken volume (audience: kagent) to avoid relying on the
+// default automounted token.
 func New(endpoint, agentRef string) *Client {
+	tokenPath := defaultSATokenPath
+	if override := os.Getenv("KAGENT_SA_TOKEN_PATH"); override != "" {
+		tokenPath = override
+	}
 	return &Client{
 		endpoint:    endpoint,
 		agentRef:    agentRef,
 		httpClient:  &http.Client{Timeout: httpTimeout},
-		saTokenPath: defaultSATokenPath,
+		saTokenPath: tokenPath,
 	}
 }
 

@@ -344,6 +344,8 @@ spec:
             {{- if .Values.kagent.apiEndpoint }}
             - name: KAGENT_API_ENDPOINT
               value: {{ .Values.kagent.apiEndpoint | quote }}
+            - name: KAGENT_SA_TOKEN_PATH
+              value: /var/run/secrets/kagent/token
             {{- end }}
             {{- if .Values.kagent.agentRef }}
             - name: KAGENT_AGENT_REF
@@ -422,7 +424,12 @@ spec:
             - name: claude-home
               mountPath: /home/node/.claude
             - name: npm-cache
-              mountPath: /home/node/.npm
+              mountPath: /home/klaus/.npm
+            {{- if .Values.kagent.apiEndpoint }}
+            - name: kagent-sa-token
+              mountPath: /var/run/secrets/kagent
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -493,6 +500,15 @@ spec:
           {{- end }}
         - name: npm-cache
           emptyDir: {}
+        {{- if .Values.kagent.apiEndpoint }}
+        - name: kagent-sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: kagent
+                  expirationSeconds: 3600
+                  path: token
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
