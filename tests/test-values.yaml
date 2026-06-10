@@ -3,3 +3,7 @@
 claude:
   permissionMode: "bypassPermissions"
   mode: agent
+
+# Disable persistent storage for ATS: the test cluster has no persistent StorageClass.
+claudeHome:
+  enabled: false

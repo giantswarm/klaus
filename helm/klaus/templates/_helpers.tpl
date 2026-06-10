@@ -139,6 +139,18 @@ Returns non-empty string when true.
 {{- end -}}
 
 {{/*
+Validate replicaCount: > 1 is not supported while session state is pod-local.
+The Service load-balances across pods, so follow-up requests may reach a different
+replica that does not hold the session JSONL, causing --resume to cold-start.
+Call once from deployment.yaml; emits nothing on success, fails on error.
+*/}}
+{{- define "klaus.validateReplicaCount" -}}
+{{- if gt (int .Values.replicaCount) 1 -}}
+{{- fail "replicaCount > 1 is not supported: the Service routes across pods but --resume requires the session JSONL to be on the pod that receives each request. Set replicaCount: 1. Per-pod volumeClaimTemplates will remove this constraint when the operator lands." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate workspace git settings.
 Call once from deployment.yaml; emits nothing on success, fails on error.
 */}}
