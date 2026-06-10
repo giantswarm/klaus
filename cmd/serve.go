@@ -22,6 +22,8 @@ import (
 	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
+	"github.com/giantswarm/klaus/pkg/kagentapi"
+	"github.com/giantswarm/klaus/pkg/memory"
 	"github.com/giantswarm/klaus/pkg/project"
 	"github.com/giantswarm/klaus/pkg/server"
 )
@@ -387,7 +389,8 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.Mode != server.ModeChat {
 		a2aMode = a2apkg.ModeAgent
 	}
-	executor := a2apkg.New(process, a2aMode)
+	memStore := memory.New(cfg.Kagent.APIEndpoint, cfg.Kagent.AgentRef)
+	executor := a2apkg.New(process, a2aMode, kagentapi.New(cfg.Kagent.APIEndpoint, cfg.Kagent.AgentRef), memStore, cfg.Memory.TopK)
 
 	srvCfg := server.Config{
 		Port:         listenPort,

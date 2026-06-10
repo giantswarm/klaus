@@ -340,6 +340,39 @@ spec:
             - name: KLAUS_A2A_ALLOWED_HOSTS
               value: {{ .Values.a2a.allowedHosts | join "," | quote }}
             {{- end }}
+            # kagent history push
+            {{- if .Values.kagent.apiEndpoint }}
+            - name: KAGENT_API_ENDPOINT
+              value: {{ .Values.kagent.apiEndpoint | quote }}
+            - name: KAGENT_SA_TOKEN_PATH
+              value: /var/run/secrets/kagent/token
+            {{- end }}
+            {{- if .Values.kagent.agentRef }}
+            - name: KAGENT_AGENT_REF
+              value: {{ .Values.kagent.agentRef | quote }}
+            {{- end }}
+            # cross-session memory
+            {{- if .Values.memory.enabled }}
+            - name: MEMORY_ENABLED
+              value: "true"
+            - name: MEMORY_TOP_K
+              value: {{ .Values.memory.topK | quote }}
+            {{- if .Values.memory.embedding.endpoint }}
+            - name: KLAUS_EMBEDDING_ENDPOINT
+              value: {{ .Values.memory.embedding.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.model }}
+            - name: KLAUS_EMBEDDING_MODEL
+              value: {{ .Values.memory.embedding.model | quote }}
+            {{- end }}
+            {{- if .Values.memory.embedding.apiKeySecretRef.name }}
+            - name: KLAUS_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.memory.embedding.apiKeySecretRef.name | quote }}
+                  key: {{ .Values.memory.embedding.apiKeySecretRef.key | quote }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
             - name: config
@@ -391,7 +424,12 @@ spec:
             - name: claude-home
               mountPath: /home/node/.claude
             - name: npm-cache
-              mountPath: /home/node/.npm
+              mountPath: /home/klaus/.npm
+            {{- if .Values.kagent.apiEndpoint }}
+            - name: kagent-sa-token
+              mountPath: /var/run/secrets/kagent
+              readOnly: true
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -462,6 +500,15 @@ spec:
           {{- end }}
         - name: npm-cache
           emptyDir: {}
+        {{- if .Values.kagent.apiEndpoint }}
+        - name: kagent-sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: kagent
+                  expirationSeconds: 3600
+                  path: token
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

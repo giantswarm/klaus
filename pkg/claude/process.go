@@ -37,6 +37,9 @@ type RunOptions struct {
 	MaxBudgetUSD float64
 	// Effort overrides Options.Effort for this run.
 	Effort string
+	// AppendSystemPrompt is appended to Options.AppendSystemPrompt for this run.
+	// In persistent (chat) mode this field is ignored and logged as a warning.
+	AppendSystemPrompt string
 }
 
 // ignoredFields returns the names of fields that have non-zero values.
@@ -68,6 +71,9 @@ func (ro *RunOptions) ignoredFields() []string {
 	}
 	if ro.Effort != "" {
 		fields = append(fields, "effort")
+	}
+	if ro.AppendSystemPrompt != "" {
+		fields = append(fields, "append_system_prompt")
 	}
 	return fields
 }
@@ -161,6 +167,12 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.Effort != "" {
 		opts.Effort = ro.Effort
+	}
+	if ro.AppendSystemPrompt != "" {
+		if opts.AppendSystemPrompt != "" {
+			opts.AppendSystemPrompt += "\n\n"
+		}
+		opts.AppendSystemPrompt += ro.AppendSystemPrompt
 	}
 	return opts
 }

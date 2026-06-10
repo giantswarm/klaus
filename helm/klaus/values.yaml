@@ -328,6 +328,40 @@ a2a:
   #     - agent2.example.com:8080
   allowedHosts: []
 
+# kagent-controller history and usage push.
+# When apiEndpoint is empty, all push operations are disabled.
+kagent:
+  # apiEndpoint is the base URL of the kagent-controller REST API.
+  # Example: http://kagent-controller.kagent.svc.cluster.local:8083
+  apiEndpoint: ""
+  # agentRef is sent as the X-Agent-Name header on push requests.
+  agentRef: ""
+
+# Per-user cross-session memory via the kagent pgvector API.
+# Uses kagent.apiEndpoint and kagent.agentRef as the backend.
+# Requires an OpenAI-compatible embedding endpoint (KLAUS_EMBEDDING_*).
+memory:
+  # enabled turns on cross-session memory retrieval and recording.
+  # Env: MEMORY_ENABLED
+  enabled: false
+  # topK is the maximum number of memory chunks to inject per turn.
+  # Env: MEMORY_TOP_K
+  topK: 5
+  embedding:
+    # endpoint is the OpenAI-compatible embedding base URL.
+    # Env: KLAUS_EMBEDDING_ENDPOINT (default: https://api.openai.com/v1)
+    endpoint: ""
+    # model is the embedding model name (e.g. text-embedding-3-small).
+    # Env: KLAUS_EMBEDDING_MODEL
+    model: ""
+    # apiKey for the embedding endpoint; omit for unauthenticated vLLM endpoints.
+    # Env: KLAUS_EMBEDDING_API_KEY
+    apiKeySecretRef: {}
+    # Example:
+    #   apiKeySecretRef:
+    #     name: my-embedding-api-key
+    #     key: api-key
+
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its
