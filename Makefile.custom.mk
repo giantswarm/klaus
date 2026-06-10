@@ -45,7 +45,7 @@ generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (onl
 .PHONY: lint-yaml
 lint-yaml: ## Run YAML linter
 	@echo "Running YAML linter..."
-	@yamllint .github/workflows/auto-release.yaml .github/workflows/ci.yaml .goreleaser.yaml .goreleaser.ci.yaml
+	@yamllint .github/workflows/ci.yaml .goreleaser.yaml .goreleaser.ci.yaml
 
 .PHONY: check
 check: lint-yaml test-vet ## Run YAML linter and Go tests
