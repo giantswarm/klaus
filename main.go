@@ -4,11 +4,13 @@ import (
 	"github.com/giantswarm/klaus/cmd"
 )
 
-// Build-time variables set via ldflags (goreleaser & Dockerfile).
+// Build-time variables set via ldflags by goreleaser. Container builds inject
+// build metadata directly into pkg/project via architect-orb's go-build job,
+// so the defaults here stay empty to avoid clobbering those values.
 var (
-	version = "dev"
-	commit  = "unknown"
-	date    = "unknown"
+	version string
+	commit  string
+	date    string
 )
 
 func main() {

@@ -26,7 +26,7 @@
       "properties": {
         "model": {
           "type": "string",
-          "description": "Claude model to use (e.g. claude-sonnet-4-20250514, sonnet, opus)"
+          "description": "Claude model to use (e.g. claude-fable-5, fable, sonnet, opus); empty uses the klaus default (fable)"
         },
         "maxTurns": {
           "type": "integer",

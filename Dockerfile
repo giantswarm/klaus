@@ -3,34 +3,15 @@
 # Declared before the first FROM so it is available to all FROM instructions.
 ARG VARIANT=alpine
 
-# Stage 1: Build the Go binary (runs on the build host, cross-compiles for target).
-FROM --platform=$BUILDPLATFORM golang:1.26.4 AS builder
+# The Go binary is built by CircleCI (architect/go-build) and attached to the
+# build context as klaus-<os>-<arch>; this image only assembles the runtime.
+# For a local build, produce the binary first (or use `make docker-build`):
+#   CGO_ENABLED=0 go build -o klaus-linux-amd64 .
 
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-ARG VERSION=
-ARG COMMIT=
-ARG DATE=
-ARG TARGETOS
-ARG TARGETARCH
-RUN VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")} && \
-    COMMIT=${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")} && \
-    DATE=${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)} && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
-    -ldflags "-w -extldflags '-static' \
-    -X 'main.version=${VERSION}' \
-    -X 'main.commit=${COMMIT}' \
-    -X 'main.date=${DATE}'" \
-    -o klaus .
-
-# Stage 2: Go toolchain for the target platform.
-# Keep the version in sync with the builder stage above.
+# Go toolchain stage -- lets Claude Code compile and run Go programs inside the container.
 FROM golang:1.26.4-alpine AS go-toolchain
 
-# Stage 3: Minimal runtime with Node.js, Claude CLI, and Go toolchain.
+# Minimal runtime with Node.js, Claude CLI, and Go toolchain.
 FROM node:24-${VARIANT}
 ARG VARIANT
 
@@ -45,7 +26,7 @@ RUN if [ "$VARIANT" = "alpine" ]; then \
 
 # Install Claude Code CLI globally.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-ARG CLAUDE_CODE_VER=2.1.169
+ARG CLAUDE_CODE_VER=2.1.173
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VER} && \
     npm cache clean --force
 
@@ -61,8 +42,10 @@ RUN if [ "$VARIANT" = "alpine" ]; then \
 # Create workspace directory.
 RUN mkdir -p /workspace && chown klaus:klaus /workspace
 
-# Copy the Go binary from the builder stage.
-COPY --from=builder /app/klaus /usr/local/bin/klaus
+# Copy the prebuilt Go binary for the target platform.
+ARG TARGETOS
+ARG TARGETARCH
+COPY klaus-${TARGETOS}-${TARGETARCH} /usr/local/bin/klaus
 
 # Copy the Go toolchain so Claude Code can compile and run Go programs.
 COPY --from=go-toolchain /usr/local/go /usr/local/go
