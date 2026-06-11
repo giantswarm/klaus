@@ -297,14 +297,8 @@ claudeHome:
 # Session store configuration.
 # Maps A2A context IDs to Claude session IDs and stores conversation turn history.
 session:
-  # dir overrides the directory used by the local backend.
-  # Defaults to $HOME/.claude/projects when empty.
-  dir: ""
-  # contextID and sessionID pre-seed the session store at startup.
-  # Set these when the pod should resume a specific conversation without
-  # requiring a first-turn round-trip. In chat mode, sessionID is also passed
-  # as --resume to the Claude subprocess.
-  contextID: ""
+  # sessionID pre-seeds the session in chat mode: passed as --resume to the
+  # Claude subprocess so the pod resumes a specific conversation on startup.
   sessionID: ""
 
 # Outbound A2A calls via the a2a_call MCP tool.
@@ -325,6 +319,10 @@ a2a:
   #     - agent1.agents.svc
   #     - agent2.example.com:8080
   allowedHosts: []
+  # agentURL is the URL advertised in this agent's A2A card.
+  # Defaults to http://<service>.<namespace>:8080/a2a (in-cluster).
+  # Override when the agent is reachable via an ingress or external hostname.
+  agentURL: ""
 
 
 # OpenTelemetry monitoring configuration.
@@ -390,9 +388,9 @@ resources:
 
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1001
-  runAsGroup: 1001
-  fsGroup: 1001
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
   seccompProfile:
     type: RuntimeDefault
 

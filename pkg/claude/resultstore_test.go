@@ -345,9 +345,10 @@ func TestStopReasonFromStatus(t *testing.T) {
 		{ProcessStatusStopped, "", StopReasonStopped},
 		{ProcessStatusError, "", StopReasonError},
 		{ProcessStatusBusy, "", StopReasonCompleted},
-		// Budget exhaustion detected from error text.
-		{ProcessStatusError, "exceeded budget limit", StopReasonBudget},
-		{ProcessStatusError, "Budget exceeded: $5.00 limit reached", StopReasonBudget},
+		// Error text containing "budget" no longer implies StopReasonBudget;
+		// callers pass the structured reason via hintStopReason instead.
+		{ProcessStatusError, "exceeded budget limit", StopReasonError},
+		{ProcessStatusError, "Budget exceeded: $5.00 limit reached", StopReasonError},
 	}
 
 	for _, tt := range tests {

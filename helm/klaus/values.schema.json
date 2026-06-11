@@ -454,12 +454,6 @@
     "session": {
       "type": "object",
       "properties": {
-        "dir": {
-          "type": "string"
-        },
-        "contextID": {
-          "type": "string"
-        },
         "sessionID": {
           "type": "string"
         }
@@ -479,10 +473,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "agentURL": {
+          "type": "string"
         }
       }
     },
-    "memory": {"type": "object"},
     "telemetry": {
       "type": "object",
       "description": "OpenTelemetry monitoring and Prometheus metrics configuration",

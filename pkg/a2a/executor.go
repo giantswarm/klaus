@@ -252,18 +252,22 @@ func (e *Executor) drainStream(
 }
 
 // Cancel implements a2asrv.AgentExecutor.
+// In agent mode the single-shot subprocess is stopped so it does not orphan.
+// In chat mode the shared PersistentProcess is left running — stopping it
+// would kill every other context's conversation.
 func (e *Executor) Cancel(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2asdk.Event, error] {
 	return func(yield func(a2asdk.Event, error) bool) {
-		if err := e.prompter.Stop(); err != nil {
-			log.Printf("[a2a] Cancel: Stop() error for contextID %q: %v", execCtx.ContextID, err)
-		}
-
-		done := e.prompter.Done()
-		select {
-		case <-done:
-		case <-time.After(30 * time.Second):
-			log.Printf("[a2a] Cancel: subprocess did not stop within 30s for contextID %q", execCtx.ContextID)
-		case <-ctx.Done():
+		if e.mode == ModeAgent {
+			if err := e.prompter.Stop(); err != nil {
+				log.Printf("[a2a] Cancel: Stop() error for contextID %q: %v", execCtx.ContextID, err)
+			}
+			done := e.prompter.Done()
+			select {
+			case <-done:
+			case <-time.After(30 * time.Second):
+				log.Printf("[a2a] Cancel: subprocess did not stop within 30s for contextID %q", execCtx.ContextID)
+			case <-ctx.Done():
+			}
 		}
 
 		yield(canceledEvent(execCtx), nil)

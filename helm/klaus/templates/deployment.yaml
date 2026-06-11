@@ -314,14 +314,6 @@ spec:
             {{- end }}
             {{- end }}
             # Session store
-            {{- if .Values.session.dir }}
-            - name: KLAUS_SESSION_DIR
-              value: {{ .Values.session.dir | quote }}
-            {{- end }}
-            {{- if .Values.session.contextID }}
-            - name: CLAUDE_CONTEXT_ID
-              value: {{ .Values.session.contextID | quote }}
-            {{- end }}
             {{- if .Values.session.sessionID }}
             - name: CLAUDE_SESSION_ID
               value: {{ .Values.session.sessionID | quote }}
@@ -329,7 +321,14 @@ spec:
             # Outbound A2A calls
             {{- if .Values.a2a.targets }}
             - name: KLAUS_A2A_TARGETS
-              value: {{ .Values.a2a.targets | toJson | quote }}
+              value: {{ $pairs := list }}{{ range $k, $v := .Values.a2a.targets }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}{{ join "," $pairs | quote }}
+            {{- end }}
+            {{- if .Values.a2a.agentURL }}
+            - name: KLAUS_AGENT_URL
+              value: {{ .Values.a2a.agentURL | quote }}
+            {{- else }}
+            - name: KLAUS_AGENT_URL
+              value: {{ printf "http://%s.%s:8080/a2a" (include "klaus.fullname" .) .Release.Namespace | quote }}
             {{- end }}
             {{- if .Values.a2a.allowDynamic }}
             - name: KLAUS_A2A_ALLOW_DYNAMIC

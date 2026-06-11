@@ -104,6 +104,8 @@ type Process struct {
 	// Nil means no persistence.
 	resultStore *ResultStore
 
+	lastStopReason StopReason // set from structured stop_reason on result messages
+
 	done      chan struct{}
 	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
@@ -390,6 +392,11 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
 			if msg.Type == MessageTypeResult {
 				metrics.RecordCost(costToRecord)
+				if isBudgetError(msg) {
+					p.mu.Lock()
+					p.lastStopReason = StopReasonBudget
+					p.mu.Unlock()
+				}
 			}
 
 			// Use select to prevent blocking if the consumer stops reading
@@ -508,7 +515,7 @@ func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) e
 		if tu != (TokenUsage{}) {
 			tuPtr = &tu
 		}
-		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, "")
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, p.lastStopReason)
 	})
 }
 

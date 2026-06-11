@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -235,14 +234,11 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 	}
 }
 
-// stopReasonFromStatus maps a process status and last error to a stop reason.
-// Budget exhaustion is detected by checking the error text for "budget" when
-// the CLI emits is_error=true with a budget-exceeded result.
-func stopReasonFromStatus(status ProcessStatus, lastError string) StopReason {
-	if status == ProcessStatusError &&
-		strings.Contains(strings.ToLower(lastError), "budget") {
-		return StopReasonBudget
-	}
+// stopReasonFromStatus maps a process status to a stop reason.
+// Budget exhaustion is detected via the structured stop_reason field
+// on result messages and passed in as hintStopReason by callers; this
+// function handles only the coarse status-level distinction.
+func stopReasonFromStatus(status ProcessStatus, _ string) StopReason {
 	switch status {
 	case ProcessStatusCompleted, ProcessStatusIdle:
 		return StopReasonCompleted
