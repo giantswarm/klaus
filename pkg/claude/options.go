@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // AgentConfig defines a custom subagent for Claude Code.
@@ -121,6 +122,21 @@ type Options struct {
 	// Subagents found via AddDirs have lower priority than those in Agents (--agents).
 	// See https://code.claude.com/docs/en/sub-agents#choose-the-subagent-scope
 	AddDirs []string
+
+	// RetryMaxAttempts is the maximum number of times the persistent subprocess
+	// watchdog will restart with --resume on unexpected exit. 0 selects the
+	// default of 3.
+	RetryMaxAttempts int
+	// RetryBaseBackoff is the initial backoff duration before the first restart
+	// attempt. Each subsequent attempt doubles the duration.
+	// Defaults to 2s.
+	RetryBaseBackoff time.Duration
+
+	// ResumeSessionID, when set, passes --resume <id> at PersistentProcess
+	// startup. Use this to continue a named session after a pod restart without
+	// requiring a first-turn warm-up. Only applied via PersistentArgs; the
+	// single-shot Process uses RunOptions.Resume instead.
+	ResumeSessionID string
 }
 
 // Permission modes recognised by the Claude Code CLI.
@@ -364,6 +380,9 @@ func (o Options) args() []string {
 // It shares the base arguments with single-shot mode but adds --input-format stream-json
 // and --replay-user-messages, and omits session management flags since the persistent
 // subprocess maintains a single long-running session.
+//
+// When ResumeSessionID is set, --resume <id> is appended so the subprocess
+// continues an existing session from startup (e.g. after a pod restart).
 func (o Options) PersistentArgs() []string {
 	args := []string{
 		"--print",
@@ -374,5 +393,39 @@ func (o Options) PersistentArgs() []string {
 		"--include-partial-messages",
 	}
 	args = append(args, o.baseArgs()...)
+	if o.ResumeSessionID != "" {
+		args = append(args, "--resume", o.ResumeSessionID)
+	}
 	return args
 }
+
+// persistentRestartArgs returns the CLI argument list for restarting a persistent
+// subprocess after an unexpected exit. It strips ResumeSessionID (the pod-startup
+// resume) and appends --resume <sessionID> (the live session) so that exactly one
+// --resume flag is present. Callers must only invoke this when sessionID is
+// non-empty; a cold start must use PersistentArgs instead.
+func (o Options) persistentRestartArgs(sessionID string) []string {
+	o2 := o
+	o2.ResumeSessionID = ""
+	args := o2.PersistentArgs()
+	return append(args, "--resume", sessionID)
+}
+
+// retryConfig returns the effective retry settings, applying defaults when the
+// Options fields are zero.
+func (o Options) retryConfig() (maxAttempts int, baseBackoff time.Duration) {
+	maxAttempts = o.RetryMaxAttempts
+	if maxAttempts == 0 {
+		maxAttempts = defaultRetryMaxAttempts
+	}
+	baseBackoff = o.RetryBaseBackoff
+	if baseBackoff == 0 {
+		baseBackoff = defaultRetryBaseBackoff
+	}
+	return maxAttempts, baseBackoff
+}
+
+const (
+	defaultRetryMaxAttempts = 3
+	defaultRetryBaseBackoff = 2 * time.Second
+)

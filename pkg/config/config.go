@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -46,6 +47,23 @@ type Config struct {
 
 	// OAuth holds OAuth 2.1 authentication settings.
 	OAuth OAuthFileConfig `yaml:"oauth"`
+
+	// A2A holds settings for outbound A2A calls via the a2a_call MCP tool.
+	A2A A2AConfig `yaml:"a2a"`
+}
+
+// A2AConfig holds outbound A2A call settings.
+type A2AConfig struct {
+	// Targets maps logical names to A2A base URLs.
+	// Env: KLAUS_A2A_TARGETS as name=url,name2=url2,...
+	Targets map[string]string `yaml:"targets"`
+	// AllowDynamic enables URL-based calls to agents not listed in Targets.
+	// Requires AllowedHosts to be non-empty (fail-closed).
+	// Env: KLAUS_A2A_ALLOW_DYNAMIC
+	AllowDynamic bool `yaml:"allowDynamic"`
+	// AllowedHosts lists host[:port] values permitted for dynamic URL calls.
+	// Env: KLAUS_A2A_ALLOWED_HOSTS as comma-separated host[:port] values.
+	AllowedHosts []string `yaml:"allowedHosts"`
 }
 
 // ClaudeConfig holds settings that are forwarded to the Claude Code CLI.
@@ -100,6 +118,13 @@ type ClaudeConfig struct {
 	// agent: single-shot Process subprocess with --no-session-persistence.
 	// chat: PersistentProcess subprocess with sessions saved to disk.
 	Mode string `yaml:"mode"`
+
+	// RetryMaxAttempts is the maximum subprocess restart attempts by the watchdog.
+	// 0 means use the default (3).
+	RetryMaxAttempts int `yaml:"retryMaxAttempts"`
+	// RetryBaseBackoff is the initial backoff before the first restart (e.g. "2s").
+	// Each subsequent attempt doubles the duration. Empty means use the default (2s).
+	RetryBaseBackoff string `yaml:"retryBaseBackoff"`
 }
 
 // ServerConfig holds settings consumed by the klaus server process itself
@@ -233,10 +258,17 @@ func applyEnvOverrides(cfg *Config) {
 	envOverrideString(&cfg.Claude.Agents, "CLAUDE_AGENTS")
 	envOverrideString(&cfg.Claude.ActiveAgent, "CLAUDE_ACTIVE_AGENT")
 	envOverrideString(&cfg.Claude.Mode, "CLAUDE_MODE")
+	envOverrideInt(&cfg.Claude.RetryMaxAttempts, "KLAUS_RETRY_MAX_ATTEMPTS")
+	envOverrideString(&cfg.Claude.RetryBaseBackoff, "KLAUS_RETRY_BASE_BACKOFF")
 
 	// Server settings.
 	envOverrideString(&cfg.Server.Port, "PORT")
 	envOverrideString(&cfg.Server.OwnerSubject, "KLAUS_OWNER_SUBJECT")
+
+	// Outbound A2A settings.
+	envOverrideA2ATargets(&cfg.A2A.Targets, "KLAUS_A2A_TARGETS")
+	envOverrideBool(&cfg.A2A.AllowDynamic, "KLAUS_A2A_ALLOW_DYNAMIC")
+	envOverrideCSV(&cfg.A2A.AllowedHosts, "KLAUS_A2A_ALLOWED_HOSTS")
 
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")
@@ -277,6 +309,9 @@ func (c *Config) Validate() error {
 	if c.Claude.MaxBudgetUSD < 0 {
 		errs = append(errs, fmt.Errorf("claude.maxBudgetUSD must be >= 0, got %f", c.Claude.MaxBudgetUSD))
 	}
+	if c.Claude.RetryMaxAttempts < 0 {
+		errs = append(errs, fmt.Errorf("claude.retryMaxAttempts must be >= 0, got %d", c.Claude.RetryMaxAttempts))
+	}
 
 	// Validate encryption key format if set.
 	if c.OAuth.Security.EncryptionKey != "" {
@@ -286,6 +321,11 @@ func (c *Config) Validate() error {
 		} else if len(decoded) != 32 {
 			errs = append(errs, fmt.Errorf("oauth.security.encryptionKey must decode to exactly 32 bytes, got %d", len(decoded)))
 		}
+	}
+
+	// Validate outbound A2A config.
+	if err := c.A2A.validate(); err != nil {
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)
@@ -365,8 +405,50 @@ func envOverrideFloat64(target *float64, key string) {
 
 func envOverrideCSV(target *[]string, key string) {
 	if v := os.Getenv(key); v != "" {
-		*target = strings.Split(v, ",")
+		parts := strings.Split(v, ",")
+		trimmed := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if s := strings.TrimSpace(p); s != "" {
+				trimmed = append(trimmed, s)
+			}
+		}
+		*target = trimmed
 	}
+}
+
+// validate checks internal consistency of the A2AConfig.
+func (a *A2AConfig) validate() error {
+	if a.AllowDynamic && len(a.AllowedHosts) == 0 {
+		return fmt.Errorf("a2a.allowDynamic requires a2a.allowedHosts to be non-empty (fail-closed)")
+	}
+	for name, rawURL := range a.Targets {
+		if _, err := url.ParseRequestURI(rawURL); err != nil {
+			return fmt.Errorf("a2a.targets[%q]: invalid URL %q: %w", name, rawURL, err)
+		}
+	}
+	return nil
+}
+
+// envOverrideA2ATargets parses "name=url,name2=url2,..." from the env var key
+// into a map. Each pair is split on the first '=' only; entries without '=' are
+// silently skipped with a warning. When the env var is set (even if all pairs
+// are malformed), the parsed map replaces any file-configured targets so the
+// env var acts as a full override.
+func envOverrideA2ATargets(target *map[string]string, key string) {
+	v := os.Getenv(key)
+	if v == "" {
+		return
+	}
+	m := make(map[string]string)
+	for _, pair := range strings.Split(v, ",") {
+		idx := strings.IndexByte(pair, '=')
+		if idx < 1 {
+			slog.Warn("skipping malformed entry in env var: expected name=url", "key", key, "value", pair)
+			continue
+		}
+		m[pair[:idx]] = pair[idx+1:]
+	}
+	*target = m
 }
 
 // parseBool returns true for "true", "1", "yes" (case-insensitive).

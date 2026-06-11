@@ -221,6 +221,14 @@ claude:
   #       sessions saved to disk (interactive multi-turn chat).
   mode: agent
 
+  # -- Subprocess watchdog retry --
+  # retryMaxAttempts is the maximum number of subprocess restarts by the watchdog.
+  # 0 means use the default (3).
+  retryMaxAttempts: 0
+  # retryBaseBackoff is the initial backoff before the first restart (e.g. "2s").
+  # Each subsequent attempt doubles the duration. Empty means use the default (2s).
+  retryBaseBackoff: ""
+
 # Owner-based access control.
 # When set, only the user whose JWT sub or email claim matches this value
 # can access the /mcp endpoint. Other authenticated users receive HTTP 403.
@@ -275,6 +283,47 @@ workspace:
   #       cpu: 500m
   #       memory: 512Mi
   gitResources: {}
+
+# claudeHome configures persistent storage for the Claude Code session state
+# (~/.claude). Required for durable --resume across pod restarts.
+# When disabled, an emptyDir is used and session history is wiped on pod restart.
+claudeHome:
+  enabled: false
+  storageClass: ""
+  size: 2Gi
+  # existingClaim mounts a pre-existing PVC instead of creating one.
+  existingClaim: ""
+
+# Session store configuration.
+# Maps A2A context IDs to Claude session IDs and stores conversation turn history.
+session:
+  # sessionID pre-seeds the session in chat mode: passed as --resume to the
+  # Claude subprocess so the pod resumes a specific conversation on startup.
+  sessionID: ""
+
+# Outbound A2A calls via the a2a_call MCP tool.
+# Configure static targets or allow dynamic URL calls to listed hosts.
+a2a:
+  # targets maps logical names to A2A base URLs.
+  # Example:
+  #   targets:
+  #     summarizer: http://summarizer-agent.agents.svc
+  #     researcher: https://researcher.example.com
+  targets: {}
+  # allowDynamic enables calls to arbitrary URLs (must pair with allowedHosts).
+  allowDynamic: false
+  # allowedHosts lists host[:port] values permitted for dynamic calls.
+  # Required when allowDynamic is true (fail-closed when empty).
+  # Example:
+  #   allowedHosts:
+  #     - agent1.agents.svc
+  #     - agent2.example.com:8080
+  allowedHosts: []
+  # agentURL is the URL advertised in this agent's A2A card.
+  # Defaults to http://<service>.<namespace>:8080/a2a (in-cluster).
+  # Override when the agent is reachable via an ingress or external hostname.
+  agentURL: ""
+
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its

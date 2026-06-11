@@ -336,20 +336,25 @@ func Test_resultStoreDir(t *testing.T) {
 
 func TestStopReasonFromStatus(t *testing.T) {
 	tests := []struct {
-		status   ProcessStatus
-		expected StopReason
+		status    ProcessStatus
+		lastError string
+		expected  StopReason
 	}{
-		{ProcessStatusCompleted, StopReasonCompleted},
-		{ProcessStatusIdle, StopReasonCompleted},
-		{ProcessStatusStopped, StopReasonStopped},
-		{ProcessStatusError, StopReasonError},
-		{ProcessStatusBusy, StopReasonCompleted},
+		{ProcessStatusCompleted, "", StopReasonCompleted},
+		{ProcessStatusIdle, "", StopReasonCompleted},
+		{ProcessStatusStopped, "", StopReasonStopped},
+		{ProcessStatusError, "", StopReasonError},
+		{ProcessStatusBusy, "", StopReasonCompleted},
+		// Error text containing "budget" no longer implies StopReasonBudget;
+		// callers pass the structured reason via hintStopReason instead.
+		{ProcessStatusError, "exceeded budget limit", StopReasonError},
+		{ProcessStatusError, "Budget exceeded: $5.00 limit reached", StopReasonError},
 	}
 
 	for _, tt := range tests {
-		got := stopReasonFromStatus(tt.status)
+		got := stopReasonFromStatus(tt.status, tt.lastError)
 		if got != tt.expected {
-			t.Errorf("stopReasonFromStatus(%q) = %q, want %q", tt.status, got, tt.expected)
+			t.Errorf("stopReasonFromStatus(%q, %q) = %q, want %q", tt.status, tt.lastError, got, tt.expected)
 		}
 	}
 }
@@ -382,7 +387,7 @@ func TestCollectToolCalls_Empty(t *testing.T) {
 func TestPersistResult_NilStore(t *testing.T) {
 	// Should not panic with nil store.
 	rs := resultState{text: "result", completed: true}
-	persistResult(nil, rs, ProcessStatusCompleted, "sess", Float64Ptr(0.1), "", nil)
+	persistResult(nil, rs, ProcessStatusCompleted, "sess", Float64Ptr(0.1), "", nil, "")
 }
 
 func TestPersistResult_IncompleteResult(t *testing.T) {
@@ -391,7 +396,7 @@ func TestPersistResult_IncompleteResult(t *testing.T) {
 
 	// Incomplete result should not be persisted.
 	rs := resultState{text: "partial", completed: false}
-	persistResult(store, rs, ProcessStatusBusy, "sess", nil, "", nil)
+	persistResult(store, rs, ProcessStatusBusy, "sess", nil, "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -411,7 +416,7 @@ func TestPersistResult_CompletedResult(t *testing.T) {
 		messages:  []StreamMessage{{Type: MessageTypeResult, Result: "final result"}},
 		completed: true,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", Float64Ptr(0.50), "", nil)
+	persistResult(store, rs, ProcessStatusCompleted, "sess-abc", Float64Ptr(0.50), "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -559,7 +564,7 @@ func TestPersistResult_WithTokenUsage(t *testing.T) {
 		CacheCreationInputTokens: 5000,
 		CacheReadInputTokens:     3000,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess-tu", Float64Ptr(0.42), "", tu)
+	persistResult(store, rs, ProcessStatusCompleted, "sess-tu", Float64Ptr(0.42), "", tu, "")
 
 	loaded, err := store.Load()
 	if err != nil {
@@ -593,7 +598,7 @@ func TestPersistResult_NilCost(t *testing.T) {
 		text:      "result without cost",
 		completed: true,
 	}
-	persistResult(store, rs, ProcessStatusCompleted, "sess", nil, "", nil)
+	persistResult(store, rs, ProcessStatusCompleted, "sess", nil, "", nil, "")
 
 	loaded, err := store.Load()
 	if err != nil {

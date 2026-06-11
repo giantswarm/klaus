@@ -80,10 +80,11 @@ type StreamMessage struct {
 	Usage *TokenUsage `json:"usage,omitempty"`
 
 	// Fields present on "result" messages.
-	Result   string  `json:"result,omitempty"`
-	Duration float64 `json:"duration_ms,omitempty"`
-	Cost     float64 `json:"cost_usd,omitempty"`
-	IsError  bool    `json:"is_error,omitempty"`
+	Result     string  `json:"result,omitempty"`
+	Duration   float64 `json:"duration_ms,omitempty"`
+	Cost       float64 `json:"cost_usd,omitempty"`
+	IsError    bool    `json:"is_error,omitempty"`
+	StopReason string  `json:"stop_reason,omitempty"`
 
 	// TotalCost tracks the running total cost of the session.
 	TotalCost float64 `json:"total_cost_usd,omitempty"`
@@ -234,6 +235,10 @@ type StatusInfo struct {
 	// acknowledgement; callers should track whether they have already
 	// processed a given result.
 	Result string `json:"result,omitempty"`
+	// RetryCount is the number of times the persistent subprocess has been
+	// restarted with --resume since the last successful turn completion.
+	// Non-zero only while a restart is in progress.
+	RetryCount int `json:"retry_count,omitempty"`
 }
 
 // ResultDetailInfo contains the full untruncated result and detailed metadata
@@ -735,6 +740,26 @@ func Truncate(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// CollectTokenUsage sums token counts across all assistant messages in the stream.
+// Returns nil when no usage is present (e.g. synthetic slash-command responses).
+func CollectTokenUsage(messages []StreamMessage) *TokenUsage {
+	var total TokenUsage
+	found := false
+	for _, msg := range messages {
+		if msg.Usage != nil {
+			total.InputTokens += msg.Usage.InputTokens
+			total.OutputTokens += msg.Usage.OutputTokens
+			total.CacheCreationInputTokens += msg.Usage.CacheCreationInputTokens
+			total.CacheReadInputTokens += msg.Usage.CacheReadInputTokens
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return &total
 }
 
 // CollectResultText extracts the result text from a completed set of stream messages.
