@@ -73,6 +73,13 @@ type chatCompletionUse struct {
 // when a completion terminates normally.
 const finishReasonStop = "stop"
 
+// finishReasonError is emitted when the agent run terminated in an error
+// state (e.g. the underlying claude subprocess exited non-zero, or a result
+// message reported is_error). Without this, a failed run is indistinguishable
+// from a successful one on the wire and callers report success for a run that
+// produced nothing — see the memory-keeper silent-failure incident.
+const finishReasonError = "error"
+
 // handleChatCompletions returns an http.HandlerFunc that accepts an
 // OpenAI-compatible chat completion request and streams the response as SSE
 // (or returns a complete response for non-streaming requests).
@@ -155,6 +162,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 	sentRole := false
 	var usage *chatCompletionUse
 	toolIndex := 0
+	resultErrored := false
 
 	for {
 		select {
@@ -165,7 +173,7 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 			return
 		case msg, ok := <-ch:
 			if !ok {
-				writeDoneChunk(w, flusher, id, model, usage)
+				writeDoneChunk(w, flusher, id, model, runFinishReason(process, resultErrored), usage)
 				return
 			}
 
@@ -174,6 +182,9 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 				// Capture usage from result messages even though we don't emit a delta.
 				if msg.Type == claudepkg.MessageTypeResult {
 					usage = collectUsage(msg, usage)
+					if msg.IsError {
+						resultErrored = true
+					}
 				}
 				continue
 			}
@@ -203,15 +214,28 @@ func streamResponse(w http.ResponseWriter, r *http.Request, process claudepkg.Pr
 	}
 }
 
-// writeDoneChunk sends the final SSE chunk with finish_reason "stop" and the [DONE] sentinel.
-func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model string, usage *chatCompletionUse) {
-	stop := finishReasonStop
+// runFinishReason determines the terminal finish_reason for a completed run.
+// It reports "error" when a result message flagged is_error, or when the
+// process ended in the error state. By the time the message channel closes,
+// the process has already run cmd.Wait() and updated its status (the channel
+// is closed after the status transition in pkg/claude), so Status() is
+// authoritative here.
+func runFinishReason(process claudepkg.Prompter, resultErrored bool) string {
+	if resultErrored || process.Status().Status == claudepkg.ProcessStatusError {
+		return finishReasonError
+	}
+	return finishReasonStop
+}
+
+// writeDoneChunk sends the final SSE chunk carrying the terminal finish_reason
+// and the [DONE] sentinel.
+func writeDoneChunk(w http.ResponseWriter, flusher http.Flusher, id, model, finishReason string, usage *chatCompletionUse) {
 	final := chatCompletionResponse{
 		ID:      id,
 		Object:  chatCompletionChunkObject,
 		Created: time.Now().Unix(),
 		Model:   model,
-		Choices: []chatChoice{{Index: 0, Delta: &chatMessage{}, FinishReason: &stop}},
+		Choices: []chatChoice{{Index: 0, Delta: &chatMessage{}, FinishReason: &finishReason}},
 		Usage:   usage,
 	}
 	data, err := json.Marshal(final)
@@ -247,7 +271,13 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 
 	resultText := claudepkg.CollectResultText(msgs)
 
-	stop := finishReasonStop
+	finishReason := finishReasonStop
+	for _, m := range msgs {
+		if m.Type == claudepkg.MessageTypeResult && m.IsError {
+			finishReason = finishReasonError
+			break
+		}
+	}
 	resp := chatCompletionResponse{
 		ID:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
@@ -256,7 +286,7 @@ func collectResponse(w http.ResponseWriter, ch <-chan claudepkg.StreamMessage, m
 		Choices: []chatChoice{{
 			Index:        0,
 			Message:      &chatMessage{Role: roleAssistant, Content: resultText},
-			FinishReason: &stop,
+			FinishReason: &finishReason,
 		}},
 	}
 

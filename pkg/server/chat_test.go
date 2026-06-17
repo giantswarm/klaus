@@ -149,6 +149,41 @@ func TestHandleChatCompletions_Streaming(t *testing.T) {
 	}
 }
 
+func TestHandleChatCompletions_StreamingFinishReasonError(t *testing.T) {
+	// A run that ends in error (e.g. the model was unavailable and the
+	// subprocess exited non-zero) must terminate the stream with
+	// finish_reason "error" so blocking callers do not report success for a
+	// run that produced nothing. Regression guard for the memory-keeper
+	// silent-failure incident.
+	prompter := &chatTestPrompter{
+		status: claude.StatusInfo{Status: claude.ProcessStatusError},
+		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+			ch := make(chan claude.StreamMessage, 2)
+			ch <- claude.StreamMessage{Type: claude.MessageTypeResult, Result: "model unavailable", IsError: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+
+	body := `{"messages":[{"role":"user","content":"hi"}],"stream":true}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handleChatCompletions(prompter)(w, req)
+
+	chunks, gotDone := parseSSEChunks(t, w)
+	if !gotDone {
+		t.Error("expected [DONE] sentinel")
+	}
+	if len(chunks) == 0 {
+		t.Fatal("expected at least the final chunk")
+	}
+	last := chunks[len(chunks)-1]
+	if last.Choices[0].FinishReason == nil || *last.Choices[0].FinishReason != "error" {
+		t.Errorf("expected final finish_reason 'error', got %v", last.Choices[0].FinishReason)
+	}
+}
+
 func TestHandleChatCompletions_StreamingSkipsAssistantMessages(t *testing.T) {
 	// With --include-partial-messages, assistant messages are redundant
 	// (content already delivered via stream_event deltas) and must be skipped.
