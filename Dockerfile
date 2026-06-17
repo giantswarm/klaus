@@ -8,7 +8,10 @@ ARG VARIANT=alpine
 # For a local build, produce the binary first (or use `make docker-build`):
 #   CGO_ENABLED=0 go build -o klaus-linux-amd64 .
 
-# Minimal runtime with Node.js and Claude CLI.
+# Go toolchain stage -- lets Claude Code compile and run Go programs inside the container.
+FROM golang:1.26.4-alpine AS go-toolchain
+
+# Minimal runtime with Node.js, Claude CLI, and Go toolchain.
 FROM node:24-${VARIANT}
 ARG VARIANT
 
@@ -44,6 +47,9 @@ ARG TARGETOS
 ARG TARGETARCH
 COPY klaus-${TARGETOS}-${TARGETARCH} /usr/local/bin/klaus
 
+# Copy the Go toolchain so Claude Code can compile and run Go programs.
+COPY --from=go-toolchain /usr/local/go /usr/local/go
+
 LABEL io.giantswarm.klaus.type=toolchain \
       io.giantswarm.klaus.name=klaus
 USER klaus
@@ -51,6 +57,9 @@ WORKDIR /workspace
 
 ENV PORT=8080
 ENV SHELL=/bin/bash
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/workspace/go
+ENV PATH="/usr/local/go/bin:${PATH}"
 EXPOSE 8080
 
 ENTRYPOINT ["klaus"]
