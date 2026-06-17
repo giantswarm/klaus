@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Retry with resume**: Persistent subprocess retries on exit up to `KLAUS_RETRY_MAX_ATTEMPTS` times (default 3), resuming from the last successful Claude session ID.
 - **Semantic memory** (`KAGENT_MEMORY_ENDPOINT`): Per-user semantic memory backed by the kagent pgvector API. Relevant past turns prepended to each prompt; new turns embedded and stored after each response. Requires `KAGENT_MEMORY_ENDPOINT`, `KLAUS_EMBEDDING_ENDPOINT`, and `KLAUS_EMBEDDING_MODEL`.
 - **OpenTelemetry spans**: Spans for subprocess start/stop, turn completion, retry events, and MCP tool calls (`pkg/telemetry`). Attribute key prefix `claude.*` for subprocess/session attributes. Global OTel provider initialised by mcp-toolkit `tracing.Init`.
-- **Durable `claude-home` PVC** (`claudeHome.enabled`): A PersistentVolumeClaim for `/home/user/.claude` preserves Claude Code session files and authentication state across pod restarts.
+- **`claudeHome` PVC** (`claudeHome.enabled`, `claudeHome.storageClass`, `claudeHome.size`, `claudeHome.existingClaim`): Helm chart now provisions a RWO PersistentVolumeClaim for `$HOME/.claude` and mounts it in the Deployment. When enabled, Claude Code session JSONL files survive pod restarts and `--resume` continues the prior conversation. Default changed from emptyDir (ephemeral) to PVC (`enabled: true`); set `enabled: false` only for ephemeral or CI installs.
+- **`replicaCount > 1` guard**: Chart rendering fails when `replicaCount` exceeds 1. The Service load-balances across pods, but `--resume` requires each request to reach the pod holding the session JSONL.
 
 ### Changed
 

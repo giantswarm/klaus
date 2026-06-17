@@ -813,3 +813,53 @@ tests:
           content:
             name: CLAUDE_MODE
             value: "chat"
+
+  # -- claudeHome PVC tests --
+
+  - it: should use PVC for claude-home when claudeHome.enabled is true
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claudeHome:
+        enabled: true
+        size: 2Gi
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: claude-home
+            persistentVolumeClaim:
+              claimName: RELEASE-NAME-klaus-claude-home
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: claude-home
+            mountPath: /home/node/.claude
+
+  - it: should use existingClaim for claude-home when set
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claudeHome:
+        enabled: true
+        existingClaim: my-existing-pvc
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: claude-home
+            persistentVolumeClaim:
+              claimName: my-existing-pvc
+
+  - it: should use emptyDir for claude-home when claudeHome.enabled is false
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      claudeHome:
+        enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: claude-home
+            emptyDir: {}

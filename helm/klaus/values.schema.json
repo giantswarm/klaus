@@ -596,6 +596,34 @@
           }
         }
       }
+    },
+    "claudeHome": {
+      "type": "object",
+      "description": "Persistent storage for Claude Code session state (~/.claude). Required for durable --resume across pod restarts.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Mount a PVC at $HOME/.claude instead of an emptyDir. Set true for any retaining install."
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "StorageClass for the PVC. Empty uses the cluster default."
+        },
+        "size": {
+          "type": "string",
+          "description": "Storage request for the PVC (e.g. 2Gi)."
+        },
+        "existingClaim": {
+          "type": "string",
+          "description": "Mount a pre-existing PVC instead of creating one."
+        }
+      }
+    },
+    "replicaCount": {
+      "type": "integer",
+      "description": "Number of replicas. Must be 1: the Service load-balances but --resume requires each request to reach the pod holding the session JSONL.",
+      "minimum": 1,
+      "maximum": 1
     }
   }
 }

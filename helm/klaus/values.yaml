@@ -286,9 +286,11 @@ workspace:
 
 # claudeHome configures persistent storage for the Claude Code session state
 # (~/.claude). Required for durable --resume across pod restarts.
-# When disabled, an emptyDir is used and session history is wiped on pod restart.
+# Set enabled: true for any install that must retain sessions across restarts.
+# Keep false only for ephemeral or CI installs where history is intentionally discarded.
+# Note: replicaCount must be 1 (enforced by the chart) while session state is pod-local.
 claudeHome:
-  enabled: false
+  enabled: true
   storageClass: ""
   size: 2Gi
   # existingClaim mounts a pre-existing PVC instead of creating one.
