@@ -158,7 +158,11 @@ func TestLoad_DefaultModel(t *testing.T) {
 		t.Fatalf("Load with missing file: %v", err)
 	}
 
-	assertEqual(t, "claude.model", DefaultModel, cfg.Claude.Model)
+	// klaus must not pin a model: with nothing configured the model stays
+	// empty so no --model flag is passed and the Claude CLI's own default is
+	// used. Regression guard for the "fable" hardcode that silently broke
+	// every run once the Fable family was gated.
+	assertEqual(t, "claude.model", "", cfg.Claude.Model)
 }
 
 func TestLoad_EnvOverridesYAML(t *testing.T) {
