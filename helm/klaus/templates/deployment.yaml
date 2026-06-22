@@ -18,6 +18,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "klaus.serviceAccountName" . }}
+      automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- include "klaus.validateWorkspaceGit" . }}
@@ -256,6 +257,15 @@ spec:
             # Operating mode
             - name: CLAUDE_MODE
               value: {{ .Values.claude.mode | quote }}
+            # Subprocess watchdog retry
+            {{- if .Values.claude.retryMaxAttempts }}
+            - name: KLAUS_RETRY_MAX_ATTEMPTS
+              value: {{ .Values.claude.retryMaxAttempts | quote }}
+            {{- end }}
+            {{- if .Values.claude.retryBaseBackoff }}
+            - name: KLAUS_RETRY_BASE_BACKOFF
+              value: {{ .Values.claude.retryBaseBackoff | quote }}
+            {{- end }}
             # OpenTelemetry monitoring (Claude Code native telemetry)
             {{- if .Values.telemetry.enabled }}
             - name: CLAUDE_CODE_ENABLE_TELEMETRY
@@ -302,6 +312,31 @@ spec:
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: {{ .Values.telemetry.resourceAttributes | quote }}
             {{- end }}
+            {{- end }}
+            # Session store
+            {{- if .Values.session.sessionID }}
+            - name: CLAUDE_SESSION_ID
+              value: {{ .Values.session.sessionID | quote }}
+            {{- end }}
+            # Outbound A2A calls
+            {{- if .Values.a2a.targets }}
+            - name: KLAUS_A2A_TARGETS
+              value: {{ $pairs := list }}{{ range $k, $v := .Values.a2a.targets }}{{ $pairs = append $pairs (printf "%s=%s" $k $v) }}{{ end }}{{ join "," $pairs | quote }}
+            {{- end }}
+            {{- if .Values.a2a.agentURL }}
+            - name: KLAUS_AGENT_URL
+              value: {{ .Values.a2a.agentURL | quote }}
+            {{- else }}
+            - name: KLAUS_AGENT_URL
+              value: {{ printf "http://%s.%s:8080/a2a" (include "klaus.fullname" .) .Release.Namespace | quote }}
+            {{- end }}
+            {{- if .Values.a2a.allowDynamic }}
+            - name: KLAUS_A2A_ALLOW_DYNAMIC
+              value: "true"
+            {{- end }}
+            {{- if .Values.a2a.allowedHosts }}
+            - name: KLAUS_A2A_ALLOWED_HOSTS
+              value: {{ .Values.a2a.allowedHosts | join "," | quote }}
             {{- end }}
           volumeMounts:
             {{- if or .Values.claude.mcpConfig (include "klaus.hasMcpServers" .) }}
@@ -417,7 +452,12 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: claude-home
+          {{- if .Values.claudeHome.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ if .Values.claudeHome.existingClaim }}{{ .Values.claudeHome.existingClaim }}{{ else }}{{ include "klaus.fullname" . }}-claude-home{{ end }}
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: npm-cache
           emptyDir: {}
       {{- with .Values.nodeSelector }}

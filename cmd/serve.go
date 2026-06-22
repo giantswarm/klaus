@@ -19,6 +19,7 @@ import (
 	"github.com/giantswarm/mcp-toolkit/logging"
 	"github.com/giantswarm/mcp-toolkit/tracing"
 
+	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	"github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/config"
 	"github.com/giantswarm/klaus/pkg/project"
@@ -295,6 +296,16 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 	if cfg.Claude.ActiveAgent != "" {
 		opts.ActiveAgent = cfg.Claude.ActiveAgent
 	}
+	if cfg.Claude.RetryMaxAttempts > 0 {
+		opts.RetryMaxAttempts = cfg.Claude.RetryMaxAttempts
+	}
+	if cfg.Claude.RetryBaseBackoff != "" {
+		if d, parseErr := time.ParseDuration(cfg.Claude.RetryBaseBackoff); parseErr == nil {
+			opts.RetryBaseBackoff = d
+		} else {
+			slog.Warn("ignoring invalid KLAUS_RETRY_BASE_BACKOFF", "value", cfg.Claude.RetryBaseBackoff, "error", parseErr)
+		}
+	}
 	// Derive NoSessionPersistence from mode: agent -> true, chat -> false.
 	// DefaultOptions() already sets NoSessionPersistence=true (agent default),
 	// so only override for chat mode.
@@ -316,6 +327,14 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		slog.Info("loaded personality", "path", soulPath, "bytes", len(soul))
 	} else if os.Getenv("KLAUS_SOUL_FILE") != "" {
 		slog.Warn("KLAUS_SOUL_FILE set but file does not exist or is empty", "path", soulPath)
+	}
+
+	// In chat mode, propagate CLAUDE_SESSION_ID as the startup resume session
+	// so the persistent subprocess continues an existing conversation after a pod restart.
+	if cfg.Claude.Mode == server.ModeChat {
+		if seedSessionID := os.Getenv("CLAUDE_SESSION_ID"); seedSessionID != "" {
+			opts.ResumeSessionID = seedSessionID
+		}
 	}
 
 	// Create the Claude process manager.
@@ -349,10 +368,38 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		mode = server.ModeChat
 	}
 
+	// Build outbound A2A registry for the a2a_call MCP tool.
+	a2aRegistry := a2apkg.NewRegistry(a2apkg.RegistryConfig{
+		Targets:      cfg.A2A.Targets,
+		AllowDynamic: cfg.A2A.AllowDynamic,
+		AllowedHosts: cfg.A2A.AllowedHosts,
+	})
+	if a2aRegistry != nil {
+		names := make([]string, 0, len(a2aRegistry.Targets()))
+		for name := range a2aRegistry.Targets() {
+			names = append(names, name)
+		}
+		slog.Info("a2a_call enabled", "targets", names, "allow_dynamic", cfg.A2A.AllowDynamic)
+	}
+
+	// Build the A2A executor.
+	a2aMode := a2apkg.ModeChat
+	if cfg.Claude.Mode != server.ModeChat {
+		a2aMode = a2apkg.ModeAgent
+	}
+	executor := a2apkg.New(process, a2aMode)
+
 	srvCfg := server.Config{
 		Port:         listenPort,
 		Mode:         mode,
 		OwnerSubject: cfg.Server.OwnerSubject,
+		Executor:     executor,
+	}
+	// Assign the concrete *Registry only when non-nil: assigning a nil pointer
+	// to an interface field produces a typed-nil that bypasses the nil check in
+	// RegisterTools, causing a panic on the first a2a_call invocation.
+	if a2aRegistry != nil {
+		srvCfg.A2ACaller = a2aRegistry
 	}
 
 	if enableOAuth {
@@ -377,7 +424,7 @@ func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server
 		slog.Warn("OAuth encryption key not set - tokens will be stored unencrypted")
 	}
 
-	oauthSrv, err := server.NewOAuthServer(serverCtx, process, config, cfg.OwnerSubject)
+	oauthSrv, err := server.NewOAuthServer(serverCtx, process, cfg.Executor, cfg.A2ACaller, config, cfg.OwnerSubject)
 	if err != nil {
 		return fmt.Errorf("failed to create OAuth server: %w", err)
 	}

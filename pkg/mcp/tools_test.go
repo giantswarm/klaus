@@ -662,6 +662,59 @@ func TestPromptTool_BlockingRunError(t *testing.T) {
 	}
 }
 
+func TestPromptTool_NonBlockingErrBusy(t *testing.T) {
+	mock := &mockPrompter{runErr: claudepkg.ErrBusy}
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	result, err := handler(context.Background(), newCallToolRequest("prompt", map[string]any{
+		"message": "Hello",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error result for ErrBusy")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("expected non-empty content")
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != "agent is busy: another prompt is already running" {
+		t.Errorf("unexpected message: %q", text.Text)
+	}
+}
+
+func TestPromptTool_BlockingErrBusy(t *testing.T) {
+	mock := &mockPrompter{runErr: claudepkg.ErrBusy}
+	tools := buildToolMap(mock)
+	handler := tools["prompt"]
+
+	result, err := handler(context.Background(), newCallToolRequest("prompt", map[string]any{
+		"message":  "Hello",
+		"blocking": true,
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsError {
+		t.Error("expected error result for ErrBusy")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("expected non-empty content")
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != "agent is busy: another prompt is already running" {
+		t.Errorf("unexpected message: %q", text.Text)
+	}
+}
+
 // --- Status tool tests ---
 
 func TestStatusTool(t *testing.T) {

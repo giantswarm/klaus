@@ -577,3 +577,78 @@ func assertEqualSlice(t *testing.T, field string, want, got []string) {
 		}
 	}
 }
+
+func TestA2AConfig_validate_valid(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  A2AConfig
+	}{
+		{"empty", A2AConfig{}},
+		{"targets only", A2AConfig{Targets: map[string]string{"a": "http://a.svc"}}},
+		{"dynamic with hosts", A2AConfig{AllowDynamic: true, AllowedHosts: []string{"a.svc"}}},
+		{"targets and dynamic", A2AConfig{
+			Targets:      map[string]string{"a": "http://a.svc"},
+			AllowDynamic: true,
+			AllowedHosts: []string{"b.svc"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.cfg.validate(); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestA2AConfig_validate_invalid(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     A2AConfig
+		wantMsg string
+	}{
+		{
+			"dynamic without hosts",
+			A2AConfig{AllowDynamic: true},
+			"allowedHosts",
+		},
+		{
+			"bad URL",
+			A2AConfig{Targets: map[string]string{"a": "not-a-url"}},
+			"invalid URL",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.cfg.validate()
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Errorf("error %q does not contain %q", err, tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestEnvOverrideA2ATargets(t *testing.T) {
+	t.Setenv("KLAUS_A2A_TARGETS", "agent1=http://a1.svc,agent2=https://a2.example.com")
+	var m map[string]string
+	envOverrideA2ATargets(&m, "KLAUS_A2A_TARGETS")
+	if m["agent1"] != "http://a1.svc" {
+		t.Errorf("agent1: want http://a1.svc, got %q", m["agent1"])
+	}
+	if m["agent2"] != "https://a2.example.com" {
+		t.Errorf("agent2: want https://a2.example.com, got %q", m["agent2"])
+	}
+}
+
+func TestEnvOverrideA2ATargets_empty(t *testing.T) {
+	t.Setenv("KLAUS_A2A_TARGETS", "")
+	m := map[string]string{"existing": "http://x.svc"}
+	envOverrideA2ATargets(&m, "KLAUS_A2A_TARGETS")
+	// No override when env is empty.
+	if m["existing"] != "http://x.svc" {
+		t.Errorf("existing entry should not be cleared")
+	}
+}

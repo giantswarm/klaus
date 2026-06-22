@@ -79,6 +79,23 @@ claude:
   settingSources: ""          # comma-separated: "user,project,local"
 ```
 
+## Subprocess retry
+
+```yaml
+claude:
+  retryMaxAttempts: 0     # 0 = use default (3)
+  retryBaseBackoff: ""    # empty = use default (2s); e.g. "5s"
+```
+
+## Session
+
+```yaml
+session:
+  dir: ""                   # override for local session file directory
+  contextID: ""             # pre-seed context ID at startup
+  sessionID: ""             # pre-seed session ID; passed as --resume in chat mode
+```
+
 ## Workspace
 
 ```yaml

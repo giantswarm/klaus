@@ -75,10 +75,41 @@ func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) 
 	}
 }
 
-func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string) {
+// handleBusy reports whether the Claude subprocess is currently busy.
+// Returns 200 OK when idle/completed, 409 Conflict when busy.
+// This is the operator contract used by the A2A layer to signal to callers
+// that the process cannot accept new requests at this time.
+func handleBusy(process claudepkg.Prompter) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if process.Status().Status == claudepkg.ProcessStatusBusy {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = fmt.Fprintln(w, "busy")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintln(w, "idle")
+	}
+}
+
+func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string, a2aHandler http.Handler) {
 	mux.HandleFunc("/healthz", handleHealthz)
+	mux.HandleFunc("/healthz/busy", handleBusy(process))
 	mux.HandleFunc("/readyz", handleReadyz(process))
 	mux.HandleFunc("/status", handleStatus(process, mode, ownerSubject))
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/", handleRoot)
+	mux.Handle("/", rootHandler(a2aHandler))
+}
+
+// rootHandler returns a catch-all handler that dispatches POST / to a2aHandler
+// when set. kagent constructs agent URLs as http://{name}.{ns}:8080 with no
+// path, so POST / must reach the A2A JSON-RPC handler. Any other path falls
+// through to handleRoot (which returns 404 for unmatched paths).
+func rootHandler(a2aHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a2aHandler != nil && r.Method == http.MethodPost && r.URL.Path == "/" {
+			a2aHandler.ServeHTTP(w, r)
+			return
+		}
+		handleRoot(w, r)
+	})
 }

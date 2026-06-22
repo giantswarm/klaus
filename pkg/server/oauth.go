@@ -24,6 +24,7 @@ import (
 	"github.com/giantswarm/mcp-oauth/storage/memory"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	a2apkg "github.com/giantswarm/klaus/pkg/a2a"
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	mcppkg "github.com/giantswarm/klaus/pkg/mcp"
 	"github.com/giantswarm/klaus/pkg/project"
@@ -202,6 +203,8 @@ func (c OAuthConfig) Validate() error {
 type OAuthServer struct {
 	serverCtx    context.Context
 	process      claudepkg.Prompter
+	executor     *a2apkg.Executor
+	a2aCaller    mcppkg.Caller
 	oauthServer  *oauth.Server
 	oauthHandler *handler.Handler
 	httpServer   *http.Server
@@ -212,7 +215,9 @@ type OAuthServer struct {
 // controls the lifetime of background goroutines; it should be cancelled
 // during server shutdown. ownerSubject restricts MCP access to the configured
 // owner identity; when empty, no owner validation is performed.
-func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, config OAuthConfig, ownerSubject string) (*OAuthServer, error) {
+// executor is optional; when non-nil the /a2a endpoint is mounted.
+// a2aCaller is optional; when non-nil the a2a_call MCP tool is registered.
+func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, executor *a2apkg.Executor, a2aCaller mcppkg.Caller, config OAuthConfig, ownerSubject string) (*OAuthServer, error) {
 	oauthSrv, err := createOAuthServer(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth server: %w", err)
@@ -223,6 +228,8 @@ func NewOAuthServer(serverCtx context.Context, process claudepkg.Prompter, confi
 	return &OAuthServer{
 		serverCtx:    serverCtx,
 		process:      process,
+		executor:     executor,
+		a2aCaller:    a2aCaller,
 		oauthServer:  oauthSrv,
 		oauthHandler: oauthHandler,
 		ownerSubject: ownerSubject,
@@ -243,8 +250,18 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 	// MCP endpoint (protected by OAuth).
 	s.setupMCPRoutes(mux, config)
 
+	// Chat completions endpoint (protected by OAuth).
+	ownerMW := OwnerMiddleware(s.ownerSubject, slog.Default())
+	mux.Handle("/v1/chat/completions", ownerMW(s.oauthHandler.ValidateToken(handleChatCompletions(s.process))))
+
+	// A2A endpoint and agent-card discovery (optional).
+	a2aMW := func(h http.Handler) http.Handler {
+		return ownerMW(s.oauthHandler.ValidateToken(h))
+	}
+	a2aHandler := registerA2ARoutes(mux, s.executor, a2aMW)
+
 	// Health and status endpoints (unprotected, bypass owner validation).
-	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject)
+	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject, a2aHandler)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -307,7 +324,7 @@ func (s *OAuthServer) setupOAuthRoutes(mux *http.ServeMux) {
 }
 
 func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
-	mcpSrv := mcppkg.NewMCPServer(s.serverCtx, s.process)
+	mcpSrv := mcppkg.NewMCPServer(s.serverCtx, s.process, s.a2aCaller)
 
 	opts := []mcpserver.StreamableHTTPOption{
 		mcpserver.WithEndpointPath("/mcp"),
