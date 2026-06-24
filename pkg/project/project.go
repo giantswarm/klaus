@@ -1,12 +1,8 @@
 package project
 
-// Populated at link time via `-X` ldflags. Two injection paths:
-//
-//   - goreleaser (release archives) sets main.version/commit/date, which are
-//     propagated here through cmd.SetBuildInfo.
-//   - architect-orb's go-build job (container images) sets gitSHA and
-//     buildTimestamp directly; version stays at its default because no tag
-//     is plumbed through.
+// Populated at link time via `-X` ldflags by architect-orb's go-build job
+// (container images), which sets gitSHA and buildTimestamp directly; version
+// stays at its default because no tag is plumbed through.
 var (
 	buildTimestamp string
 	gitSHA         string
@@ -32,7 +28,7 @@ func GitSHA() string {
 }
 
 // SetBuildInfo overrides the build-time metadata. This is called by the cmd
-// package to propagate ldflags set on main (via goreleaser or Dockerfile).
+// package to propagate ldflags set on main (via the Dockerfile build).
 func SetBuildInfo(v, commit, date string) {
 	if v != "" {
 		version = v
