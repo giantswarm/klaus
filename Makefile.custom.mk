@@ -1,17 +1,3 @@
-##@ Release
-
-.PHONY: release-dry-run
-release-dry-run: ## Test the release process without publishing (all platforms)
-	goreleaser release --snapshot --clean --skip=announce,publish,validate
-
-.PHONY: release-dry-run-fast
-release-dry-run-fast: ## Fast release dry-run for CI (linux/amd64 only, ~6min faster)
-	goreleaser release --config .goreleaser.ci.yaml --snapshot --clean --skip=announce,publish,validate
-
-.PHONY: release-local
-release-local: ## Create a release locally
-	goreleaser release --clean
-
 ##@ Docker
 
 .PHONY: docker-build docker-build-alpine docker-build-debian docker-binary generate-dockerfile-debian
@@ -45,7 +31,7 @@ generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (onl
 .PHONY: lint-yaml
 lint-yaml: ## Run YAML linter
 	@echo "Running YAML linter..."
-	@yamllint .github/workflows/ci.yaml .goreleaser.yaml .goreleaser.ci.yaml
+	@yamllint .github/workflows/ci.yaml
 
 .PHONY: check
 check: lint-yaml test-vet ## Run YAML linter and Go tests
