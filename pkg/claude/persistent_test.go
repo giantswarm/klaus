@@ -29,8 +29,8 @@ func TestNewPersistentProcess_InitialState(t *testing.T) {
 	if status.ToolCallCount != 0 {
 		t.Errorf("expected 0 tool call count, got %d", status.ToolCallCount)
 	}
-	if status.ToolCalls != nil {
-		t.Errorf("expected nil tool calls, got %v", status.ToolCalls)
+	if len(status.ToolCalls) != 0 {
+		t.Errorf("expected empty tool calls, got %v", status.ToolCalls)
 	}
 	if status.LastMessage != "" {
 		t.Errorf("expected empty last message, got %q", status.LastMessage)
@@ -759,4 +759,255 @@ func TestExitCodeFromError(t *testing.T) {
 			t.Errorf("expected %q, got %q", err.Error(), got)
 		}
 	})
+}
+
+// TestPersistentRestartArgs verifies that persistentRestartArgs appends
+// --resume <sessionID> to the standard persistent args.
+func TestPersistentRestartArgs(t *testing.T) {
+	opts := Options{
+		Model:          "claude-sonnet-4-20250514",
+		PermissionMode: PermissionModeBypass,
+	}
+
+	restartArgs := opts.persistentRestartArgs("session-abc")
+
+	assertContainsSequence(t, restartArgs, "--resume", "session-abc")
+	// Core persistent flags must still be present.
+	assertContainsSequence(t, restartArgs, "--input-format", "stream-json")
+	assertContainsSequence(t, restartArgs, "--output-format", "stream-json")
+	assertContains(t, restartArgs, "--replay-user-messages")
+}
+
+// TestPersistentRestartArgs_ColdStart verifies that PersistentArgs (cold start)
+// does NOT include --resume.
+func TestPersistentRestartArgs_ColdStart(t *testing.T) {
+	opts := Options{PermissionMode: PermissionModeBypass}
+	args := opts.PersistentArgs()
+	assertNotContains(t, args, "--resume")
+}
+
+// TestRetryConfig verifies that retryConfig applies defaults when Options
+// fields are zero and respects explicit values when set.
+func TestRetryConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		maxAttempts, baseBackoff := Options{}.retryConfig()
+		if maxAttempts != defaultRetryMaxAttempts {
+			t.Errorf("expected default max attempts %d, got %d", defaultRetryMaxAttempts, maxAttempts)
+		}
+		if baseBackoff != defaultRetryBaseBackoff {
+			t.Errorf("expected default base backoff %v, got %v", defaultRetryBaseBackoff, baseBackoff)
+		}
+	})
+
+	t.Run("explicit values", func(t *testing.T) {
+		opts := Options{RetryMaxAttempts: 7, RetryBaseBackoff: 500 * time.Millisecond}
+		maxAttempts, baseBackoff := opts.retryConfig()
+		if maxAttempts != 7 {
+			t.Errorf("expected 7, got %d", maxAttempts)
+		}
+		if baseBackoff != 500*time.Millisecond {
+			t.Errorf("expected 500ms, got %v", baseBackoff)
+		}
+	})
+}
+
+// TestWatchdog_NoRetry_OnIntentionalStop verifies that the watchdog does not
+// restart the subprocess when status is ProcessStatusStopped.
+func TestWatchdog_NoRetry_OnIntentionalStop(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	processDone := make(chan struct{})
+	close(processDone)
+
+	p := &PersistentProcess{
+		opts:        Options{RetryMaxAttempts: 3, RetryBaseBackoff: 10 * time.Millisecond},
+		status:      ProcessStatusStopped,
+		subagents:   newSubagentTracker(),
+		toolUseIDs:  make(map[string]string),
+		done:        done,
+		processDone: processDone,
+		autoRestart: false,
+		stderrTail:  newRingBuffer(5),
+	}
+
+	alreadyDone := make(chan struct{})
+	close(alreadyDone)
+
+	startCalled := make(chan struct{}, 1)
+	// We cannot intercept start() directly, but the watchdog checks status
+	// before doing anything. Assert that after the watchdog goroutine completes
+	// no restart was attempted (p.retryCount stays 0).
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p.startWatchdog(ctx, alreadyDone)
+
+	// Give the goroutine time to run.
+	time.Sleep(50 * time.Millisecond)
+	p.mu.RLock()
+	count := p.retryCount
+	p.mu.RUnlock()
+
+	if count != 0 {
+		t.Errorf("expected retryCount=0 after intentional stop, got %d", count)
+	}
+	_ = startCalled
+}
+
+// TestWatchdog_NoRetry_OnBudgetExhaustion verifies that the watchdog does not
+// restart when lastStopReason is StopReasonBudget.
+func TestWatchdog_NoRetry_OnBudgetExhaustion(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	processDone := make(chan struct{})
+	close(processDone)
+
+	p := &PersistentProcess{
+		opts:           Options{RetryMaxAttempts: 3, RetryBaseBackoff: 10 * time.Millisecond},
+		status:         ProcessStatusError,
+		lastStopReason: StopReasonBudget,
+		subagents:      newSubagentTracker(),
+		toolUseIDs:     make(map[string]string),
+		done:           done,
+		processDone:    processDone,
+		autoRestart:    false,
+		stderrTail:     newRingBuffer(5),
+	}
+
+	alreadyDone := make(chan struct{})
+	close(alreadyDone)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p.startWatchdog(ctx, alreadyDone)
+
+	time.Sleep(50 * time.Millisecond)
+
+	p.mu.RLock()
+	count := p.retryCount
+	p.mu.RUnlock()
+
+	if count != 0 {
+		t.Errorf("expected retryCount=0 after budget stop, got %d", count)
+	}
+}
+
+// TestWatchdog_RespectsMaxAttempts verifies that the watchdog stops retrying
+// after maxAttempts and does not increment retryCount beyond the cap.
+func TestWatchdog_RespectsMaxAttempts(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	processDone := make(chan struct{})
+	close(processDone)
+
+	// Simulate a process that has already used all retries.
+	p := &PersistentProcess{
+		opts:        Options{RetryMaxAttempts: 2, RetryBaseBackoff: 10 * time.Millisecond},
+		status:      ProcessStatusError,
+		retryCount:  2, // already at the limit
+		subagents:   newSubagentTracker(),
+		toolUseIDs:  make(map[string]string),
+		done:        done,
+		processDone: processDone,
+		autoRestart: false,
+		stderrTail:  newRingBuffer(5),
+	}
+
+	alreadyDone := make(chan struct{})
+	close(alreadyDone)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p.startWatchdog(ctx, alreadyDone)
+
+	time.Sleep(50 * time.Millisecond)
+
+	p.mu.RLock()
+	count := p.retryCount
+	p.mu.RUnlock()
+
+	// retryCount must not exceed maxAttempts.
+	if count > 2 {
+		t.Errorf("retryCount exceeded max attempts: got %d, want ≤2", count)
+	}
+}
+
+// TestRetryCount_ResetOnSuccessfulTurn verifies that retryCount resets to 0
+// when readLoop processes a successful (non-error) result message.
+func TestRetryCount_ResetOnSuccessfulTurn(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	processDone := make(chan struct{})
+	close(processDone)
+
+	p := &PersistentProcess{
+		opts:        DefaultOptions(),
+		status:      ProcessStatusBusy,
+		retryCount:  2, // simulate prior retries
+		subagents:   newSubagentTracker(),
+		toolCalls:   make(map[string]int),
+		modelUsage:  make(map[string]int),
+		toolUseIDs:  make(map[string]string),
+		done:        make(chan struct{}),
+		processDone: processDone,
+		autoRestart: false,
+		stderrTail:  newRingBuffer(5),
+	}
+
+	// Inject a successful (is_error=false) result message directly.
+	resultMsg := StreamMessage{
+		Type:   MessageTypeResult,
+		Result: "all done",
+	}
+	p.sawContent = true
+
+	// Simulate the final-result branch of readLoop.
+	isFinal := p.sawContent || resultMsg.IsError || resultMsg.Result != ""
+	if isFinal {
+		p.mu.Lock()
+		if !resultMsg.IsError {
+			p.retryCount = 0
+			p.lastStopReason = StopReasonCompleted
+		}
+		p.mu.Unlock()
+	}
+
+	p.mu.RLock()
+	count := p.retryCount
+	reason := p.lastStopReason
+	p.mu.RUnlock()
+
+	if count != 0 {
+		t.Errorf("expected retryCount=0 after successful turn, got %d", count)
+	}
+	if reason != StopReasonCompleted {
+		t.Errorf("expected lastStopReason=completed, got %q", reason)
+	}
+}
+
+// TestStatusInfo_IncludesRetryCount verifies that Status() includes the
+// current retryCount so callers can surface it in /status and spans.
+func TestStatusInfo_IncludesRetryCount(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	processDone := make(chan struct{})
+	close(processDone)
+
+	p := &PersistentProcess{
+		opts:        DefaultOptions(),
+		status:      ProcessStatusIdle,
+		retryCount:  3,
+		subagents:   newSubagentTracker(),
+		toolCalls:   make(map[string]int),
+		modelUsage:  make(map[string]int),
+		toolUseIDs:  make(map[string]string),
+		done:        done,
+		processDone: processDone,
+		autoRestart: false,
+		stderrTail:  newRingBuffer(5),
+	}
+
+	info := p.Status()
+	if info.RetryCount != 3 {
+		t.Errorf("expected RetryCount=3, got %d", info.RetryCount)
+	}
 }

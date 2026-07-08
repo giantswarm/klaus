@@ -14,7 +14,11 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/giantswarm/klaus/pkg/metrics"
+	"github.com/giantswarm/klaus/pkg/telemetry"
 )
 
 // PersistentProcess maintains a long-running Claude subprocess for multi-turn
@@ -83,6 +87,19 @@ type PersistentProcess struct {
 	// watchdogCtx controls the lifetime of the watchdog goroutine.
 	watchdogCtx    context.Context
 	watchdogCancel context.CancelFunc
+
+	// retryCount is the number of times the watchdog has restarted the
+	// subprocess with --resume since the last successful turn completion.
+	// Reset to 0 on each successful (non-error) result message.
+	retryCount int
+
+	// lastStopReason records the stop reason from the most recent result
+	// message. Used by the watchdog to gate retries: budget exhaustion and
+	// intentional stops are never retried.
+	lastStopReason StopReason
+
+	// turnIndex counts completed turns for span attributes.
+	turnIndex int
 }
 
 // NewPersistentProcess returns a PersistentProcess. Call Start() to launch
@@ -98,6 +115,8 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
 		toolUseIDs:  make(map[string]string),
+		toolCalls:   make(map[string]int),
+		modelUsage:  make(map[string]int),
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
@@ -106,9 +125,16 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 	}
 }
 
-// Start launches the persistent Claude subprocess. It must be called before
-// sending prompts. The subprocess runs until Stop() is called or it exits.
+// Start launches the persistent Claude subprocess using PersistentArgs.
+// It must be called before sending prompts. The subprocess runs until Stop()
+// is called or it exits.
 func (p *PersistentProcess) Start(ctx context.Context) error {
+	return p.start(ctx, p.opts.PersistentArgs(), false)
+}
+
+// start is the internal launch implementation. resume indicates whether this
+// call is a watchdog restart (affects log output and span attributes).
+func (p *PersistentProcess) start(ctx context.Context, args []string, resume bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -117,8 +143,6 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	}
 
 	p.status = ProcessStatusStarting
-
-	args := p.opts.PersistentArgs()
 
 	cmd := exec.Command("claude", args...) //nolint:gosec // args are controlled
 	if p.opts.WorkDir != "" {
@@ -165,6 +189,17 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	readerCtx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 
+	// Emit subprocess-start span.
+	_, span := telemetry.Tracer("claude.persistent").Start(ctx,
+		telemetry.SpanClaudeSubprocessStart,
+		trace.WithAttributes(
+			attribute.String(telemetry.AttrSessionID, p.sessionID),
+			attribute.String(telemetry.AttrModel, p.opts.Model),
+			attribute.Bool(telemetry.AttrResume, resume),
+			attribute.Int(telemetry.AttrRetryCount, p.retryCount),
+		))
+	span.End()
+
 	// Read stderr in background and capture recent lines for crash diagnostics.
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -178,26 +213,30 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	}()
 
 	// Read stdout stream-json messages and dispatch to active response channel.
-	go p.readLoop(readerCtx, stdout, cmd, processDone)
+	go p.readLoop(readerCtx, stdout, cmd, processDone) //nolint:gosec
 
 	// Start the background watchdog that auto-restarts on unexpected exit.
 	if p.autoRestart {
-		p.startWatchdog(context.Background(), processDone)
+		p.startWatchdog(context.Background(), processDone) //nolint:gosec
 	}
 
-	slog.Info("claude: persistent subprocess started")
+	if resume {
+		slog.Info("claude: persistent subprocess restarted", "retry", p.retryCount)
+	} else {
+		slog.Info("claude: persistent subprocess started")
+	}
 	return nil
 }
 
-// restartBackoff is the minimum time to wait between restart attempts to
-// prevent tight restart loops when the subprocess fails immediately.
-const restartBackoff = 2 * time.Second
-
 // startWatchdog launches a background goroutine that watches for unexpected
-// subprocess exits and restarts the process automatically. It cancels any
-// previously running watchdog to avoid duplicates.
+// subprocess exits and restarts the process with --resume (when a sessionID is
+// available). It cancels any previously running watchdog to avoid duplicates.
+//
+// Retry limits and backoff are taken from Options.RetryMaxAttempts and
+// Options.RetryBaseBackoff (defaults: 3 attempts, 2 s base — doubles each try).
+// Retries are skipped when the exit was intentional (StopReasonStopped) or
+// caused by budget exhaustion (StopReasonBudget).
 func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan struct{}) {
-	// Cancel any existing watchdog before starting a new one.
 	if p.watchdogCancel != nil {
 		p.watchdogCancel()
 	}
@@ -205,6 +244,8 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 	watchCtx, watchCancel := context.WithCancel(ctx)
 	p.watchdogCtx = watchCtx
 	p.watchdogCancel = watchCancel
+
+	maxAttempts, baseBackoff := p.opts.retryConfig()
 
 	go func() {
 		slog.Debug("claude: watchdog started, waiting for subprocess exit")
@@ -215,32 +256,64 @@ func (p *PersistentProcess) startWatchdog(ctx context.Context, processDone chan 
 		case <-processDone:
 		}
 
-		p.mu.RLock()
+		p.mu.Lock()
 		status := p.status
-		lastErr := p.lastError
-		p.mu.RUnlock()
+		sessionID := p.sessionID
+		lastStopReason := p.lastStopReason
+		currentRetry := p.retryCount
+		p.mu.Unlock()
 
-		// Only restart if the process exited unexpectedly (not via Stop).
-		if status == ProcessStatusStopped {
-			slog.Debug("claude: watchdog: subprocess stopped intentionally, not restarting")
+		// Never restart on intentional stop or budget exhaustion.
+		if status == ProcessStatusStopped ||
+			lastStopReason == StopReasonStopped ||
+			lastStopReason == StopReasonBudget {
+			slog.Debug("claude: watchdog: not restarting", "status", status, "stop_reason", lastStopReason)
 			return
 		}
 
-		slog.Warn("claude: subprocess exited unexpectedly, restarting",
-			"status", status, "last_error", lastErr, "backoff", restartBackoff)
+		nextRetry := currentRetry + 1
+		if maxAttempts > 0 && nextRetry > maxAttempts {
+			slog.Error("claude: watchdog: max retry attempts reached, not restarting", "max", maxAttempts)
+			_, span := telemetry.Tracer("claude.persistent").Start(watchCtx,
+				telemetry.SpanClaudeSubprocessExit,
+				trace.WithAttributes(
+					attribute.String(telemetry.AttrSessionID, sessionID),
+					attribute.String(telemetry.AttrStopReason, "max_retries_exceeded"),
+					attribute.Int(telemetry.AttrRetryCount, currentRetry),
+				))
+			span.End()
+			return
+		}
+
+		backoff := baseBackoff
+		for i := 0; i < currentRetry; i++ {
+			backoff *= 2
+		}
+
+		slog.Warn("claude: watchdog: subprocess exited unexpectedly, restarting",
+			"status", status, "stop_reason", lastStopReason, "attempt", nextRetry, "max", maxAttempts, "backoff", backoff)
 		metrics.ProcessRestartsTotal.Inc()
 
 		select {
 		case <-watchCtx.Done():
 			slog.Debug("claude: watchdog cancelled during restart backoff")
 			return
-		case <-time.After(restartBackoff):
+		case <-time.After(backoff):
 		}
 
-		if err := p.Start(watchCtx); err != nil {
-			slog.Error("claude: watchdog failed to restart persistent subprocess", "error", err)
+		p.mu.Lock()
+		p.retryCount = nextRetry
+		p.mu.Unlock()
+
+		var restartArgs []string
+		if sessionID != "" {
+			restartArgs = p.opts.persistentRestartArgs(sessionID)
 		} else {
-			slog.Info("claude: watchdog restarted persistent subprocess successfully")
+			restartArgs = p.opts.PersistentArgs()
+		}
+
+		if err := p.start(watchCtx, restartArgs, true); err != nil {
+			slog.Error("claude: watchdog: failed to restart persistent subprocess", "error", err)
 		}
 	}()
 }
@@ -255,6 +328,8 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		p.cmd = nil
 		p.stdin = nil
 
+		exitCode := exitCodeFromError(waitErr)
+
 		var exitErrStr string
 		if waitErr != nil {
 			exitErrStr = waitErr.Error()
@@ -267,8 +342,14 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			p.status = ProcessStatusIdle
 		}
 
+		sessionID := p.sessionID
+		retryCount := p.retryCount
+		lastStopReason := p.lastStopReason
+
 		// If there's an active response channel, send a crash error message
 		// so the user sees something instead of silence.
+		// Do this while holding the lock to prevent a concurrent RunWithOptions
+		// from installing a new responseCh between the unlock and re-lock.
 		if p.responseCh != nil && p.status != ProcessStatusStopped {
 			stderrLines := strings.Join(p.stderrTail.contents(), "\n")
 			crashText := fmt.Sprintf(
@@ -307,6 +388,16 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		lastErr := p.lastError
 		close(processDone)
 		p.mu.Unlock()
+
+		_, exitSpan := telemetry.Tracer("claude.persistent").Start(context.Background(),
+			telemetry.SpanClaudeSubprocessExit,
+			trace.WithAttributes(
+				attribute.String(telemetry.AttrSessionID, sessionID),
+				attribute.String(telemetry.AttrExitCode, exitCode),
+				attribute.String(telemetry.AttrStopReason, string(lastStopReason)),
+				attribute.Int(telemetry.AttrRetryCount, retryCount),
+			))
+		exitSpan.End()
 		metrics.SetProcessStatus(string(status))
 		slog.Info("claude: persistent subprocess exited", "wait_err", waitErr, "last_error", lastErr, "status", status)
 	}()
@@ -453,6 +544,27 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				if p.status == ProcessStatusBusy {
 					p.status = ProcessStatusIdle
 				}
+
+				if isBudgetError(msg) {
+					p.lastStopReason = StopReasonBudget
+				} else if msg.IsError {
+					p.lastStopReason = StopReasonError
+				} else {
+					// Successful turn: reset retry counter.
+					p.retryCount = 0
+					p.lastStopReason = StopReasonCompleted
+				}
+
+				p.turnIndex++
+				sessionID := p.sessionID
+				turnIndex := p.turnIndex
+				var inputTokens, outputTokens int64
+				if msg.Usage != nil {
+					inputTokens = msg.Usage.InputTokens
+					outputTokens = msg.Usage.OutputTokens
+				}
+				stopReason := p.lastStopReason
+
 				// Signal done for this prompt.
 				select {
 				case <-p.done:
@@ -460,6 +572,21 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				default:
 					close(p.done)
 				}
+
+				p.mu.Unlock()
+				metrics.SetProcessStatus(string(ProcessStatusIdle))
+
+				_, turnSpan := telemetry.Tracer("claude.persistent").Start(context.Background(),
+					telemetry.SpanClaudeTurnComplete,
+					trace.WithAttributes(
+						attribute.String(telemetry.AttrSessionID, sessionID),
+						attribute.Int(telemetry.AttrTurnIndex, turnIndex),
+						attribute.String(telemetry.AttrStopReason, string(stopReason)),
+						attribute.Int64(telemetry.AttrInputTokens, inputTokens),
+						attribute.Int64(telemetry.AttrOutputTokens, outputTokens),
+					))
+				turnSpan.End()
+				continue
 			}
 			status := p.status
 			p.mu.Unlock()
@@ -619,12 +746,12 @@ loop:
 // Stop sends SIGTERM to the persistent subprocess and waits for it to exit.
 // It also cancels the background watchdog to prevent auto-restart.
 func (p *PersistentProcess) Stop() error {
-	// Cancel the watchdog first to prevent restart during shutdown.
+	p.mu.Lock()
+	// Cancel the watchdog under the lock: startWatchdog writes watchdogCancel
+	// under mu, so reading it here outside the lock is a data race.
 	if p.watchdogCancel != nil {
 		p.watchdogCancel()
 	}
-
-	p.mu.Lock()
 	cmd := p.cmd
 	processDone := p.processDone
 	if cmd == nil || cmd.Process == nil {
@@ -679,6 +806,7 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		totalCost := p.totalCost
 		costSeen := p.costSeen
 		lastError := p.lastError
+		lastStopReason := p.lastStopReason
 		tu := p.tokenUsage
 		store := p.resultStore
 		p.mu.Unlock()
@@ -691,7 +819,7 @@ func (p *PersistentProcess) Submit(ctx context.Context, prompt string, opts *Run
 		if tu != (TokenUsage{}) {
 			tuPtr = &tu
 		}
-		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, lastStopReason)
 	})
 }
 
@@ -711,6 +839,7 @@ func (p *PersistentProcess) Status() StatusInfo {
 		SubagentCalls: copySubagentCalls(p.subagents.calls()),
 		ModelUsage:    copyToolCalls(p.modelUsage),
 		ErrorCount:    p.errorCount,
+		RetryCount:    p.retryCount,
 	}
 
 	if p.costSeen {
@@ -952,4 +1081,18 @@ func (r *ringBuffer) contents() []string {
 	result = append(result, r.lines[r.pos:]...)
 	result = append(result, r.lines[:r.pos]...)
 	return result
+}
+
+// isBudgetError reports whether a result message indicates budget exhaustion.
+// The CLI sets stop_reason on result messages; "max_budget" is the structured
+// signal. The text fallback handles older CLI versions where the structured
+// field may be absent.
+func isBudgetError(msg StreamMessage) bool {
+	if !msg.IsError {
+		return false
+	}
+	if msg.StopReason == "max_budget" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(msg.Result), "budget")
 }

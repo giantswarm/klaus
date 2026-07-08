@@ -998,3 +998,46 @@ func TestParseStreamMessage_StreamEvent_InputJSONDelta(t *testing.T) {
 		t.Errorf("expected InputJSONDelta %q, got %q", `{"cmd":"ls"}`, msg.InputJSONDelta)
 	}
 }
+
+func TestCollectTokenUsage(t *testing.T) {
+	t.Run("sums across assistant messages", func(t *testing.T) {
+		messages := []StreamMessage{
+			{Type: MessageTypeSystem, SessionID: "s1"},
+			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "hello", Usage: &TokenUsage{InputTokens: 10, OutputTokens: 20}},
+			{Type: MessageTypeAssistant, Subtype: SubtypeToolUse, Usage: &TokenUsage{InputTokens: 5, OutputTokens: 3, CacheReadInputTokens: 7}},
+			{Type: MessageTypeResult, Result: "done"},
+		}
+		got := CollectTokenUsage(messages)
+		if got == nil {
+			t.Fatal("expected non-nil usage")
+		}
+		if got.InputTokens != 15 {
+			t.Errorf("InputTokens: want 15, got %d", got.InputTokens)
+		}
+		if got.OutputTokens != 23 {
+			t.Errorf("OutputTokens: want 23, got %d", got.OutputTokens)
+		}
+		if got.CacheReadInputTokens != 7 {
+			t.Errorf("CacheReadInputTokens: want 7, got %d", got.CacheReadInputTokens)
+		}
+		if got.CacheCreationInputTokens != 0 {
+			t.Errorf("CacheCreationInputTokens: want 0, got %d", got.CacheCreationInputTokens)
+		}
+	})
+
+	t.Run("nil when no usage present", func(t *testing.T) {
+		messages := []StreamMessage{
+			{Type: MessageTypeSystem, SessionID: "s1"},
+			{Type: MessageTypeResult, Result: "done"},
+		}
+		if got := CollectTokenUsage(messages); got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+	})
+
+	t.Run("nil for empty slice", func(t *testing.T) {
+		if got := CollectTokenUsage(nil); got != nil {
+			t.Errorf("expected nil, got %+v", got)
+		}
+	})
+}

@@ -22,9 +22,12 @@ docker-build-debian: docker-binary ## Build Debian Docker image
 	@echo "Building Debian image..."
 	@docker build -f Dockerfile.debian -t klaus:debian .
 
-generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (only VARIANT default differs)
+generate-dockerfile-debian: ## Regenerate Dockerfile.debian from Dockerfile (only VARIANT default and go-toolchain image differ)
 	@printf '# DO NOT EDIT. Generated from Dockerfile.\n# This file exists so the CI job can build the Debian variant without --build-arg.\n# Regenerate with: make generate-dockerfile-debian\n\n' > Dockerfile.debian
-	@sed 's/^ARG VARIANT=alpine$$/ARG VARIANT=slim/' Dockerfile >> Dockerfile.debian
+	@sed \
+		-e 's/^ARG VARIANT=alpine$$/ARG VARIANT=slim/' \
+		-e 's/FROM golang:\([^ ]*\)-alpine AS go-toolchain/FROM golang:\1 AS go-toolchain/' \
+		Dockerfile >> Dockerfile.debian
 
 verify-dockerfile-debian: generate-dockerfile-debian ## Fail if Dockerfile.debian is stale relative to Dockerfile.
 	@git diff --exit-code Dockerfile.debian || { \

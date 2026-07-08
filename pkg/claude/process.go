@@ -25,6 +25,10 @@ type RunOptions struct {
 	ContinueSession bool
 	// ForkSession overrides Options.ForkSession for this run.
 	ForkSession bool
+	// SaveSession forces session persistence for this run even when
+	// Options.NoSessionPersistence is true. Required when the caller needs
+	// --resume to work on a subsequent invocation.
+	SaveSession bool
 	// ActiveAgent overrides Options.ActiveAgent for this run.
 	ActiveAgent string
 	// JSONSchema overrides Options.JSONSchema for this run.
@@ -100,6 +104,8 @@ type Process struct {
 	// Nil means no persistence.
 	resultStore *ResultStore
 
+	lastStopReason StopReason // set from structured stop_reason on result messages
+
 	done      chan struct{}
 	runCancel context.CancelFunc // cancels the stdout-reading goroutine
 }
@@ -129,12 +135,18 @@ func (p *Process) mergedOpts(ro *RunOptions) Options {
 	}
 	if ro.Resume != "" {
 		opts.Resume = ro.Resume
+		// --resume requires the previous session on disk; clear the flag so
+		// the current run also saves (it may itself be resumed later).
+		opts.NoSessionPersistence = false
 	}
 	if ro.ContinueSession {
 		opts.ContinueSession = true
 	}
 	// Any operation that references a prior session requires the session to be persisted.
 	if opts.SessionID != "" || opts.ContinueSession || opts.Resume != "" {
+		opts.NoSessionPersistence = false
+	}
+	if ro.SaveSession {
 		opts.NoSessionPersistence = false
 	}
 	if ro.ForkSession {
@@ -170,6 +182,7 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	}
 	p.status = ProcessStatusStarting
 	p.lastError = ""
+	p.sessionID = ""
 	// Preserve liveMessages and messageCount across turns so that
 	// the MCP messages tool returns the full conversation history
 	// and message_count accumulates rather than resetting (#171).
@@ -379,6 +392,11 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			metrics.RecordStreamMessage(string(msg.Type), string(msg.Subtype), msg.ToolName)
 			if msg.Type == MessageTypeResult {
 				metrics.RecordCost(costToRecord)
+				if isBudgetError(msg) {
+					p.mu.Lock()
+					p.lastStopReason = StopReasonBudget
+					p.mu.Unlock()
+				}
 			}
 
 			// Use select to prevent blocking if the consumer stops reading
@@ -497,7 +515,7 @@ func (p *Process) Submit(ctx context.Context, prompt string, opts *RunOptions) e
 		if tu != (TokenUsage{}) {
 			tuPtr = &tu
 		}
-		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr)
+		persistResult(store, rs, status, sessionID, costPtr, lastError, tuPtr, p.lastStopReason)
 	})
 }
 

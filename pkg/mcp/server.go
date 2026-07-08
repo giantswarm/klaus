@@ -11,9 +11,10 @@ import (
 
 // NewServer returns a StreamableHTTPServer that serves MCP at /mcp.
 // The serverCtx controls the lifetime of background goroutines; it should
-// be cancelled during server shutdown.
-func NewServer(serverCtx context.Context, process claudepkg.Prompter) *server.StreamableHTTPServer {
-	mcpServer := NewMCPServer(serverCtx, process)
+// be cancelled during server shutdown. caller may be nil; when nil, a2a_call
+// is not registered.
+func NewServer(serverCtx context.Context, process claudepkg.Prompter, caller Caller) *server.StreamableHTTPServer {
+	mcpServer := NewMCPServer(serverCtx, process, caller)
 
 	httpServer := server.NewStreamableHTTPServer(mcpServer,
 		server.WithEndpointPath("/mcp"),
@@ -25,8 +26,8 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter) *server.St
 // NewMCPServer returns the raw MCPServer with tools registered, for use
 // when wrapping with custom middleware (e.g. OAuth). The serverCtx controls
 // the lifetime of background goroutines; it should be cancelled during
-// server shutdown.
-func NewMCPServer(serverCtx context.Context, process claudepkg.Prompter) *server.MCPServer {
+// server shutdown. caller may be nil; when nil, a2a_call is not registered.
+func NewMCPServer(serverCtx context.Context, process claudepkg.Prompter, caller Caller) *server.MCPServer {
 	mcpServer := server.NewMCPServer(
 		project.Name,
 		project.Version(),
@@ -35,7 +36,7 @@ func NewMCPServer(serverCtx context.Context, process claudepkg.Prompter) *server
 		server.WithInstructions("Klaus wraps a Claude Code agent. Use the 'prompt' tool to send tasks."),
 	)
 
-	RegisterTools(serverCtx, mcpServer, process)
+	RegisterTools(serverCtx, mcpServer, process, caller)
 
 	return mcpServer
 }

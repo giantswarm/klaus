@@ -198,13 +198,18 @@ func (s *ResultStore) Load() (*PersistedResult, error) {
 
 // persistResult is a helper called from the setResult callbacks in both
 // Process and PersistentProcess. It saves the result to disk if a store
-// is configured and the result is complete.
-func persistResult(store *ResultStore, rs resultState, status ProcessStatus, sessionID string, totalCost *float64, lastError string, tokenUsage *TokenUsage) {
+// is configured and the result is complete. hintStopReason, when non-empty,
+// overrides the stop reason derived from status/lastError (e.g. when the
+// stream-level budget detection already set the authoritative reason).
+func persistResult(store *ResultStore, rs resultState, status ProcessStatus, sessionID string, totalCost *float64, lastError string, tokenUsage *TokenUsage, hintStopReason StopReason) {
 	if store == nil || !rs.completed {
 		return
 	}
 
-	reason := stopReasonFromStatus(status)
+	reason := hintStopReason
+	if reason == "" {
+		reason = stopReasonFromStatus(status, lastError)
+	}
 
 	pr := PersistedResult{
 		ResultText:    rs.text,
@@ -230,7 +235,10 @@ func persistResult(store *ResultStore, rs resultState, status ProcessStatus, ses
 }
 
 // stopReasonFromStatus maps a process status to a stop reason.
-func stopReasonFromStatus(status ProcessStatus) StopReason {
+// Budget exhaustion is detected via the structured stop_reason field
+// on result messages and passed in as hintStopReason by callers; this
+// function handles only the coarse status-level distinction.
+func stopReasonFromStatus(status ProcessStatus, _ string) StopReason {
 	switch status {
 	case ProcessStatusCompleted, ProcessStatusIdle:
 		return StopReasonCompleted
