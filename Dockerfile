@@ -9,7 +9,7 @@ ARG VARIANT=alpine
 #   CGO_ENABLED=0 go build -o klaus-linux-amd64 .
 
 # Go toolchain stage -- lets Claude Code compile and run Go programs inside the container.
-FROM golang:1.26.4-alpine AS go-toolchain
+FROM golang:1.26.5-alpine AS go-toolchain
 
 # Minimal runtime with Node.js, Claude CLI, and Go toolchain.
 FROM node:24-${VARIANT}
