@@ -1,493 +1,418 @@
 {
-  "$schema": "http://json-schema.org/schema#",
-  "type": "object",
-  "properties": {
-    "image": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "tag": {
-          "type": "string"
-        }
-      }
-    },
-    "registry": {
-      "type": "object",
-      "properties": {
-        "domain": {
-          "type": "string"
-        }
-      }
-    },
-    "claude": {
-      "type": "object",
-      "properties": {
-        "model": {
-          "type": "string",
-          "description": "Claude model to use (e.g. sonnet, opus, claude-sonnet-4-20250514); empty passes no --model flag so the Claude CLI's own default is used (klaus does not pin a model)"
-        },
-        "maxTurns": {
-          "type": "integer",
-          "description": "Max agentic turns per prompt (0 = unlimited)"
-        },
-        "permissionMode": {
-          "type": "string",
-          "description": "Permission mode for tool usage",
-          "enum": ["default", "acceptEdits", "bypassPermissions", "dontAsk", "plan", "delegate"]
-        },
-        "systemPrompt": {
-          "type": "string",
-          "description": "Override the default system prompt"
-        },
-        "appendSystemPrompt": {
-          "type": "string",
-          "description": "Append to the default system prompt"
-        },
-        "mcpConfig": {
-          "type": "string",
-          "description": "Inline MCP configuration JSON. Mutually exclusive with mcpServers."
-        },
-        "mcpServers": {
-          "type": "object",
-          "description": "Structured MCP server definitions rendered to .mcp.json. Each entry is a free-form object passed through as-is. Mutually exclusive with mcpConfig.",
-          "additionalProperties": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "affinity": {
             "type": "object",
-            "description": "MCP server configuration (type, url, command, args, env, headers, etc.)"
-          }
+            "additionalProperties": false
         },
-        "mcpServerSecrets": {
-          "type": "array",
-          "description": "Kubernetes Secret references injected as container env vars for ${VAR} expansion in MCP server config",
-          "items": {
+        "anthropicApiKey": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
-              "secretName": {
-                "type": "string",
-                "description": "Name of the Kubernetes Secret"
-              },
-              "env": {
-                "type": "object",
-                "description": "Mapping of env var name to Secret key",
-                "additionalProperties": {
-                  "type": "string"
+                "secretKey": {
+                    "type": "string"
+                },
+                "secretName": {
+                    "type": "string"
                 }
-              }
-            },
-            "required": ["secretName", "env"]
-          }
+            }
         },
-        "mcpTimeout": {
-          "type": "integer",
-          "description": "MCP server connection timeout in milliseconds (0 = default)"
-        },
-        "maxMcpOutputTokens": {
-          "type": "integer",
-          "description": "Maximum tokens in MCP server output (0 = default)"
-        },
-        "strictMcpConfig": {
-          "type": "boolean",
-          "description": "Only use MCP servers from mcpConfig/mcpServers"
-        },
-        "maxBudgetUSD": {
-          "type": "number",
-          "description": "Maximum dollar spend per invocation (0 = no limit)"
-        },
-        "effort": {
-          "type": "string",
-          "description": "Effort level for responses",
-          "enum": ["", "low", "medium", "high"]
-        },
-        "fallbackModel": {
-          "type": "string",
-          "description": "Fallback model when primary is overloaded"
-        },
-        "jsonSchema": {
-          "type": "string",
-          "description": "JSON Schema for structured output validation"
-        },
-        "settingsFile": {
-          "type": "string",
-          "description": "Path to settings JSON file inside the container"
-        },
-        "settingSources": {
-          "type": "string",
-          "description": "Setting sources to load (comma-separated: user,project,local)"
-        },
-        "tools": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Base set of built-in tools available"
-        },
-        "allowedTools": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Tool access patterns to allow"
-        },
-        "disallowedTools": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Tool patterns to explicitly block"
-        },
-        "pluginDirs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Directories to load plugins from"
-        },
-        "addDirs": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Additional directories to search for .claude/ subdirectories (skills, agents)"
-        },
-        "loadAdditionalDirsMemory": {
-          "type": "boolean",
-          "description": "Enable loading CLAUDE.md memory files from additional directories",
-          "default": true
-        },
-        "skills": {
-          "type": "object",
-          "description": "Inline skills rendered as SKILL.md files",
-          "additionalProperties": {
+        "claude": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
-              "description": {
-                "type": "string"
-              },
-              "content": {
-                "type": "string"
-              },
-              "disableModelInvocation": {
-                "type": "boolean"
-              },
-              "userInvocable": {
-                "type": "boolean"
-              },
-              "allowedTools": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "context": {
-                "type": "array"
-              },
-              "agent": {
-                "type": "string"
-              },
-              "argumentHint": {
-                "type": "string"
-              }
-            },
-            "required": ["content"]
-          }
-        },
-        "agentFiles": {
-          "type": "object",
-          "description": "Markdown-format agent definitions loaded via --add-dir",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "content": {
-                "type": "string"
-              }
-            },
-            "required": ["content"]
-          }
-        },
-        "hooks": {
-          "type": "object",
-          "description": "Claude Code lifecycle hooks rendered to settings.json. Mutually exclusive with settingsFile. Keys are event names (PreToolUse, PostToolUse, Stop, SubagentStart, SubagentStop, Notification).",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "matcher": {
-                  "type": "string",
-                  "description": "Pattern to match (e.g. tool name for PreToolUse, agent name for SubagentStart)"
+                "activeAgent": {
+                    "type": "string"
+                },
+                "addDirs": {
+                    "type": "array",
+                    "description": "Extension directories -- addDirs are additional directories to search for .claude/ subdirectories (skills, agents)."
+                },
+                "agentFiles": {
+                    "type": "object",
+                    "description": "Inline subagent files (markdown format) -- These are mounted as .claude/agents/<name>.md files. Claude Code discovers them and makes them available for delegation via the Task tool, and for selection as the main agent via activeAgent or the MCP agent parameter. Subagents defined here have lower priority than those in `agents` (JSON). See https://code.claude.com/docs/en/sub-agents Example: agentFiles: researcher: content: | name: researcher description: Research agent that gathers information tools: Read, Grep, Glob You are a research agent...",
+                    "additionalProperties": false
+                },
+                "agents": {
+                    "type": "object",
+                    "description": "Subagents (JSON format, highest priority) -- Subagents are specialized AI assistants that the main Claude Code agent can delegate work to via the built-in \"Task\" tool. Each runs in its own context window with its own prompt, tools, model, and permissions. These have the highest priority and override agent files with the same name. See https://code.claude.com/docs/en/sub-agents Example: agents: reviewer: description: \"Reviews code changes. Use proactively after edits.\" prompt: \"You are a senior code reviewer...\" tools: [\"Read\", \"Grep\", \"Glob\", \"Bash\"] model: \"sonnet\" deployer: description: \"Handles deployments\" prompt: \"You are a deployment specialist...\"",
+                    "additionalProperties": false
+                },
+                "allowedTools": {
+                    "type": "array"
+                },
+                "appendSystemPrompt": {
+                    "type": "string"
+                },
+                "disallowedTools": {
+                    "type": "array"
+                },
+                "effort": {
+                    "type": "string"
+                },
+                "fallbackModel": {
+                    "type": "string"
+                },
+                "hookScripts": {
+                    "type": "object",
+                    "additionalProperties": false
                 },
                 "hooks": {
-                  "type": "array",
-                  "items": {
                     "type": "object",
-                    "properties": {
-                      "type": {
-                        "type": "string",
-                        "enum": ["command"]
-                      },
-                      "command": {
-                        "type": "string",
-                        "description": "Shell command to execute. Receives JSON via stdin."
-                      },
-                      "timeout": {
-                        "type": "integer",
-                        "description": "Timeout in milliseconds for the hook command"
-                      }
-                    },
-                    "required": ["type", "command"]
-                  }
-                }
-              },
-              "required": ["hooks"]
-            }
-          }
-        },
-        "hookScripts": {
-          "type": "object",
-          "description": "Hook script contents mounted at /etc/klaus/hooks/ with mode 0755",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "plugins": {
-          "type": "array",
-          "description": "Klaus plugin references delivered via Kubernetes OCI image volumes",
-          "items": {
-            "type": "object",
-            "properties": {
-              "repository": {
-                "type": "string",
-                "description": "OCI repository URL"
-              },
-              "tag": {
-                "type": "string",
-                "description": "Image tag (mutually exclusive with digest)"
-              },
-              "digest": {
-                "type": "string",
-                "description": "Image digest (mutually exclusive with tag)"
-              }
-            },
-            "required": ["repository"]
-          }
-        },
-        "agents": {
-          "type": "object",
-          "description": "Custom subagents delegatable via the Task tool. Each runs in its own context with its own prompt, tools, and model.",
-          "additionalProperties": {
-            "type": "object",
-            "properties": {
-              "description": {
-                "type": "string",
-                "description": "When Claude should delegate to this subagent"
-              },
-              "prompt": {
-                "type": "string",
-                "description": "System prompt for the subagent"
-              },
-              "tools": {
-                "type": "array",
-                "items": {
-                  "type": "string"
+                    "description": "Hooks -- hooks defines Claude Code lifecycle hooks, rendered to settings.json. Mutually exclusive with settingsFile. Example: hooks: PreToolUse: - matcher: \"Bash\" hooks: - type: command command: /etc/klaus/hooks/block-dangerous.sh",
+                    "additionalProperties": false
                 },
-                "description": "Tools the subagent can use (inherits all if omitted)"
-              },
-              "disallowedTools": {
-                "type": "array",
-                "items": {
-                  "type": "string"
+                "includePartialMessages": {
+                    "type": "boolean",
+                    "description": "Streaming -- includePartialMessages emits partial message chunks during streaming. Enables progress tracking with message count, tool call count, and last activity."
                 },
-                "description": "Tools to deny from the subagent"
-              },
-              "model": {
-                "type": "string",
-                "description": "Model override: sonnet, opus, haiku, or inherit"
-              },
-              "permissionMode": {
-                "type": "string",
-                "description": "Permission mode override for the subagent",
-                "enum": ["default", "acceptEdits", "dontAsk", "delegate", "bypassPermissions", "plan"]
-              },
-              "maxTurns": {
-                "type": "integer",
-                "description": "Maximum agentic turns before the subagent stops"
-              },
-              "skills": {
-                "type": "array",
-                "items": {
-                  "type": "string"
+                "jsonSchema": {
+                    "type": "string",
+                    "description": "Structured output -- jsonSchema constrains the output to conform to a JSON Schema (JSON string)."
                 },
-                "description": "Skills to preload into the subagent context at startup"
-              },
-              "mcpServers": {
-                "type": "object",
-                "description": "MCP servers available to this subagent"
-              },
-              "hooks": {
-                "type": "object",
-                "description": "Lifecycle hooks scoped to this subagent"
-              },
-              "memory": {
-                "type": "string",
-                "description": "Persistent memory scope: user, project, or local",
-                "enum": ["user", "project", "local"]
-              }
-            },
-            "required": ["description", "prompt"]
-          }
-        },
-        "activeAgent": {
-          "type": "string",
-          "description": "Select which agent runs as the top-level agent for the session (--agent flag). Must match a name in agents or agentFiles."
-        },
-        "includePartialMessages": {
-          "type": "boolean",
-          "description": "Emit partial message chunks during streaming"
-        },
-        "mode": {
-          "type": "string",
-          "description": "Operating mode: agent (single-shot, no session persistence) or chat (persistent subprocess, sessions saved to disk). Default: agent.",
-          "enum": ["agent", "chat"],
-          "default": "agent"
-        }
-      }
-    },
-    "anthropicApiKey": {
-      "type": "object",
-      "properties": {
-        "secretName": {
-          "type": "string"
-        },
-        "secretKey": {
-          "type": "string"
-        }
-      }
-    },
-    "workspace": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "storageClass": {
-          "type": "string"
-        },
-        "size": {
-          "type": "string"
-        },
-        "existingClaim": {
-          "type": "string"
-        }
-      }
-    },
-    "telemetry": {
-      "type": "object",
-      "description": "OpenTelemetry monitoring and Prometheus metrics configuration",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Enable OTel env var pass-through to the Claude Code subprocess"
-        },
-        "metricsExporter": {
-          "type": "string",
-          "description": "Metrics exporter for Claude Code telemetry",
-          "enum": ["otlp", "prometheus", "console"]
-        },
-        "logsExporter": {
-          "type": "string",
-          "description": "Logs/events exporter for Claude Code telemetry",
-          "enum": ["otlp", "console"]
-        },
-        "otlp": {
-          "type": "object",
-          "description": "OTLP exporter configuration",
-          "properties": {
-            "protocol": {
-              "type": "string",
-              "description": "OTLP transport protocol",
-              "enum": ["grpc", "http/protobuf"]
-            },
-            "endpoint": {
-              "type": "string",
-              "description": "OTLP collector endpoint URL"
-            },
-            "headers": {
-              "type": "string",
-              "description": "OTLP headers for authentication (e.g. Authorization=Bearer token)"
-            }
-          }
-        },
-        "metricExportIntervalMs": {
-          "type": "integer",
-          "description": "Metric flush interval in milliseconds"
-        },
-        "logsExportIntervalMs": {
-          "type": "integer",
-          "description": "Logs flush interval in milliseconds"
-        },
-        "logUserPrompts": {
-          "type": "boolean",
-          "description": "Include user prompt text in OTel log events (privacy sensitive)"
-        },
-        "logToolDetails": {
-          "type": "boolean",
-          "description": "Include tool input/output in OTel log events (privacy sensitive)"
-        },
-        "includeSessionId": {
-          "type": "boolean",
-          "description": "Include session_id label in OTel metrics"
-        },
-        "includeVersion": {
-          "type": "boolean",
-          "description": "Include version label in OTel metrics"
-        },
-        "includeAccountUuid": {
-          "type": "boolean",
-          "description": "Include account_uuid label in OTel metrics"
-        },
-        "resourceAttributes": {
-          "type": "string",
-          "description": "Custom OTEL_RESOURCE_ATTRIBUTES in W3C Baggage format"
-        },
-        "scrapeAnnotations": {
-          "type": "boolean",
-          "description": "Add prometheus.io/* scrape annotations to the Service"
-        },
-        "serviceMonitor": {
-          "type": "object",
-          "description": "Prometheus Operator ServiceMonitor configuration",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "Create a ServiceMonitor resource for Prometheus Operator"
-            },
-            "interval": {
-              "type": "string",
-              "description": "Scrape interval (e.g. 30s)"
-            },
-            "scrapeTimeout": {
-              "type": "string",
-              "description": "Scrape timeout (e.g. 10s)"
-            },
-            "namespaceSelector": {
-              "type": "object",
-              "description": "Optional namespace selector for cross-namespace monitoring",
-              "properties": {
-                "any": {
-                  "type": "boolean"
+                "loadAdditionalDirsMemory": {
+                    "type": "boolean"
                 },
-                "matchNames": {
-                  "type": "array",
-                  "items": {
+                "maxBudgetUSD": {
+                    "type": "integer",
+                    "description": "Operational controls -- maxBudgetUSD caps the maximum dollar spend per invocation; 0 means no limit."
+                },
+                "maxMcpOutputTokens": {
+                    "type": "integer"
+                },
+                "maxTurns": {
+                    "type": "integer"
+                },
+                "mcpConfig": {
                     "type": "string"
-                  }
+                },
+                "mcpServerSecrets": {
+                    "type": "array"
+                },
+                "mcpServers": {
+                    "type": "object",
+                    "additionalProperties": false
+                },
+                "mcpTimeout": {
+                    "type": "integer"
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Operating mode -- mode selects the operating mode: \"agent\" or \"chat\". (autonomous coding, no disk I/O for sessions). chat: uses a PersistentProcess subprocess (bidirectional stream-json) with sessions saved to disk (interactive multi-turn chat)."
+                },
+                "model": {
+                    "type": "string"
+                },
+                "permissionMode": {
+                    "type": "string"
+                },
+                "pluginDirs": {
+                    "type": "array",
+                    "description": "Plugin support -- pluginDirs are directories to load plugins from."
+                },
+                "plugins": {
+                    "type": "array",
+                    "description": "Plugins -- plugins references Klaus plugins stored in OCI registries, delivered via Kubernetes OCI image volumes (beta since Kubernetes 1.33, KEP-4639). Each plugin is a versioned, distributable package of skills, hooks, agents, and MCP servers. See giantswarm/klaus-operator#6 for the OCI artifact format. Example: plugins: - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/gs-base tag: v0.6.0 - repository: gsoci.azurecr.io/giantswarm/klaus-plugins/security digest: sha256:abc123..."
+                },
+                "settingSources": {
+                    "type": "string"
+                },
+                "settingsFile": {
+                    "type": "string",
+                    "description": "Settings -- settingsFile is a path to a settings JSON file inside the container."
+                },
+                "skills": {
+                    "type": "object",
+                    "description": "Inline skills -- Supported frontmatter fields: description, disableModelInvocation, userInvocable, allowedTools, model, context, agent, argumentHint. Example: skills: api-conventions: description: \"API design patterns\" content: | When writing API endpoints...",
+                    "additionalProperties": false
+                },
+                "strictMcpConfig": {
+                    "type": "boolean"
+                },
+                "systemPrompt": {
+                    "type": "string"
+                },
+                "tools": {
+                    "type": "array",
+                    "description": "Tool control -- tools controls the base set of built-in tools available. Empty list means all default tools. Use [\"Bash\",\"Edit\",\"Read\"] to restrict."
                 }
-              }
             }
-          }
+        },
+        "global": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "podSecurityStandards": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enforced": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        },
+        "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "tag": {
+                    "type": "string"
+                }
+            }
+        },
+        "nodeSelector": {
+            "type": "object",
+            "additionalProperties": false
+        },
+        "owner": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "subject": {
+                    "type": "string"
+                }
+            }
+        },
+        "podSecurityContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "fsGroup": {
+                    "type": "integer"
+                },
+                "runAsGroup": {
+                    "type": "integer"
+                },
+                "runAsNonRoot": {
+                    "type": "boolean"
+                },
+                "runAsUser": {
+                    "type": "integer"
+                },
+                "seccompProfile": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "type": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "port": {
+            "type": "integer"
+        },
+        "registry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "domain": {
+                    "type": "string"
+                }
+            }
+        },
+        "replicaCount": {
+            "type": "integer"
+        },
+        "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "limits": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "cpu": {
+                            "type": "string"
+                        },
+                        "memory": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "requests": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "cpu": {
+                            "type": "string"
+                        },
+                        "memory": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "securityContext": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "allowPrivilegeEscalation": {
+                    "type": "boolean"
+                },
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "drop": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "readOnlyRootFilesystem": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "serviceAccount": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "annotations": {
+                    "type": "object",
+                    "additionalProperties": false
+                },
+                "create": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "telemetry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "includeAccountUuid": {
+                    "type": "boolean"
+                },
+                "includeSessionId": {
+                    "type": "boolean"
+                },
+                "includeVersion": {
+                    "type": "boolean"
+                },
+                "logToolDetails": {
+                    "type": "boolean"
+                },
+                "logUserPrompts": {
+                    "type": "boolean"
+                },
+                "logsExportIntervalMs": {
+                    "type": "integer"
+                },
+                "logsExporter": {
+                    "type": "string"
+                },
+                "metricExportIntervalMs": {
+                    "type": "integer"
+                },
+                "metricsExporter": {
+                    "type": "string"
+                },
+                "otlp": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "endpoint": {
+                            "type": "string"
+                        },
+                        "headers": {
+                            "type": "string"
+                        },
+                        "protocol": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "resourceAttributes": {
+                    "type": "string"
+                },
+                "scrapeAnnotations": {
+                    "type": "boolean"
+                },
+                "serviceMonitor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "interval": {
+                            "type": "string"
+                        },
+                        "namespaceSelector": {
+                            "type": "object",
+                            "additionalProperties": false
+                        },
+                        "scrapeTimeout": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "tolerations": {
+            "type": "array"
+        },
+        "toolchainImage": {
+            "type": "string"
+        },
+        "workspace": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "existingClaim": {
+                    "type": "string"
+                },
+                "gitDepth": {
+                    "type": "integer"
+                },
+                "gitImage": {
+                    "type": "string"
+                },
+                "gitRef": {
+                    "type": "string"
+                },
+                "gitRepo": {
+                    "type": "string"
+                },
+                "gitResources": {
+                    "type": "object",
+                    "additionalProperties": false
+                },
+                "gitSecretName": {
+                    "type": "string"
+                },
+                "gitTimeout": {
+                    "type": "integer"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "storageClass": {
+                    "type": "string"
+                }
+            }
         }
-      }
     }
-  }
 }
