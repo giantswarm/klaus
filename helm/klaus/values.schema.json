@@ -5,7 +5,7 @@
     "properties": {
         "affinity": {
             "type": "object",
-            "additionalProperties": false
+            "additionalProperties": true
         },
         "anthropicApiKey": {
             "type": "object",
@@ -48,12 +48,18 @@
                 "agentFiles": {
                     "type": "object",
                     "description": "Inline subagent files (markdown format) -- These are mounted as .claude/agents/<name>.md files. Claude Code discovers them and makes them available for delegation via the Task tool, and for selection as the main agent via activeAgent or the MCP agent parameter. Subagents defined here have lower priority than those in `agents` (JSON). See https://code.claude.com/docs/en/sub-agents Example: agentFiles: researcher: content: | name: researcher description: Research agent that gathers information tools: Read, Grep, Glob You are a research agent...",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
                 },
                 "agents": {
                     "type": "object",
                     "description": "Subagents (JSON format, highest priority) -- Subagents are specialized AI assistants that the main Claude Code agent can delegate work to via the built-in \"Task\" tool. Each runs in its own context window with its own prompt, tools, model, and permissions. These have the highest priority and override agent files with the same name. See https://code.claude.com/docs/en/sub-agents Example: agents: reviewer: description: \"Reviews code changes. Use proactively after edits.\" prompt: \"You are a senior code reviewer...\" tools: [\"Read\", \"Grep\", \"Glob\", \"Bash\"] model: \"sonnet\" deployer: description: \"Handles deployments\" prompt: \"You are a deployment specialist...\"",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
                 },
                 "allowedTools": {
                     "type": "array"
@@ -72,12 +78,16 @@
                 },
                 "hookScripts": {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "hooks": {
                     "type": "object",
                     "description": "Hooks -- hooks defines Claude Code lifecycle hooks, rendered to settings.json. Mutually exclusive with settingsFile. Example: hooks: PreToolUse: - matcher: \"Bash\" hooks: - type: command command: /etc/klaus/hooks/block-dangerous.sh",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "array"
+                    }
                 },
                 "includePartialMessages": {
                     "type": "boolean",
@@ -108,7 +118,10 @@
                 },
                 "mcpServers": {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
                 },
                 "mcpTimeout": {
                     "type": "integer"
@@ -141,7 +154,10 @@
                 "skills": {
                     "type": "object",
                     "description": "Inline skills -- Supported frontmatter fields: description, disableModelInvocation, userInvocable, allowedTools, model, context, agent, argumentHint. Example: skills: api-conventions: description: \"API design patterns\" content: | When writing API endpoints...",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "object",
+                        "additionalProperties": true
+                    }
                 },
                 "strictMcpConfig": {
                     "type": "boolean"
@@ -203,7 +219,9 @@
         },
         "nodeSelector": {
             "type": "object",
-            "additionalProperties": false
+            "additionalProperties": {
+                "type": "string"
+            }
         },
         "owner": {
             "type": "object",
@@ -319,7 +337,9 @@
             "properties": {
                 "annotations": {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "create": {
                     "type": "boolean"
@@ -399,7 +419,7 @@
                         },
                         "namespaceSelector": {
                             "type": "object",
-                            "additionalProperties": false
+                            "additionalProperties": true
                         },
                         "scrapeTimeout": {
                             "type": "string"
@@ -438,7 +458,7 @@
                 },
                 "gitResources": {
                     "type": "object",
-                    "additionalProperties": false
+                    "additionalProperties": true
                 },
                 "gitSecretName": {
                     "type": "string"
