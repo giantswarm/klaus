@@ -19,6 +19,21 @@
                 }
             }
         },
+        "baseDomain": {
+            "type": "string"
+        },
+        "bootstrapMode": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "chartOperator": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "ciliumNetworkPolicy": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "claude": {
             "type": "object",
             "additionalProperties": false,
@@ -140,6 +155,25 @@
                 }
             }
         },
+        "cluster": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "clusterCA": {
+            "type": "string"
+        },
+        "clusterCIDR": {
+            "type": "string"
+        },
+        "clusterDNSIP": {
+            "type": "string"
+        },
+        "clusterID": {
+            "type": "string"
+        },
+        "gcpProject": {
+            "type": "string"
+        },
         "global": {
             "type": "object",
             "additionalProperties": false,
@@ -209,6 +243,9 @@
         },
         "port": {
             "type": "integer"
+        },
+        "provider": {
+            "type": "string"
         },
         "registry": {
             "type": "object",
@@ -291,6 +328,9 @@
                     "type": "string"
                 }
             }
+        },
+        "subscriptionID": {
+            "type": "string"
         },
         "telemetry": {
             "type": "object",
