@@ -54,7 +54,7 @@ claude:
   #       args: ["-y", "@bytebase/dbhub"]
   #       env:
   #         DB_URL: "${DATABASE_URL}"
-  mcpServers: {}
+  mcpServers: {}  # @schema additionalProperties: {type: object, additionalProperties: true}
   # mcpServerSecrets injects Kubernetes Secret values as container env vars
   # for ${VAR} expansion in MCP server configuration.
   # Example:
@@ -131,7 +131,7 @@ claude:
   #       description: "API design patterns"
   #       content: |
   #         When writing API endpoints...
-  skills: {}
+  skills: {}  # @schema additionalProperties: {type: object, additionalProperties: true}
 
   # -- Inline subagent files (markdown format) --
   # agentFiles defines markdown-format subagent definitions loaded via --add-dir.
@@ -150,7 +150,7 @@ claude:
   #         tools: Read, Grep, Glob
   #         ---
   #         You are a research agent...
-  agentFiles: {}
+  agentFiles: {}  # @schema additionalProperties: {type: object, additionalProperties: true}
 
   # -- Hooks --
   # hooks defines Claude Code lifecycle hooks, rendered to settings.json.
@@ -162,7 +162,7 @@ claude:
   #         hooks:
   #           - type: command
   #             command: /etc/klaus/hooks/block-dangerous.sh
-  hooks: {}
+  hooks: {}  # @schema additionalProperties: {type: array}
   # hookScripts defines hook script contents mounted at /etc/klaus/hooks/ with mode 0755.
   # Example:
   #   hookScripts:
@@ -170,7 +170,7 @@ claude:
   #       #!/bin/bash
   #       INPUT=$(cat)
   #       exit 0
-  hookScripts: {}
+  hookScripts: {}  # @schema additionalProperties: {type: string}
 
   # -- Plugins --
   # plugins references Klaus plugins stored in OCI registries, delivered via
@@ -202,7 +202,7 @@ claude:
   #     deployer:
   #       description: "Handles deployments"
   #       prompt: "You are a deployment specialist..."
-  agents: {}
+  agents: {}  # @schema additionalProperties: {type: object, additionalProperties: true}
   # activeAgent selects which agent runs as the top-level agent for the session
   # (--agent flag). This changes the main agent persona, NOT which subagents
   # are available. The selected agent can still delegate to other subagents.
@@ -275,7 +275,7 @@ workspace:
   #     limits:
   #       cpu: 500m
   #       memory: 512Mi
-  gitResources: {}
+  gitResources: {}  # @schema additionalProperties: true
 
 # OpenTelemetry monitoring configuration.
 # These env vars are inherited by the Claude Code subprocess, enabling its
@@ -328,7 +328,7 @@ telemetry:
     # namespaceSelector restricts which namespaces the ServiceMonitor
     # matches. Leave empty to match only the release namespace (default).
     # Set any=true for cross-namespace matching, or use matchNames.
-    namespaceSelector: {}
+    namespaceSelector: {}  # @schema additionalProperties: true
 
 resources:
   limits:
@@ -356,13 +356,13 @@ securityContext:
 serviceAccount:
   create: true
   name: ""
-  annotations: {}
+  annotations: {}  # @schema additionalProperties: {type: string}
 
-nodeSelector: {}
+nodeSelector: {}  # @schema additionalProperties: {type: string}
 
 tolerations: []
 
-affinity: {}
+affinity: {}  # @schema additionalProperties: true
 
 global:
   podSecurityStandards:
