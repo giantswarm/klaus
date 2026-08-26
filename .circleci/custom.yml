@@ -13,9 +13,10 @@
 #   - Aliyun mirrors (sync-china-registry) for the 3 extra variants
 #   - branch dev-chart push (the golden pipeline only builds + tests on branches)
 #
-# Downstream notification is NOT here: the repository_dispatch to the toolchain
-# repos runs in .github/workflows/notify-downstream.yaml, where the
-# DOWNSTREAM_DISPATCH_TOKEN secret actually exists.
+# Downstream notification is NOT here, and no longer exists anywhere: the
+# toolchain repos pick new klaus base images up through their own Renovate
+# `klaus-images` group, which collapses a burst of releases into one bump PR
+# per repo. See giantswarm/klaus#442.
 version: 2.1
 
 workflows:
