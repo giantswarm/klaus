@@ -9,12 +9,12 @@
 # Auto-release run itself is not subject to that rule.
 #
 # Why the registry wait: the same tag push starts the CircleCI pipeline that
-# builds and pushes the images, which takes ~15-20 minutes. The downstream
+# builds and pushes the images, which takes several minutes. The downstream
 # repos build immediately on dispatch, so dispatching before the manifests
 # exist makes them fail. That ordering guarantee is the only reason dispatch
-# ever lived in CircleCI -- polling gsoci reproduces it without coupling
-# dispatch to the push jobs (notably the Aliyun mirror, which routinely times
-# out on multi-arch images).
+# ever lived in CircleCI -- polling gsoci reproduces it without a cross-system
+# `requires` chain, and gates on the images the downstream repos actually
+# consume rather than on whichever push jobs happen to be listed.
 name: Notify downstream
 
 on:
