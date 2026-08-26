@@ -1,0 +1,182 @@
+# yamllint disable rule:truthy
+# Tells the klaus toolchain repos that a new klaus release is available, so
+# they bump their `FROM gsoci.azurecr.io/giantswarm/klaus{,-debian}:<version>`
+# lines.
+#
+# Why `workflow_run` and not `release: published` / `push: tags`: Auto-release
+# creates the tag and the release with the repo's GITHUB_TOKEN, and events
+# raised by GITHUB_TOKEN never start a new workflow run. Chaining off the
+# Auto-release run itself is not subject to that rule.
+#
+# Why the registry wait: the same tag push starts the CircleCI pipeline that
+# builds and pushes the images, which takes ~15-20 minutes. The downstream
+# repos build immediately on dispatch, so dispatching before the manifests
+# exist makes them fail. That ordering guarantee is the only reason dispatch
+# ever lived in CircleCI -- polling gsoci reproduces it without coupling
+# dispatch to the push jobs (notably the Aliyun mirror, which routinely times
+# out on multi-arch images).
+name: Notify downstream
+
+on:
+  workflow_run:
+    workflows:
+      - Auto-release
+    types:
+      - completed
+  # Escape hatch: re-dispatch a release whose automatic run failed, or backfill
+  # downstream repos that missed one.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, with or without the leading v (e.g. 0.0.304)
+        required: true
+        type: string
+
+permissions: {}
+
+# Serialize per release, and never cancel a run that is mid-poll -- the images
+# it is waiting for are the whole point.
+concurrency:
+  group: notify-downstream-${{ github.event.workflow_run.head_sha || inputs.version }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: gsoci.azurecr.io
+  # The images downstream `FROM` lines point at. All of them must exist before
+  # we dispatch. klaus-toolchains/base{,-debian} are deliberately absent: no
+  # downstream Dockerfile references them.
+  REQUIRED_IMAGES: giantswarm/klaus giantswarm/klaus-debian
+  DOWNSTREAM_REPOS: giantswarm/klaus-toolchains giantswarm/klaus-toolchains-internal
+
+jobs:
+  dispatch:
+    name: Dispatch klaus-release
+    runs-on: ubuntu-24.04
+    # A failed Auto-release run produced no tag; a manual run carries its own.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: read        # read the tag the Auto-release run created
+    timeout-minutes: 50
+    steps:
+      # Only the workflow_run path has to map a commit back to its tag.
+      - name: Checkout
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0        # full history so the tag walk sees everything
+          fetch-tags: true
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            RAW="$INPUT_VERSION"
+          else
+            # Auto-release tags the commit it ran on, so a tag at that sha is
+            # this release. No tag means the run found nothing releasable.
+            RAW=$(git tag -l 'v*.*.*' --points-at "$HEAD_SHA" | sort -V | tail -n1)
+            if [ -z "$RAW" ]; then
+              echo "::notice::No release tag at ${HEAD_SHA} -- nothing to dispatch"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          # Image tags and downstream `FROM` lines carry no leading v.
+          VERSION="${RAW#v}"
+          if ! echo "$VERSION" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Invalid version: ${RAW}"
+            exit 1
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved klaus release \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for images in the registry
+        if: steps.version.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Multi-arch pushes land as an index, single-arch as a plain
+          # manifest, and architect may emit either OCI or Docker schema 2 --
+          # ask for all four or a valid tag reads as a 404.
+          accept='application/vnd.oci.image.index.v1+json'
+          accept="${accept}, application/vnd.docker.distribution.manifest.list.v2+json"
+          accept="${accept}, application/vnd.oci.image.manifest.v1+json"
+          accept="${accept}, application/vnd.docker.distribution.manifest.v2+json"
+
+          # Anonymous pull token, fetched per probe: ACR hands out 20-minute
+          # tokens and a cold multi-arch build outlasts that.
+          manifest_exists() {
+            local repo="$1" token code
+            token=$(curl -fsS --retry 3 --retry-delay 5 \
+              "https://${REGISTRY}/oauth2/token?service=${REGISTRY}&scope=repository:${repo}:pull" \
+              | jq -r '.access_token')
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: ${accept}" \
+              "https://${REGISTRY}/v2/${repo}/manifests/${VERSION}")
+            [ "$code" = "200" ]
+          }
+
+          deadline=$((SECONDS + 40 * 60))
+          pending="$REQUIRED_IMAGES"
+          while true; do
+            still=""
+            for repo in $pending; do
+              if manifest_exists "$repo"; then
+                echo "found ${REGISTRY}/${repo}:${VERSION}"
+              else
+                still="${still} ${repo}"
+              fi
+            done
+            pending="${still# }"
+            if [ -z "$pending" ]; then
+              break
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out after 40m waiting for ${VERSION}:${still}"
+              exit 1
+            fi
+            echo "still waiting for${still} (${SECONDS}s elapsed)"
+            sleep 30
+          done
+          echo "All images present in ${REGISTRY}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch klaus-release
+        if: steps.version.outputs.skip == 'false'
+        env:
+          # Repo secret. The default GITHUB_TOKEN cannot dispatch into another
+          # repository.
+          GH_TOKEN: ${{ secrets.DOWNSTREAM_DISPATCH_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::DOWNSTREAM_DISPATCH_TOKEN is not set"
+            exit 1
+          fi
+
+          # Every repo is attempted, then the job fails if any dispatch did --
+          # a half-delivered release must not look green.
+          failed=0
+          for repo in $DOWNSTREAM_REPOS; do
+            echo "Dispatching klaus-release ${VERSION} to ${repo}"
+            if gh api --method POST "/repos/${repo}/dispatches" \
+                -f "event_type=klaus-release" \
+                -f "client_payload[version]=${VERSION}"; then
+              echo "- dispatched \`${VERSION}\` to \`${repo}\`" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Failed to dispatch ${VERSION} to ${repo}"
+              echo "- **failed** to dispatch \`${VERSION}\` to \`${repo}\`" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done
+          exit "$failed"

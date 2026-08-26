@@ -11,55 +11,12 @@
 #     klaus-toolchains/base-debian) on branches, main (:latest) and tags
 #   - :latest tagging on main for all 4 variants
 #   - Aliyun mirrors (sync-china-registry) for the 3 extra variants
-#   - notify-downstream repository_dispatch to the toolchain repos on release
 #   - branch dev-chart push (the golden pipeline only builds + tests on branches)
+#
+# Downstream notification is NOT here: the repository_dispatch to the toolchain
+# repos runs in .github/workflows/notify-downstream.yaml, where the
+# DOWNSTREAM_DISPATCH_TOKEN secret actually exists.
 version: 2.1
-
-jobs:
-  notify-downstream:
-    docker:
-    - image: cimg/base:2026.08
-    steps:
-    - run:
-        name: Notify downstream repos of new release
-        command: |
-          VERSION="${CIRCLE_TAG}"
-          if [ -z "$VERSION" ]; then
-            echo "CIRCLE_TAG is empty -- aborting" >&2
-            exit 1
-          fi
-          if [ -z "$DOWNSTREAM_DISPATCH_TOKEN" ]; then
-            echo "DOWNSTREAM_DISPATCH_TOKEN not set -- aborting" >&2
-            exit 1
-          fi
-
-          PAYLOAD=$(jq -cn --arg v "$VERSION" \
-            '{"event_type":"klaus-release","client_payload":{"version":$v}}')
-
-          DOWNSTREAM_REPOS=(
-            "giantswarm/klaus-toolchains"
-            "giantswarm/klaus-toolchains-internal"
-          )
-          FAILED=0
-          for repo in "${DOWNSTREAM_REPOS[@]}"; do
-            echo "Dispatching to $repo ($VERSION)"
-            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-              -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${DOWNSTREAM_DISPATCH_TOKEN}" \
-              "https://api.github.com/repos/${repo}/dispatches" \
-              -d "$PAYLOAD") || true
-            if [ -z "$HTTP_CODE" ]; then
-              echo "  -> curl failed for $repo (network error)" >&2
-              FAILED=1
-            elif [ "$HTTP_CODE" = "204" ]; then
-              echo "  -> Notified $repo"
-            else
-              echo "  -> Failed to notify $repo (HTTP $HTTP_CODE)" >&2
-              FAILED=1
-            fi
-          done
-          exit $FAILED
 
 workflows:
   build:
@@ -238,20 +195,6 @@ workflows:
         name: sync-china-registry-toolchains-base-debian
         image: giantswarm/klaus-toolchains/base-debian
         requires:
-        - push-to-toolchains-debian-release
-        filters:
-          tags:
-            only: /^v.*/
-          branches:
-            ignore: /.*/
-
-    # ---- Tag builds: notify downstream after all images are pushed ----
-    - notify-downstream:
-        context: architect
-        requires:
-        - push-to-registries-release
-        - push-to-registries-debian-release
-        - push-to-toolchains-release
         - push-to-toolchains-debian-release
         filters:
           tags:
