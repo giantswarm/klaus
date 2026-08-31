@@ -80,3 +80,8 @@ require (
 	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+// Pin transitive modules flagged by the OSS Index scan (nancy) in CI.
+// go mod tidy would otherwise resolve them below the fixed versions,
+// because nothing imports them directly.
+replace golang.org/x/mod => golang.org/x/mod v0.40.0
