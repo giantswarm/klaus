@@ -4,7 +4,7 @@
 # append). devctl never touches this file.
 #
 # Generated job names referenced in `requires` below: go-build,
-# push-to-registries-release, execute-chart-tests.
+# execute-chart-tests.
 #
 # What this file carries beyond the golden pipeline:
 #   - 3 extra image variants (klaus-debian, klaus-toolchains/base,
@@ -12,6 +12,33 @@
 #   - :latest tagging on main for all 4 variants
 #   - Aliyun mirrors (sync-china-registry) for the 3 extra variants
 #   - branch dev-chart push (the golden pipeline only builds + tests on branches)
+#
+# Image builds on main and on tags use the orb's native per-architecture shape
+# (architect-orb >= 10.2.0, docs/job/build-image.md): one architect/build-image
+# job per platform on a resource class of that architecture (small for
+# linux/amd64, arm.medium for linux/arm64), each pushing its platform by
+# digest; the push-to-registries-* job with merge-digests: true joins the two
+# digests into the tagged index, signs and attests it. The Dockerfiles run
+# `npm install -g` and copy a Go toolchain, so the arm64 leg used to run under
+# QEMU on the amd64 host and was the critical path.
+#
+# Invariants (architect-orb docs/job/push-to-registries.md):
+#   - `platforms` on the merge job == the set of build-image jobs it requires
+#   - `split-china-push` identical on the build jobs and the merge job
+#   - `tag-latest-branch` only on the merge job (build jobs push by digest, no tags)
+#   - persist-build-version stays false on the build-image jobs (default); the
+#     merge job persists .build_version
+#   - digests land in .image-digests/<image>/<platform>, so the four images of
+#     one pipeline never persist the same workspace path
+#
+# split-china-push is on for the main (:latest) variants as well as the tag
+# variants. On main the version resolves to the release version, because the
+# auto-release tag exists by the time the job checks out, so the orb's push_dev
+# gate does not exclude Aliyun; the direct buildx push to Aliyun from main hit
+# the orb's 20m no-output timeout on 12 of the 13 main pipelines before this
+# change (25-52 min per job, four jobs per merge). Release tags reach Aliyun
+# through the sync-china-registry jobs of the tag pipeline; :latest is
+# published to gsoci only.
 #
 # Downstream notification is NOT here, and no longer exists anywhere: the
 # toolchain repos pick new klaus base images up through their own Renovate
@@ -22,7 +49,9 @@ version: 2.1
 workflows:
   build:
     jobs:
-    # ---- Branch builds: amd64 dev images for PR validation ----
+    # ---- Branch builds: amd64 dev images for PR validation. A single platform
+    #      on an amd64 host, so nothing is emulated here; execute-chart-tests
+    #      deploys the klaus dev image on kind, so this push stays. ----
     - architect/push-to-registries:
         context: architect
         name: push-to-registries
@@ -76,59 +105,230 @@ workflows:
             ignore:
             - main
 
-    # ---- Main branch: tag all image variants as :latest ----
-    - architect/push-to-registries:
+    # ---- Main branch: tag all image variants as :latest. Two native builds
+    #      per variant, merged by the push-to-registries-* job that carries
+    #      tag-latest-branch. ----
+
+    # giantswarm/klaus (Dockerfile)
+    - architect/build-image:
         context: architect
-        name: push-to-registries-latest
-        tag-latest-branch: main
+        name: build-image-latest-amd64
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
         requires:
         - go-build
         filters:
           branches:
             only: main
+    - architect/build-image:
+        context: architect
+        name: build-image-latest-arm64
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-latest
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
+        tag-latest-branch: main
+        requires:
+        - build-image-latest-amd64
+        - build-image-latest-arm64
+        filters:
+          branches:
+            only: main
 
+    # giantswarm/klaus-debian (Dockerfile.debian)
+    - architect/build-image:
+        context: architect
+        name: build-image-debian-latest-amd64
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
+    - architect/build-image:
+        context: architect
+        name: build-image-debian-latest-arm64
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
     - architect/push-to-registries:
         context: architect
         name: push-to-registries-debian-latest
         image: giantswarm/klaus-debian
-        dockerfile: ./Dockerfile.debian
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
         tag-latest-branch: main
+        requires:
+        - build-image-debian-latest-amd64
+        - build-image-debian-latest-arm64
+        filters:
+          branches:
+            only: main
+
+    # giantswarm/klaus-toolchains/base (Dockerfile)
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-latest-amd64
+        image: giantswarm/klaus-toolchains/base
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
         requires:
         - go-build
         filters:
           branches:
             only: main
-
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-latest-arm64
+        image: giantswarm/klaus-toolchains/base
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
     - architect/push-to-registries:
         context: architect
         name: push-to-toolchains-latest
         image: giantswarm/klaus-toolchains/base
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
         tag-latest-branch: main
+        requires:
+        - build-toolchains-latest-amd64
+        - build-toolchains-latest-arm64
+        filters:
+          branches:
+            only: main
+
+    # giantswarm/klaus-toolchains/base-debian (Dockerfile.debian)
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-debian-latest-amd64
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
         requires:
         - go-build
         filters:
           branches:
             only: main
-
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-debian-latest-arm64
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          branches:
+            only: main
     - architect/push-to-registries:
         context: architect
         name: push-to-toolchains-debian-latest
         image: giantswarm/klaus-toolchains/base-debian
-        dockerfile: ./Dockerfile.debian
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
         tag-latest-branch: main
         requires:
-        - go-build
+        - build-toolchains-debian-latest-amd64
+        - build-toolchains-debian-latest-arm64
         filters:
           branches:
             only: main
 
     # ---- Tag builds: the 3 extra image variants (the klaus image itself is
-    #      pushed by the generated push-to-registries-release job) ----
+    #      built by the generated build-image-release-* jobs and merged by
+    #      push-to-registries-release). Same three-job shape; the merge jobs
+    #      keep their names so the sync-china-registry-* jobs below resolve. ----
+
+    # giantswarm/klaus-debian (Dockerfile.debian)
+    - architect/build-image:
+        context: architect
+        name: build-image-debian-release-amd64
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+    - architect/build-image:
+        context: architect
+        name: build-image-debian-release-arm64
+        image: giantswarm/klaus-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
     - architect/push-to-registries:
         context: architect
         name: push-to-registries-debian-release
         image: giantswarm/klaus-debian
-        dockerfile: ./Dockerfile.debian
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
+        requires:
+        - build-image-debian-release-amd64
+        - build-image-debian-release-arm64
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    # giantswarm/klaus-toolchains/base (Dockerfile)
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-release-amd64
+        image: giantswarm/klaus-toolchains/base
+        platform: linux/amd64
+        resource_class: small
         split-china-push: true
         requires:
         - go-build
@@ -137,33 +337,88 @@ workflows:
             only: /^v.*/
           branches:
             ignore: /.*/
-
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-release-arm64
+        image: giantswarm/klaus-toolchains/base
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
     - architect/push-to-registries:
         context: architect
         name: push-to-toolchains-release
         image: giantswarm/klaus-toolchains/base
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
         split-china-push: true
         requires:
-        - go-build
+        - build-toolchains-release-amd64
+        - build-toolchains-release-arm64
         filters:
           tags:
             only: /^v.*/
           branches:
             ignore: /.*/
 
+    # giantswarm/klaus-toolchains/base-debian (Dockerfile.debian)
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-debian-release-amd64
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/amd64
+        resource_class: small
+        split-china-push: true
+        requires:
+        - go-build
+        # TRIAL ONLY (do not merge): run this variant on the trial branch with a
+        # tag suffix, so the three-job shape is exercised end to end without
+        # touching the dev tag the single-job branch push writes.
+        tag-suffix: -native
+        filters:
+          branches:
+            only: trial/native-image-builds
+    - architect/build-image:
+        context: architect
+        name: build-toolchains-debian-release-arm64
+        image: giantswarm/klaus-toolchains/base-debian
+        dockerfile: ./Dockerfile.debian
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        # TRIAL ONLY (do not merge): run this variant on the trial branch with a
+        # tag suffix, so the three-job shape is exercised end to end without
+        # touching the dev tag the single-job branch push writes.
+        tag-suffix: -native
+        filters:
+          branches:
+            only: trial/native-image-builds
     - architect/push-to-registries:
         context: architect
         name: push-to-toolchains-debian-release
         image: giantswarm/klaus-toolchains/base-debian
-        dockerfile: ./Dockerfile.debian
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
         split-china-push: true
         requires:
-        - go-build
+        - build-toolchains-debian-release-amd64
+        - build-toolchains-debian-release-arm64
+        # TRIAL ONLY (do not merge): run this variant on the trial branch with a
+        # tag suffix, so the three-job shape is exercised end to end without
+        # touching the dev tag the single-job branch push writes.
+        tag-suffix: -native
         filters:
-          tags:
-            only: /^v.*/
           branches:
-            ignore: /.*/
+            only: trial/native-image-builds
 
     # ---- Aliyun mirrors for the 3 extra variants (the klaus image is
     #      mirrored by the generated sync-china-registry job) ----

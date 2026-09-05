@@ -5,7 +5,7 @@
 # workflow in .circleci/config.yml merges into this file at pipeline runtime.
 version: 2.1
 orbs:
-  architect: giantswarm/architect@10.3.0
+  architect: giantswarm/architect@10.4.0
 
 workflows:
   build:
@@ -25,13 +25,35 @@ workflows:
           tags:
             only: /^v.*/
 
-    # Branches: validate the image build without pushing anything (push: false
-    # keeps the buildx result in the BuildKit cache). Same hadolint lint and
-    # multi-arch build as the release job, so Dockerfile regressions surface
-    # on the PR instead of at tag time.
-    - architect/push-to-registries:
+    # Native per-architecture image build (opt-in): one architect/build-image
+    # job per platform, each on a resource class of that architecture, so no
+    # RUN step is emulated. The jobs run concurrently and push their platform
+    # by digest; a push-to-registries job with merge-digests: true joins the
+    # digests into the tagged index, signs and attests it. The platform list on
+    # the merge job must match the set of build jobs, and split-china-push /
+    # force-public must be identical on all of them -- the generator keeps
+    # them in step.
+    #
+    # Branches validate the Dockerfile per architecture without pushing (push:
+    # false). Nothing is pushed, so there is no digest to join and no
+    # push-to-registries job on this path.
+    - architect/build-image:
         context: architect
-        name: build-image
+        name: build-image-amd64
+        platform: linux/amd64
+        resource_class: small
+        push: false
+        requires:
+        - go-build
+        filters:
+          branches:
+            ignore:
+            - main
+    - architect/build-image:
+        context: architect
+        name: build-image-arm64
+        platform: linux/arm64
+        resource_class: arm.medium
         push: false
         requires:
         - go-build
@@ -40,15 +62,50 @@ workflows:
             ignore:
             - main
 
-    # Tag builds: push multi-arch image to gsoci + gsociprivate. Aliyun is
-    # handled by the sync-china-registry job below (orb's split-china-push
-    # mechanism), so the buildx push no longer crosses the Pacific.
-    - architect/push-to-registries:
+    # Tag builds: one native build per architecture, then
+    # push-to-registries-release joins the digests into the tagged index in
+    # gsoci + gsociprivate, signs and attests it. Aliyun is handled by the
+    # sync-china-registry job below (the orb's split-china-push mechanism), so
+    # no push crosses the Pacific. Each build job pushes its platform BY
+    # DIGEST, setting no tag: a single-architecture manifest is not
+    # independently useful, and tagging one would publish something consumers
+    # could pull by accident.
+    - architect/build-image:
         context: architect
-        name: push-to-registries-release
+        name: build-image-release-amd64
+        platform: linux/amd64
+        resource_class: small
         split-china-push: true
         requires:
         - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+    - architect/build-image:
+        context: architect
+        name: build-image-release-arm64
+        platform: linux/arm64
+        resource_class: arm.medium
+        split-china-push: true
+        requires:
+        - go-build
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
+    - architect/push-to-registries:
+        context: architect
+        name: push-to-registries-release
+        merge-digests: true
+        platforms: "linux/amd64,linux/arm64"
+        split-china-push: true
+        requires:
+        - build-image-release-amd64
+        - build-image-release-arm64
         filters:
           tags:
             only: /^v.*/
@@ -94,10 +151,13 @@ workflows:
     # Branch: run chart tests after build-chart. When branchPublish pushes a dev
     # image, the test also waits on push-to-registries -- run-tests-with-ats
     # deploys the chart, which pulls that image from gsoci, and gating on the
-    # push avoids an ImagePullBackOff race.
+    # push avoids an ImagePullBackOff race. The architect context carries the
+    # registry credentials the job hands to its kind node, so the chart can pull
+    # private images (gsociprivate) without imagePullSecrets.
     - architect/run-tests-with-ats:
         name: execute-chart-tests
-        app-test-suite_container_tag: "1.0.2"
+        context: architect
+        app-test-suite_container_tag: "1.0.3"
         # app-test-suite 1.x provisions no cluster: the job creates the kind
         # cluster and runs the pinned image against its kubeconfig.
         create_kind_cluster: true
