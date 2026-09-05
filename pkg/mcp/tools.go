@@ -358,6 +358,8 @@ func stopTool(process claudepkg.Prompter) server.ServerTool {
 func resultTool(process claudepkg.Prompter) server.ServerTool {
 	tool := mcp.NewTool("result",
 		mcp.WithDescription("Get the full untruncated result and detailed metadata from the last completed run. "+
+			"result_text is the agent's final message (the last non-empty assistant text when the run ended in tool use), "+
+			"pr_urls lists the pull requests the run created or pushed to. "+
 			"This is a debugging tool for troubleshooting only -- for normal use, check the result field in the status tool output. "+
 			"Use this when the agent produced unexpected results or failed, and you need the full output and message history."),
 	)

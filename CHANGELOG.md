@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `result` MCP tool: `result_text` was empty for every run started through `/v1/chat/completions` (`klausctl prompt`, `klausctl run`, the `klaus_prompt` MCP tool). Only the `prompt` tool's `Submit` path stored the turn result; the chat endpoint drives `RunWithOptions` directly and never did. Each turn's result is now finalized in the stream reader when its result message arrives (or the subprocess exits), in both agent and chat mode, and persisted to the result store. When a turn ends in a tool call and the CLI's result message carries no text, `result_text` is the last non-empty assistant text instead of the concatenation of every assistant message. Fixes [klausctl#269](https://github.com/giantswarm/klausctl/issues/269).
+- `pr_urls` means "pull requests this turn created or pushed to": URLs printed by `gh pr create`, plus PRs addressed by `gh pr view/checkout/merge/comment/...` in a repository the turn `git push`ed to (bare PR numbers resolve against `--repo` or the single pushed repository). Previously every PR URL that appeared in any Bash output was listed, so PRs merely read during research showed up and PRs pushed to via `gh pr merge <number>` did not.
+- `subagent_calls` entries stayed `running` after the parent finished: completion is now detected from the `Agent`/`Task` tool's `tool_result` (matched by `tool_use_id`) instead of only from `<usage>` blocks in assistant text.
+- `tool_result` blocks whose `content` is an array of content blocks (MCP tools) no longer make the whole user message unparseable; their text is flattened, so error counts and PR attribution see them.
+
 ### Changed
 
 

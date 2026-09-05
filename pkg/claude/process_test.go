@@ -856,15 +856,42 @@ func TestCollectResultText(t *testing.T) {
 		}
 	})
 
-	t.Run("falls back to assistant text", func(t *testing.T) {
+	t.Run("falls back to the last non-empty assistant text", func(t *testing.T) {
 		messages := []StreamMessage{
 			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "part 1 "},
 			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "part 2"},
 			{Type: MessageTypeResult},
 		}
 		got := CollectResultText(messages)
-		if got != "part 1 part 2" {
-			t.Errorf("expected %q, got %q", "part 1 part 2", got)
+		if got != "part 2" {
+			t.Errorf("expected %q, got %q", "part 2", got)
+		}
+	})
+
+	t.Run("tool-heavy final turn keeps the last assistant text", func(t *testing.T) {
+		// A run that ends in tool use (e.g. ScheduleWakeup) produces a
+		// result message with an empty result field; the last thing the
+		// agent said is still the result.
+		messages := []StreamMessage{
+			{Type: MessageTypeUser, Text: "do the thing"},
+			{Type: MessageTypeAssistant, Subtype: SubtypeText, Text: "Merged the PR; CI is green."},
+			{Type: MessageTypeAssistant, Subtype: SubtypeToolUse, ToolName: "ScheduleWakeup", ToolID: "t1"},
+			{Type: MessageTypeUser, Message: json.RawMessage(`{"content":[{"type":"tool_result","tool_use_id":"t1","content":"scheduled"}]}`)},
+			{Type: MessageTypeResult, Result: "", TotalCost: 1.5},
+		}
+		got := CollectResultText(messages)
+		if got != "Merged the PR; CI is green." {
+			t.Errorf("expected last assistant text, got %q", got)
+		}
+	})
+
+	t.Run("ignores the synthetic user prompt", func(t *testing.T) {
+		messages := []StreamMessage{
+			syntheticUserMessage("prompt text"),
+			{Type: MessageTypeResult},
+		}
+		if got := CollectResultText(messages); got != "" {
+			t.Errorf("expected empty, got %q", got)
 		}
 	})
 
