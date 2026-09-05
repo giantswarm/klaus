@@ -84,7 +84,6 @@ type Process struct {
 	toolCalls     map[string]int
 	modelUsage    map[string]int
 	prURLs        []string
-	toolUseIDs    map[string]string // toolUseID -> toolName
 	errorCount    int
 	tokenUsage    TokenUsage
 	lastMessage   string
@@ -92,8 +91,14 @@ type Process struct {
 	subagents     *subagentTracker
 	liveMessages  []StreamMessage
 
-	// result stores the output of the last completed Submit run,
-	// allowing callers to retrieve results asynchronously.
+	// turnStart is the index into liveMessages where the current (or last)
+	// prompt's messages begin. The turn's result is derived from
+	// liveMessages[turnStart:] when the subprocess exits.
+	turnStart int
+
+	// result stores the output of the last completed run (started via
+	// Submit or RunWithOptions), allowing callers to retrieve it
+	// asynchronously.
 	result resultState
 
 	// resultStore persists results to disk so they survive restarts.
@@ -177,7 +182,6 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
 	p.prURLs = nil
-	p.toolUseIDs = make(map[string]string)
 	p.errorCount = 0
 	p.tokenUsage = TokenUsage{}
 	p.totalCost = 0
@@ -185,6 +189,10 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
+	// The previous turn's result is cleared now that a new one starts; it
+	// remains available on disk via the result store.
+	p.result = resultState{}
+	p.turnStart = len(p.liveMessages)
 
 	// Inject a synthetic user message so the prompt appears in liveMessages.
 	// The Claude CLI only emits assistant/system/result on stdout; the user's
@@ -275,10 +283,15 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			} else if p.status == ProcessStatusBusy {
 				p.status = ProcessStatusIdle
 			}
+			// The subprocess exit ends the turn: store its result before
+			// signalling completion so waiters see the final state.
+			p.result = turnResult(p.liveMessages, p.turnStart)
+			p.prURLs = CollectPRURLs(p.result.messages)
 			status := p.status
 			close(done)
 			p.mu.Unlock()
 			metrics.SetProcessStatus(string(status))
+			p.persistTurnResult()
 		}()
 
 		scanner := bufio.NewScanner(stdout)
@@ -322,9 +335,6 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 					p.toolCallCount++
 					p.lastToolName = msg.ToolName
 					p.toolCalls[msg.ToolName]++
-					if msg.ToolID != "" {
-						p.toolUseIDs[msg.ToolID] = msg.ToolName
-					}
 					p.subagents.handleToolUse(msg)
 				} else {
 					p.subagents.handleMessage(msg)
@@ -332,19 +342,9 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			} else {
 				p.subagents.handleMessage(msg)
 			}
-			// Extract PR URLs and count errors from tool_result content blocks.
-			if blocks := ExtractToolResults(msg); len(blocks) > 0 {
-				for _, block := range blocks {
-					// Only extract PR URLs from Bash tool results to avoid
-					// false positives from file content (Read, Write, etc.).
-					if block.ToolUseID == "" || isBashTool(p.toolUseIDs[block.ToolUseID]) {
-						p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
-					}
-					if block.IsError {
-						p.errorCount++
-					}
-				}
-			}
+			// Count errors from tool_result content blocks. PR URLs are
+			// attributed once the turn completes (see CollectPRURLs).
+			p.errorCount += countErrors(ExtractToolResults(msg))
 			// Aggregate token usage from assistant messages.
 			if msg.Usage != nil {
 				p.tokenUsage.InputTokens += msg.Usage.InputTokens
@@ -603,9 +603,32 @@ func (p *Process) ResultDetail() ResultDetailInfo {
 	return detail
 }
 
+// persistTurnResult writes the in-memory result of the last turn to the
+// result store so it survives a restart of the klaus process. It is called
+// after the turn has been finalized, without holding the lock.
+func (p *Process) persistTurnResult() {
+	p.mu.RLock()
+	store := p.resultStore
+	rs := p.result
+	status := p.status
+	sessionID := p.sessionID
+	lastError := p.lastError
+	var cost *float64
+	if p.costSeen {
+		cost = Float64Ptr(p.totalCost)
+	}
+	var tokenUsage *TokenUsage
+	if p.tokenUsage != (TokenUsage{}) {
+		tu := p.tokenUsage
+		tokenUsage = &tu
+	}
+	p.mu.RUnlock()
+	persistResult(store, rs, status, sessionID, cost, lastError, tokenUsage)
+}
+
 // Messages returns the current conversation messages. liveMessages accumulates
 // across turns, so it is preferred over result.messages (which only contains
-// the last Submit run). Falls back to persisted state on disk when empty.
+// the last run). Falls back to persisted state on disk when empty.
 func (p *Process) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status

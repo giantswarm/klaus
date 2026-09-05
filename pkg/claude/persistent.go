@@ -38,7 +38,6 @@ type PersistentProcess struct {
 	toolCalls     map[string]int
 	modelUsage    map[string]int
 	prURLs        []string
-	toolUseIDs    map[string]string // toolUseID -> toolName
 	errorCount    int
 	tokenUsage    TokenUsage
 	lastMessage   string
@@ -46,11 +45,17 @@ type PersistentProcess struct {
 	subagents     *subagentTracker
 	liveMessages  []StreamMessage
 
+	// turnStart is the index into liveMessages where the current (or last)
+	// prompt's messages begin. The turn's result is derived from
+	// liveMessages[turnStart:] when its final result message arrives.
+	turnStart int
+
 	// stderrTail captures the last few lines of stderr for crash diagnostics.
 	stderrTail *ringBuffer
 
-	// result stores the output of the last completed Submit run,
-	// allowing callers to retrieve results asynchronously.
+	// result stores the output of the last completed run (started via
+	// Submit or RunWithOptions), allowing callers to retrieve it
+	// asynchronously.
 	result resultState
 
 	// resultStore persists results to disk so they survive restarts.
@@ -97,7 +102,6 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 		opts:        opts,
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
-		toolUseIDs:  make(map[string]string),
 		done:        done,
 		processDone: processDone,
 		autoRestart: true,
@@ -296,11 +300,16 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			close(p.responseCh)
 			p.responseCh = nil
 		}
-		// Close the done channel for any active prompt.
+		// Close the done channel for any active prompt, storing what the
+		// agent produced so far as that prompt's result.
+		turnFinalized := false
 		select {
 		case <-p.done:
 			// Already closed.
 		default:
+			p.result = turnResult(p.liveMessages, p.turnStart)
+			p.prURLs = CollectPRURLs(p.result.messages)
+			turnFinalized = true
 			close(p.done)
 		}
 		status := p.status
@@ -308,6 +317,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		close(processDone)
 		p.mu.Unlock()
 		metrics.SetProcessStatus(string(status))
+		if turnFinalized {
+			p.persistTurnResult()
+		}
 		slog.Info("claude: persistent subprocess exited", "wait_err", waitErr, "last_error", lastErr, "status", status)
 	}()
 
@@ -370,9 +382,6 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				p.toolCallCount++
 				p.lastToolName = msg.ToolName
 				p.toolCalls[msg.ToolName]++
-				if msg.ToolID != "" {
-					p.toolUseIDs[msg.ToolID] = msg.ToolName
-				}
 				p.subagents.handleToolUse(msg)
 			} else {
 				p.subagents.handleMessage(msg)
@@ -380,19 +389,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		} else {
 			p.subagents.handleMessage(msg)
 		}
-		// Extract PR URLs and count errors from tool_result content blocks.
-		if blocks := ExtractToolResults(msg); len(blocks) > 0 {
-			for _, block := range blocks {
-				// Only extract PR URLs from Bash tool results to avoid
-				// false positives from file content (Read, Write, etc.).
-				if block.ToolUseID == "" || isBashTool(p.toolUseIDs[block.ToolUseID]) {
-					p.prURLs = appendUnique(p.prURLs, extractPRURLs(block.Content)...)
-				}
-				if block.IsError {
-					p.errorCount++
-				}
-			}
-		}
+		// Count errors from tool_result content blocks. PR URLs are
+		// attributed once the turn completes (see CollectPRURLs).
+		p.errorCount += countErrors(ExtractToolResults(msg))
 		// Aggregate token usage from assistant messages.
 		if msg.Usage != nil {
 			p.tokenUsage.InputTokens += msg.Usage.InputTokens
@@ -444,6 +443,13 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 				msg.Result != "" ||
 				(msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0))
 			p.mu.Lock()
+			if isFinal {
+				// The final result ends the turn: store its result before
+				// the channel closes so the drain goroutine and any waiter
+				// on Done() observe a finalized turn.
+				p.result = turnResult(p.liveMessages, p.turnStart)
+				p.prURLs = CollectPRURLs(p.result.messages)
+			}
 			if p.responseCh != nil && isFinal {
 				close(p.responseCh)
 				p.responseCh = nil
@@ -464,6 +470,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 			status := p.status
 			p.mu.Unlock()
 			metrics.SetProcessStatus(string(status))
+			if isFinal {
+				p.persistTurnResult()
+			}
 		}
 	}
 
@@ -534,7 +543,6 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.toolCalls = make(map[string]int)
 	p.modelUsage = make(map[string]int)
 	p.prURLs = nil
-	p.toolUseIDs = make(map[string]string)
 	p.errorCount = 0
 	p.tokenUsage = TokenUsage{}
 	p.totalCost = 0
@@ -542,6 +550,10 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 	p.lastMessage = ""
 	p.lastToolName = ""
 	p.subagents.reset()
+	// The previous turn's result is cleared now that a new one starts; it
+	// remains available on disk via the result store.
+	p.result = resultState{}
+	p.turnStart = len(p.liveMessages)
 
 	// Inject a synthetic user message so the prompt appears in liveMessages.
 	// The Claude CLI only emits assistant/system/result on stdout; the user's
@@ -797,9 +809,32 @@ func (p *PersistentProcess) ResultDetail() ResultDetailInfo {
 	return detail
 }
 
+// persistTurnResult writes the in-memory result of the last turn to the
+// result store so it survives a restart of the klaus process. It is called
+// after the turn has been finalized, without holding the lock.
+func (p *PersistentProcess) persistTurnResult() {
+	p.mu.RLock()
+	store := p.resultStore
+	rs := p.result
+	status := p.status
+	sessionID := p.sessionID
+	lastError := p.lastError
+	var cost *float64
+	if p.costSeen {
+		cost = Float64Ptr(p.totalCost)
+	}
+	var tokenUsage *TokenUsage
+	if p.tokenUsage != (TokenUsage{}) {
+		tu := p.tokenUsage
+		tokenUsage = &tu
+	}
+	p.mu.RUnlock()
+	persistResult(store, rs, status, sessionID, cost, lastError, tokenUsage)
+}
+
 // Messages returns the current conversation messages. liveMessages accumulates
 // across turns, so it is preferred over result.messages (which only contains
-// the last Submit run). Falls back to persisted state on disk when empty.
+// the last run). Falls back to persisted state on disk when empty.
 func (p *PersistentProcess) Messages() MessagesInfo {
 	p.mu.RLock()
 	status := p.status

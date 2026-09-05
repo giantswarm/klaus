@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"time"
 )
 
@@ -494,8 +493,27 @@ type ToolResultBlock struct {
 	IsError   bool   `json:"is_error"`
 }
 
-// prURLPattern matches GitHub pull request URLs in tool result content.
-var prURLPattern = regexp.MustCompile(`https://github\.com/[\w.\-]+/[\w.\-]+/pull/\d+`)
+// UnmarshalJSON accepts tool_result blocks whose content is either a plain
+// string (built-in tools such as Bash) or an array of content blocks (MCP
+// tools), flattening the latter to their text. Without this, one array-valued
+// block made the whole user message unparseable and its tool results (PR
+// URLs, error flags) were silently dropped.
+func (b *ToolResultBlock) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Type      string          `json:"type"`
+		ToolUseID string          `json:"tool_use_id"`
+		Content   json.RawMessage `json:"content"`
+		IsError   bool            `json:"is_error"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	b.Type = aux.Type
+	b.ToolUseID = aux.ToolUseID
+	b.IsError = aux.IsError
+	b.Content = extractToolResultContent(aux.Content)
+	return nil
+}
 
 // maxModelNameLen caps model name strings to prevent unbounded map key growth.
 const maxModelNameLen = 256
@@ -533,21 +551,6 @@ func ExtractToolResults(msg StreamMessage) []ToolResultBlock {
 		}
 	}
 	return results
-}
-
-// isBashTool reports whether the given tool name refers to a Bash/shell tool
-// whose output may contain real PR URLs (as opposed to file content tools like
-// Read/Write that may contain PR URLs embedded in source code or docs).
-func isBashTool(name string) bool {
-	return name == ToolNameBash || name == "bash"
-}
-
-// maxPRURLsPerBlock caps the number of PR URLs extracted from a single content block.
-const maxPRURLsPerBlock = 20
-
-// extractPRURLs returns GitHub PR URLs found in the given text, capped at maxPRURLsPerBlock.
-func extractPRURLs(text string) []string {
-	return prURLPattern.FindAllString(text, maxPRURLsPerBlock)
 }
 
 // countErrors returns the number of tool_result blocks with is_error set to true.
@@ -600,40 +603,6 @@ func CollectModelUsage(messages []StreamMessage) map[string]int {
 		return nil
 	}
 	return usage
-}
-
-// CollectPRURLs extracts unique GitHub PR URLs from tool_result content blocks
-// that correspond to Bash/shell tool invocations. Tool results from file-reading
-// tools (Read, Write, etc.) are skipped to avoid false positives from PR URLs
-// embedded in source code or documentation.
-func CollectPRURLs(messages []StreamMessage) []string {
-	// Build a map from tool_use_id to tool_name by scanning assistant tool_use messages.
-	toolNames := make(map[string]string)
-	for _, msg := range messages {
-		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeToolUse && msg.ToolID != "" {
-			toolNames[msg.ToolID] = msg.ToolName
-		}
-	}
-
-	var urls []string
-	for _, msg := range messages {
-		blocks := ExtractToolResults(msg)
-		for _, block := range blocks {
-			// Only extract PR URLs from Bash tool results.
-			if block.ToolUseID != "" {
-				toolName := toolNames[block.ToolUseID]
-				if !isBashTool(toolName) {
-					continue
-				}
-			}
-			found := extractPRURLs(block.Content)
-			urls = appendUnique(urls, found...)
-		}
-	}
-	if len(urls) == 0 {
-		return nil
-	}
-	return urls
 }
 
 // CollectErrorCount counts tool_result blocks with is_error set to true.
@@ -737,22 +706,34 @@ func Truncate(s string, maxLen int) string {
 	return string(runes[:maxLen]) + "..."
 }
 
-// CollectResultText extracts the result text from a completed set of stream messages.
-// It returns the text from the last result message, falling back to concatenated
-// assistant text messages if no result message contains text.
+// CollectResultText returns the result text of a completed turn: the text of
+// the last result message when it carries one, otherwise the last non-empty
+// assistant text of the turn. The fallback covers turns that end in tool use
+// (the Claude CLI then emits a result message with an empty result field), so
+// callers still see what the agent last said instead of nothing.
 func CollectResultText(messages []StreamMessage) string {
-	// Try to get result from the last result message.
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Type == MessageTypeResult && messages[i].Result != "" {
 			return messages[i].Result
 		}
 	}
-	// Fallback: concatenate assistant text messages.
-	var text string
-	for _, msg := range messages {
-		if msg.Type == MessageTypeAssistant && msg.Subtype == SubtypeText {
-			text += msg.Text
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Type == MessageTypeAssistant && messages[i].Text != "" {
+			return messages[i].Text
 		}
 	}
-	return text
+	return ""
+}
+
+// turnResult builds the stored result of a completed turn from the messages
+// recorded since its prompt was submitted (live[start:]). Both the MCP prompt
+// tool (Submit) and the chat completions endpoint (RunWithOptions) end up
+// here, so the result tool reports the last turn regardless of which surface
+// started it.
+func turnResult(live []StreamMessage, start int) resultState {
+	if start < 0 || start > len(live) {
+		start = 0
+	}
+	turn := copyStreamMessages(live[start:])
+	return resultState{text: CollectResultText(turn), messages: turn, completed: true}
 }

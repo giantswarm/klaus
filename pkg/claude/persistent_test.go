@@ -515,7 +515,6 @@ func main() {
 		opts:        DefaultOptions(),
 		status:      ProcessStatusIdle,
 		subagents:   newSubagentTracker(),
-		toolUseIDs:  make(map[string]string),
 		done:        done,
 		processDone: processDone,
 		autoRestart: false, // disable auto-restart for test isolation
@@ -633,6 +632,11 @@ func main() {
 
 	if lastErr == "" {
 		t.Error("expected lastError to be set after crash")
+	}
+
+	// The interrupted turn is finalized with what the agent said so far.
+	if got := p.ResultDetail().ResultText; got != "partial response" {
+		t.Errorf("ResultDetail().ResultText = %q, want %q", got, "partial response")
 	}
 }
 

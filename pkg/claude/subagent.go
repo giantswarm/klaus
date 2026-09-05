@@ -115,13 +115,29 @@ var usageBlockRe = regexp.MustCompile(
 		`</usage>`,
 )
 
-// handleMessage processes a non-tool_use stream message looking for subagent
-// result data via <usage> blocks in text content. Must NOT be called with
-// tool_use messages (use handleToolUse for those). Returns true if a subagent
-// was completed.
+// handleMessage processes a non-tool_use stream message looking for the
+// completion of an in-flight subagent. Must NOT be called with tool_use
+// messages (use handleToolUse for those). Returns true if a subagent was
+// completed.
+//
+// A subagent completes when the user message carrying the tool_result for its
+// dispatch arrives; the result is matched by tool_use_id. Older transcripts
+// that surface the subagent's <usage> block as assistant text are still
+// recognised by the FIFO fallback below.
 func (st *subagentTracker) handleMessage(msg StreamMessage) bool {
 	if len(st.inflight) == 0 {
 		return false
+	}
+
+	completed := false
+	for _, block := range ExtractToolResults(msg) {
+		if inf, ok := st.inflight[block.ToolUseID]; ok {
+			st.completeSubagent(block.ToolUseID, inf, block.Content)
+			completed = true
+		}
+	}
+	if completed {
+		return true
 	}
 
 	// Look for <usage> blocks in text content that signal subagent completion.
