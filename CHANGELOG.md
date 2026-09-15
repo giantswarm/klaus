@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pr_urls` means "pull requests this turn created or pushed to": URLs printed by `gh pr create`, plus PRs addressed by `gh pr view/checkout/merge/comment/...` in a repository the turn `git push`ed to (bare PR numbers resolve against `--repo` or the single pushed repository). Previously every PR URL that appeared in any Bash output was listed, so PRs merely read during research showed up and PRs pushed to via `gh pr merge <number>` did not.
 - `subagent_calls` entries stayed `running` after the parent finished: completion is now detected from the `Agent`/`Task` tool's `tool_result` (matched by `tool_use_id`) instead of only from `<usage>` blocks in assistant text.
 - `tool_result` blocks whose `content` is an array of content blocks (MCP tools) no longer make the whole user message unparseable; their text is flattened, so error counts and PR attribution see them.
+- Drop the version badges from the chart README so a release PR's `Chart.yaml` version bump no longer leaves `README.md` stale and fails the helm-docs pre-commit hook.
 
 ### Changed
 
