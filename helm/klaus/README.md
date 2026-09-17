@@ -1,7 +1,5 @@
 # klaus
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![AppVersion: 0.1.0](https://img.shields.io/badge/AppVersion-0.1.0-informational?style=flat-square)
-
 A Go wrapper around claude-code to orchestrate AI agents within Kubernetes
 
 **Homepage:** <https://github.com/giantswarm/klaus>
