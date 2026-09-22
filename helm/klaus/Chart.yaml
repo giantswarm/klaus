@@ -1,6 +1,7 @@
 apiVersion: v2
 annotations:
-  application.giantswarm.io/team: planeteers
+  application.giantswarm.io/team: bumblebee
+  io.giantswarm.application.team: bumblebee
 name: klaus
 description: A Go wrapper around claude-code to orchestrate AI agents within Kubernetes
 icon: https://s.giantswarm.io/app-icons/klaus/1/light.png
