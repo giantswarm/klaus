@@ -635,6 +635,44 @@ tests:
               secretName: my-git-creds
               defaultMode: 256
 
+  - it: should authenticate through a credential helper, never the clone URL
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+        gitSecretName: "my-git-creds"
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GIT_CONFIG_KEY_0
+            value: credential.helper
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].env[?(@.name == "GIT_CONFIG_VALUE_0")].value
+          pattern: 'password=\$\(cat /etc/git-secret/token\)'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: "git clone 'https://github.com/example/repo.git' /workspace"
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].args[0]
+          pattern: 'x-access-token|/etc/git-secret'
+
+  - it: should not configure a credential helper when gitSecretName is empty
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      workspace:
+        enabled: true
+        gitRepo: "https://github.com/example/repo.git"
+    asserts:
+      - notContains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GIT_CONFIG_KEY_0
+            value: credential.helper
+
   - it: should not mount git-credentials volume when gitSecretName is empty
     documentIndex: 0
     template: templates/deployment.yaml

@@ -261,9 +261,9 @@ workspace:
   # and set this value to the internal image reference.
   gitImage: "alpine/git:v2.54.0"
   # gitSecretName references a K8s Secret containing a personal access token
-  # (key: token) for HTTPS repo authentication. The token is injected into the
-  # clone URL as x-access-token and stripped from the persisted remote URL
-  # after clone/fetch to avoid leaking credentials on the workspace PVC.
+  # (key: token) for HTTPS repo authentication. A git credential helper reads
+  # the token from the mounted Secret when git authenticates, so it never
+  # lands in a remote URL or .git/config on the workspace PVC.
   gitSecretName: ""
   # gitResources sets resource requests/limits for the git-clone init container.
   # Useful for large repositories that require significant memory during clone.

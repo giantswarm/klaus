@@ -35,31 +35,29 @@ spec:
               value: /tmp
             - name: GIT_CONFIG_NOSYSTEM
               value: "1"
+            {{- if .Values.workspace.gitSecretName }}
+            - name: GIT_TERMINAL_PROMPT
+              value: "0"
+            {{- /* A per-process credential helper: git reads the token from the mounted Secret when it authenticates, so it never lands in a remote URL or .git/config. */}}
+            - name: GIT_CONFIG_COUNT
+              value: "1"
+            - name: GIT_CONFIG_KEY_0
+              value: credential.helper
+            - name: GIT_CONFIG_VALUE_0
+              value: '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$(cat /etc/git-secret/token)"; }; f'
+            {{- end }}
           args:
             - |
               set -e
-              {{- if .Values.workspace.gitSecretName }}
-              # Build authenticated URL using shell expansion (avoids sed delimiter issues with token content).
-              REPO='{{ .Values.workspace.gitRepo }}'
-              TOKEN=$(cat /etc/git-secret/token)
-              AUTH_URL="${REPO%%://*}://x-access-token:${TOKEN}@${REPO#*://}"
-              # Ensure credentials are stripped from the persisted remote even on unexpected exit.
-              trap 'cd /workspace 2>/dev/null && git remote set-url origin "$REPO" 2>/dev/null' EXIT
-              {{- end }}
               if [ ! -d /workspace/.git ]; then
-                {{- /* Double quotes required: AUTH_URL needs shell variable expansion; plain repo URL does not. */}}
-                git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}"{{ if .Values.workspace.gitSecretName }}${AUTH_URL}{{ else }}{{ .Values.workspace.gitRepo }}{{ end }}" /workspace
+                git clone {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}'{{ .Values.workspace.gitRepo }}' /workspace
                 {{- if .Values.workspace.gitRef }}
                 cd /workspace && git checkout '{{ .Values.workspace.gitRef }}'
                 {{- end }}
-                {{- if .Values.workspace.gitSecretName }}
-                cd /workspace && git remote set-url origin '{{ .Values.workspace.gitRepo }}'
-                {{- end }}
               else
                 cd /workspace
-                {{- if .Values.workspace.gitSecretName }}
-                git remote set-url origin "${AUTH_URL}"
-                {{- end }}
+                # Reset origin to the configured URL; this also drops credentials an older chart left in it.
+                git remote set-url origin '{{ .Values.workspace.gitRepo }}'
                 git fetch {{ if .Values.workspace.gitDepth }}--depth {{ .Values.workspace.gitDepth }} {{ end }}origin
                 {{- if .Values.workspace.gitRef }}
                 git checkout '{{ .Values.workspace.gitRef }}'
@@ -68,9 +66,6 @@ spec:
                 if git symbolic-ref -q HEAD >/dev/null 2>&1; then
                   git pull --ff-only
                 fi
-                {{- if .Values.workspace.gitSecretName }}
-                git remote set-url origin '{{ .Values.workspace.gitRepo }}'
-                {{- end }}
               fi
           volumeMounts:
             - name: workspace
