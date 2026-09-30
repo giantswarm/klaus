@@ -1230,3 +1230,34 @@ func extractText(t *testing.T, result *mcp.CallToolResult) string {
 	}
 	return tc.Text
 }
+
+func TestPromptRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "session still starting",
+			err:  claudepkg.ErrStarting,
+			want: "failed to start task: claude process is already busy: its session is still starting (SessionStart hooks, MCP servers); the prompt was not queued: send it again once the running prompt has finished (status idle or completed)",
+		},
+		{
+			name: "busy with a prompt",
+			err:  claudepkg.ErrBusy,
+			want: "failed to start task: claude process is already busy with another prompt; the prompt was not queued: send it again once that one has finished (status idle or completed)",
+		},
+		{
+			name: "any other failure",
+			err:  fmt.Errorf("exec: not found"),
+			want: "failed to start task: exec: not found",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := promptRefused("failed to start task", tt.err); got != tt.want {
+				t.Errorf("promptRefused() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

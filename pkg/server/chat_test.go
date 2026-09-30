@@ -846,21 +846,36 @@ func TestHandleChatCompletions_NonStreamingUsage(t *testing.T) {
 }
 
 func TestHandleChatCompletions_BusyReturns429(t *testing.T) {
-	prompter := &chatTestPrompter{
-		status: claude.StatusInfo{Status: claude.ProcessStatusBusy},
-		runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
-			return nil, claude.ErrBusy
-		},
+	tests := []struct {
+		name     string
+		err      error
+		wantBody string
+	}{
+		{name: "busy with a prompt", err: claude.ErrBusy, wantBody: "agent is busy\n"},
+		{name: "session still starting", err: claude.ErrStarting, wantBody: "agent is busy: its session is still starting\n"},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompter := &chatTestPrompter{
+				status: claude.StatusInfo{Status: claude.ProcessStatusBusy},
+				runFn: func(_ context.Context, _ string, _ *claude.RunOptions) (<-chan claude.StreamMessage, error) {
+					return nil, tt.err
+				},
+			}
 
-	body := `{"messages":[{"role":"user","content":"hi"}],"stream":true}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
-	w := httptest.NewRecorder()
+			body := `{"messages":[{"role":"user","content":"hi"}],"stream":true}`
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			w := httptest.NewRecorder()
 
-	handleChatCompletions(prompter)(w, req)
+			handleChatCompletions(prompter)(w, req)
 
-	if w.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429, got %d", w.Code)
+			if w.Code != http.StatusTooManyRequests {
+				t.Errorf("expected 429, got %d", w.Code)
+			}
+			if got := w.Body.String(); got != tt.wantBody {
+				t.Errorf("body = %q, want %q", got, tt.wantBody)
+			}
+		})
 	}
 }
 

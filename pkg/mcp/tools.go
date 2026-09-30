@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -150,7 +151,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 			// outlives the MCP request but is cancelled on shutdown.
 			if err := process.Submit(serverCtx, message, &runOpts); err != nil {
 				metrics.PromptsTotal.WithLabelValues("error", "async").Inc()
-				return mcp.NewToolResultError(fmt.Sprintf("failed to start task: %v", err)), nil
+				return mcp.NewToolResultError(promptRefused("failed to start task", err)), nil
 			}
 
 			metrics.PromptsTotal.WithLabelValues("started", "async").Inc()
@@ -184,7 +185,7 @@ func promptTool(serverCtx context.Context, process claudepkg.Prompter) server.Se
 		ch, err := process.RunWithOptions(ctx, message, &runOpts)
 		if err != nil {
 			metrics.PromptsTotal.WithLabelValues("error", "blocking").Inc()
-			return mcp.NewToolResultError(fmt.Sprintf("claude execution failed: %v", err)), nil
+			return mcp.NewToolResultError(promptRefused("claude execution failed", err)), nil
 		}
 
 		mcpServer := server.ServerFromContext(ctx)
@@ -448,4 +449,16 @@ func optionalFloat(request mcp.CallToolRequest, key string) (float64, error) {
 		return 0, fmt.Errorf("parameter %q must be a number", key)
 	}
 	return f, nil
+}
+
+// promptRefused describes a prompt the process did not take. A busy process
+// does not queue it, so the message says to send it again, and when.
+func promptRefused(prefix string, err error) string {
+	switch {
+	case errors.Is(err, claudepkg.ErrStarting):
+		return fmt.Sprintf("%s: %v; the prompt was not queued: send it again once the running prompt has finished (status idle or completed)", prefix, err)
+	case errors.Is(err, claudepkg.ErrBusy):
+		return fmt.Sprintf("%s: %v with another prompt; the prompt was not queued: send it again once that one has finished (status idle or completed)", prefix, err)
+	}
+	return fmt.Sprintf("%s: %v", prefix, err)
 }
