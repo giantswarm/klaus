@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -11,6 +12,28 @@ import (
 // ErrBusy is returned when a prompt is submitted while the process is already
 // handling another prompt.
 var ErrBusy = errors.New("claude process is already busy")
+
+// ErrStarting is returned when a prompt is submitted while the current
+// prompt's session is still starting: Claude runs its SessionStart hooks and
+// connects its MCP servers before it emits its init message, which can take
+// minutes. It wraps ErrBusy, so a caller checking for ErrBusy still matches.
+var ErrStarting = fmt.Errorf("%w: its session is still starting (SessionStart hooks, MCP servers)", ErrBusy)
+
+// busyError is the refusal for a prompt that arrives while another one runs:
+// ErrStarting until the running session has emitted Claude's init message,
+// ErrBusy after it.
+func busyError(initialized bool) error {
+	if initialized {
+		return ErrBusy
+	}
+	return ErrStarting
+}
+
+// isInit reports whether msg is Claude's init message, emitted once the
+// session has started: after the SessionStart hooks, before the first turn.
+func isInit(msg StreamMessage) bool {
+	return msg.Type == MessageTypeSystem && msg.Subtype == SubtypeInit
+}
 
 // MessageType identifies the kind of message in the stream-json protocol.
 type MessageType string
@@ -23,12 +46,14 @@ const (
 	MessageTypeStreamEvent MessageType = "stream_event"
 )
 
-// MessageSubtype identifies the subtype of an assistant message.
+// MessageSubtype identifies the subtype of an assistant or system message.
 type MessageSubtype string
 
 const (
 	SubtypeText    MessageSubtype = "text"
 	SubtypeToolUse MessageSubtype = "tool_use"
+	// SubtypeInit is the subtype of the system message that starts a session.
+	SubtypeInit MessageSubtype = "init"
 )
 
 // Stream event type names emitted by the Claude CLI inside stream_event envelopes.

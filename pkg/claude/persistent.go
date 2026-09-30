@@ -50,6 +50,10 @@ type PersistentProcess struct {
 	// liveMessages[turnStart:] when its final result message arrives.
 	turnStart int
 
+	// initialized is set once the subprocess has emitted Claude's init
+	// message; until then a second prompt gets ErrStarting. Start resets it.
+	initialized bool
+
 	// stderrTail captures the last few lines of stderr for crash diagnostics.
 	stderrTail *ringBuffer
 
@@ -110,6 +114,9 @@ func NewPersistentProcess(opts Options) *PersistentProcess {
 	}
 }
 
+// errAlreadyRunning is returned by Start when the subprocess runs already.
+var errAlreadyRunning = errors.New("persistent process already running")
+
 // Start launches the persistent Claude subprocess. It must be called before
 // sending prompts. The subprocess runs until Stop() is called or it exits.
 func (p *PersistentProcess) Start(ctx context.Context) error {
@@ -117,10 +124,11 @@ func (p *PersistentProcess) Start(ctx context.Context) error {
 	defer p.mu.Unlock()
 
 	if p.cmd != nil {
-		return fmt.Errorf("persistent process already running")
+		return errAlreadyRunning
 	}
 
 	p.status = ProcessStatusStarting
+	p.initialized = false
 
 	args := p.opts.PersistentArgs()
 
@@ -385,6 +393,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 			p.sessionID = msg.SessionID
 		}
+		if isInit(msg) {
+			p.initialized = true
+		}
 		if msg.Type == MessageTypeAssistant {
 			p.sawContent = true
 			if model := ExtractModel(msg); model != "" {
@@ -534,16 +545,18 @@ func (p *PersistentProcess) RunWithOptions(ctx context.Context, prompt string, r
 
 	if p.cmd == nil {
 		p.mu.Unlock()
-		// Auto-start if not yet started.
-		if err := p.Start(context.Background()); err != nil {
+		// Auto-start if not yet started. A concurrent prompt may have
+		// started it in the meantime; that one then holds the turn below.
+		if err := p.Start(context.Background()); err != nil && !errors.Is(err, errAlreadyRunning) {
 			return nil, err
 		}
 		p.mu.Lock()
 	}
 
 	if p.status == ProcessStatusBusy {
+		err := busyError(p.initialized)
 		p.mu.Unlock()
-		return nil, ErrBusy
+		return nil, err
 	}
 
 	p.status = ProcessStatusBusy

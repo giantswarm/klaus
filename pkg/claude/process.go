@@ -96,6 +96,10 @@ type Process struct {
 	// liveMessages[turnStart:] when the subprocess exits.
 	turnStart int
 
+	// initialized is set once the current prompt's subprocess has emitted
+	// Claude's init message; until then a second prompt gets ErrStarting.
+	initialized bool
+
 	// result stores the output of the last completed run (started via
 	// Submit or RunWithOptions), allowing callers to retrieve it
 	// asynchronously.
@@ -169,11 +173,15 @@ func (p *Process) Run(ctx context.Context, prompt string) (<-chan StreamMessage,
 // RunWithOptions spawns a claude subprocess with per-run option overrides.
 func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *RunOptions) (<-chan StreamMessage, error) {
 	p.mu.Lock()
-	if p.status == ProcessStatusBusy {
+	// Starting counts as busy: another caller is spawning its subprocess
+	// between this lock and the next, and a second spawn would run beside it.
+	if p.status == ProcessStatusBusy || p.status == ProcessStatusStarting {
+		err := busyError(p.initialized)
 		p.mu.Unlock()
-		return nil, ErrBusy
+		return nil, err
 	}
 	p.status = ProcessStatusStarting
+	p.initialized = false
 	p.lastError = ""
 	// Preserve liveMessages and messageCount across turns so that
 	// the MCP messages tool returns the full conversation history
@@ -326,6 +334,9 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 			p.liveMessages = append(p.liveMessages, msg)
 			if msg.Type == MessageTypeSystem && msg.SessionID != "" {
 				p.sessionID = msg.SessionID
+			}
+			if isInit(msg) {
+				p.initialized = true
 			}
 			if msg.Type == MessageTypeAssistant {
 				if model := ExtractModel(msg); model != "" {

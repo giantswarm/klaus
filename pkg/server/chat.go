@@ -114,6 +114,10 @@ func handleChatCompletions(process claudepkg.Prompter) http.HandlerFunc {
 
 		ch, err := process.RunWithOptions(r.Context(), prompt, runOpts)
 		if err != nil {
+			if errors.Is(err, claudepkg.ErrStarting) {
+				http.Error(w, "agent is busy: its session is still starting", http.StatusTooManyRequests)
+				return
+			}
 			if errors.Is(err, claudepkg.ErrBusy) {
 				http.Error(w, "agent is busy", http.StatusTooManyRequests)
 				return
