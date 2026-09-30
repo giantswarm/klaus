@@ -494,6 +494,103 @@ func main() {
 	os.Exit(1)
 }
 `
+	p, ch, promptDone := runPersistentHelper(t, helperSrc)
+
+	// Drain all messages from the response channel.
+	var msgs []StreamMessage
+	for msg := range ch {
+		msgs = append(msgs, msg)
+	}
+
+	// Verify we got messages including the crash error.
+	if len(msgs) == 0 {
+		t.Fatal("expected at least one message from crash, got none")
+	}
+
+	// Find the crash error message.
+	var crashMsg *StreamMessage
+	for i := range msgs {
+		if msgs[i].IsError && msgs[i].Type == MessageTypeResult {
+			crashMsg = &msgs[i]
+			break
+		}
+	}
+
+	if crashMsg == nil {
+		t.Fatal("expected a crash error message in the stream, found none")
+	}
+
+	if !strings.Contains(crashMsg.Result, "exited unexpectedly") {
+		t.Errorf("crash message should mention unexpected exit, got: %s", crashMsg.Result)
+	}
+
+	if !strings.Contains(crashMsg.Result, "1") {
+		t.Errorf("crash message should contain exit code 1, got: %s", crashMsg.Result)
+	}
+
+	// Verify the done channel is closed.
+	select {
+	case <-promptDone:
+	default:
+		t.Error("expected prompt done channel to be closed after crash")
+	}
+
+	// Verify status reflects the error.
+	p.mu.RLock()
+	status := p.status
+	lastErr := p.lastError
+	p.mu.RUnlock()
+
+	if status != ProcessStatusError {
+		t.Errorf("expected status %q after crash, got %q", ProcessStatusError, status)
+	}
+
+	// The exit error carries what the agent said, not only the exit status.
+	if want := "exit status 1: partial response"; lastErr != want {
+		t.Errorf("lastError = %q, want %q", lastErr, want)
+	}
+
+	// The interrupted turn is finalized with what the agent said so far.
+	if got := p.ResultDetail().ResultText; got != "partial response" {
+		t.Errorf("ResultDetail().ResultText = %q, want %q", got, "partial response")
+	}
+}
+
+// TestPersistentProcess_ErrorResultThenExit verifies that when the CLI ends a
+// turn with an error result and then exits, the exit error names the cause
+// and the persisted result carries it.
+func TestPersistentProcess_ErrorResultThenExit(t *testing.T) {
+	helperSrc := `
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	buf := make([]byte, 4096)
+	os.Stdin.Read(buf)
+	fmt.Println(` + "`" + `{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}` + "`" + `)
+	os.Exit(1)
+}
+`
+	p, _, _ := runPersistentHelper(t, helperSrc)
+
+	want := "exit status 1: Not logged in · Please run /login"
+	if got := p.Status().ErrorMessage; got != want {
+		t.Errorf("Status().ErrorMessage = %q, want %q", got, want)
+	}
+	if got := p.ResultDetail().ErrorMessage; got != want {
+		t.Errorf("ResultDetail().ErrorMessage = %q, want %q", got, want)
+	}
+}
+
+// runPersistentHelper builds helperSrc into a binary, wires it into a
+// PersistentProcess as its claude subprocess with an active prompt, sends one
+// user message and waits for the subprocess to exit.
+func runPersistentHelper(t *testing.T, helperSrc string) (*PersistentProcess, chan StreamMessage, chan struct{}) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	srcPath := tmpDir + "/crash_helper.go"
 	binPath := tmpDir + "/crash_helper"
@@ -581,63 +678,7 @@ func main() {
 		t.Fatal("timed out waiting for subprocess to exit")
 	}
 
-	// Drain all messages from the response channel.
-	var msgs []StreamMessage
-	for msg := range ch {
-		msgs = append(msgs, msg)
-	}
-
-	// Verify we got messages including the crash error.
-	if len(msgs) == 0 {
-		t.Fatal("expected at least one message from crash, got none")
-	}
-
-	// Find the crash error message.
-	var crashMsg *StreamMessage
-	for i := range msgs {
-		if msgs[i].IsError && msgs[i].Type == MessageTypeResult {
-			crashMsg = &msgs[i]
-			break
-		}
-	}
-
-	if crashMsg == nil {
-		t.Fatal("expected a crash error message in the stream, found none")
-	}
-
-	if !strings.Contains(crashMsg.Result, "exited unexpectedly") {
-		t.Errorf("crash message should mention unexpected exit, got: %s", crashMsg.Result)
-	}
-
-	if !strings.Contains(crashMsg.Result, "1") {
-		t.Errorf("crash message should contain exit code 1, got: %s", crashMsg.Result)
-	}
-
-	// Verify the done channel is closed.
-	select {
-	case <-promptDone:
-	default:
-		t.Error("expected prompt done channel to be closed after crash")
-	}
-
-	// Verify status reflects the error.
-	p.mu.RLock()
-	status := p.status
-	lastErr := p.lastError
-	p.mu.RUnlock()
-
-	if status != ProcessStatusError {
-		t.Errorf("expected status %q after crash, got %q", ProcessStatusError, status)
-	}
-
-	if lastErr == "" {
-		t.Error("expected lastError to be set after crash")
-	}
-
-	// The interrupted turn is finalized with what the agent said so far.
-	if got := p.ResultDetail().ResultText; got != "partial response" {
-		t.Errorf("ResultDetail().ResultText = %q, want %q", got, "partial response")
-	}
+	return p, ch, promptDone
 }
 
 // newLineScanner is a helper to create a bufio.Scanner from an io.ReadCloser.

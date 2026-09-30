@@ -256,12 +256,15 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 	var stderrWg sync.WaitGroup
 	stderrWg.Add(1)
 
-	// Read stderr in background for logging.
+	// Read stderr in background for logging, keeping its tail for the turn's
+	// exit error. The stdout reader reads it only after stderrWg.Wait().
+	stderrTail := newRingBuffer(20)
 	go func() {
 		defer stderrWg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			slog.Debug("claude stderr", "line", scanner.Text())
+			stderrTail.add(scanner.Text())
 		}
 	}()
 
@@ -277,16 +280,16 @@ func (p *Process) RunWithOptions(ctx context.Context, prompt string, runOpts *Ru
 
 			p.mu.Lock()
 			p.cmd = nil
-			if waitErr != nil && p.status != ProcessStatusStopped {
-				p.status = ProcessStatusError
-				p.lastError = waitErr.Error()
-			} else if p.status == ProcessStatusBusy {
-				p.status = ProcessStatusIdle
-			}
 			// The subprocess exit ends the turn: store its result before
 			// signalling completion so waiters see the final state.
 			p.result = turnResult(p.liveMessages, p.turnStart)
 			p.prURLs = CollectPRURLs(p.result.messages)
+			if waitErr != nil && p.status != ProcessStatusStopped {
+				p.status = ProcessStatusError
+				p.lastError = exitError(waitErr, p.result.messages, stderrTail.contents())
+			} else if p.status == ProcessStatusBusy {
+				p.status = ProcessStatusIdle
+			}
 			status := p.status
 			close(done)
 			p.mu.Unlock()

@@ -259,14 +259,27 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		p.cmd = nil
 		p.stdin = nil
 
-		var exitErrStr string
-		if waitErr != nil {
-			exitErrStr = waitErr.Error()
+		// The exit ends the open turn, or explains the finished one when its
+		// final result was an error: the CLI prints the cause, then exits.
+		// A turn that finished normally does not describe a later crash.
+		turnOpen := true
+		select {
+		case <-p.done:
+			turnOpen = false
+		default:
+		}
+		var turn []StreamMessage
+		if p.turnStart >= 0 && p.turnStart <= len(p.liveMessages) {
+			turn = p.liveMessages[p.turnStart:]
+		}
+		endedInError := !turnOpen && endsInErrorResult(turn)
+		if !turnOpen && !endedInError {
+			turn = nil
 		}
 
 		if waitErr != nil && p.status != ProcessStatusStopped {
 			p.status = ProcessStatusError
-			p.lastError = exitErrStr
+			p.lastError = exitError(waitErr, turn, p.stderrTail.contents())
 		} else if p.status != ProcessStatusStopped {
 			p.status = ProcessStatusIdle
 		}
@@ -317,7 +330,9 @@ func (p *PersistentProcess) readLoop(ctx context.Context, stdout io.ReadCloser, 
 		close(processDone)
 		p.mu.Unlock()
 		metrics.SetProcessStatus(string(status))
-		if turnFinalized {
+		// A turn persisted when its error result arrived is persisted again
+		// with the exit error, so the result on disk carries the cause too.
+		if turnFinalized || (endedInError && status == ProcessStatusError) {
 			p.persistTurnResult()
 		}
 		slog.Info("claude: persistent subprocess exited", "wait_err", waitErr, "last_error", lastErr, "status", status)
@@ -960,6 +975,17 @@ func exitCodeFromError(err error) string {
 }
 
 // ringBuffer is a simple fixed-size circular buffer for strings.
+// endsInErrorResult reports whether the last result message of a turn is an
+// error result.
+func endsInErrorResult(turn []StreamMessage) bool {
+	for i := len(turn) - 1; i >= 0; i-- {
+		if turn[i].Type == MessageTypeResult {
+			return turn[i].IsError
+		}
+	}
+	return false
+}
+
 type ringBuffer struct {
 	lines []string
 	pos   int
