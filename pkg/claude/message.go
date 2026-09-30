@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -736,4 +737,23 @@ func turnResult(live []StreamMessage, start int) resultState {
 	}
 	turn := copyStreamMessages(live[start:])
 	return resultState{text: CollectResultText(turn), messages: turn, completed: true}
+}
+
+// maxExitDetailLen bounds the agent text or stderr appended to an exit error.
+const maxExitDetailLen = 500
+
+// exitError is the error a turn reports when its subprocess exited with
+// waitErr. The bare wait error ("exit status 1") hides the cause, which the
+// agent usually printed ("Not logged in · Please run /login"), so the turn's
+// last result or assistant text is appended; without one, the stderr tail.
+func exitError(waitErr error, turn []StreamMessage, stderrTail []string) string {
+	detail := CollectResultText(turn)
+	if detail == "" {
+		detail = strings.Join(stderrTail, "\n")
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return waitErr.Error()
+	}
+	return waitErr.Error() + ": " + Truncate(detail, maxExitDetailLen)
 }
