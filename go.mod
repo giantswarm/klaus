@@ -140,3 +140,7 @@ require (
 // go mod tidy would otherwise resolve them below the fixed versions,
 // because nothing imports them directly.
 replace golang.org/x/mod => golang.org/x/mod v0.41.0
+
+replace github.com/prometheus/prometheus v0.51.0 => github.com/prometheus/prometheus v0.315.0
+
+replace go.etcd.io/etcd/v3 v3.6.8 => go.etcd.io/etcd/v3 v3.7.2
