@@ -19,9 +19,6 @@ type statusResponse struct {
 	Commit  string               `json:"commit"`
 	Agent   claudepkg.StatusInfo `json:"agent"`
 	Mode    string               `json:"mode"`
-	// Owner is intentionally exposed on the unauthenticated /status endpoint
-	// for observability (e.g. confirming which identity owns this instance).
-	Owner string `json:"owner,omitempty"`
 }
 
 func handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -56,7 +53,7 @@ func handleRoot(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, "%s %s\n", project.Name, project.Version())
 }
 
-func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) http.HandlerFunc {
+func handleStatus(process claudepkg.Prompter, mode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		resp := statusResponse{
 			Name:    project.Name,
@@ -65,7 +62,6 @@ func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) 
 			Commit:  project.GitSHA(),
 			Agent:   process.Status(),
 			Mode:    mode,
-			Owner:   ownerSubject,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -75,10 +71,10 @@ func handleStatus(process claudepkg.Prompter, mode string, ownerSubject string) 
 	}
 }
 
-func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string, ownerSubject string) {
+func registerOperationalRoutes(mux *http.ServeMux, process claudepkg.Prompter, mode string) {
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz(process))
-	mux.HandleFunc("/status", handleStatus(process, mode, ownerSubject))
+	mux.HandleFunc("/status", handleStatus(process, mode))
 	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/", handleRoot)
 }

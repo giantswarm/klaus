@@ -68,7 +68,10 @@ All klaus configuration is done via environment variables. Only `ANTHROPIC_API_K
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8080` |
-| `KLAUS_OWNER_SUBJECT` | Owner identity for JWT access control | -- |
+| `KLAUS_OWNER_SUBJECT` | Owner identity, compared with the verified token's `sub` or verified `email` | -- |
+| `KLAUS_TOKEN_ISSUER_URL` | OIDC issuer whose signed tokens `/mcp` accepts when OAuth is off | -- |
+| `KLAUS_TOKEN_AUDIENCES` | Accepted `aud` values (comma-separated); required with `KLAUS_TOKEN_ISSUER_URL` | -- |
+| `KLAUS_ALLOW_UNAUTHENTICATED` | Serve `/mcp` with no authentication when neither OAuth nor a token issuer is set | `false` |
 
 ## Validation
 
@@ -78,4 +81,5 @@ The following variables are validated at startup:
 - `CLAUDE_EFFORT` must be `low`, `medium`, or `high`
 - `CLAUDE_PERMISSION_MODE` must be a valid mode
 - `CLAUDE_MAX_TURNS` must be >= 0
+- Without OAuth, `/mcp` needs `KLAUS_TOKEN_ISSUER_URL` with `KLAUS_TOKEN_AUDIENCES`, or `KLAUS_ALLOW_UNAUTHENTICATED=true`; `KLAUS_OWNER_SUBJECT` needs `KLAUS_TOKEN_ISSUER_URL` or OAuth
 - `CLAUDE_MAX_BUDGET_USD` must be >= 0

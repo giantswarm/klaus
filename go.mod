@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/creativeprojects/go-selfupdate v1.6.0
 	github.com/giantswarm/mcp-oauth v1.7.0
 	github.com/giantswarm/mcp-toolkit v0.2.15
@@ -80,7 +81,7 @@ require (
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/giantswarm/selfupdate-cosign v0.3.2
 	github.com/go-fed/httpsig v1.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-github/v86 v86.0.0 // indirect

@@ -139,6 +139,9 @@ func TestLoad_FileNotFound_EnvOnly(t *testing.T) {
 	t.Setenv("CLAUDE_MODEL", "opus")
 	t.Setenv("PORT", "3000")
 	t.Setenv("KLAUS_OWNER_SUBJECT", "admin@example.com")
+	t.Setenv("KLAUS_TOKEN_ISSUER_URL", "https://dex.example.com")
+	t.Setenv("KLAUS_TOKEN_AUDIENCES", "muster,klaus")
+	t.Setenv("KLAUS_ALLOW_UNAUTHENTICATED", "true")
 
 	cfg, err := Load("/nonexistent/config.yaml")
 	if err != nil {
@@ -148,6 +151,9 @@ func TestLoad_FileNotFound_EnvOnly(t *testing.T) {
 	assertEqual(t, "claude.model", "opus", cfg.Claude.Model)
 	assertEqual(t, "server.port", "3000", cfg.Server.Port)
 	assertEqual(t, "server.ownerSubject", "admin@example.com", cfg.Server.OwnerSubject)
+	assertEqual(t, "server.tokenIssuerURL", "https://dex.example.com", cfg.Server.TokenIssuerURL)
+	assertEqual(t, "server.tokenAudiences", "muster|klaus", strings.Join(cfg.Server.TokenAudiences, "|"))
+	assertEqualBool(t, "server.allowUnauthenticated", true, cfg.Server.AllowUnauthenticated)
 }
 
 func TestLoad_DefaultModel(t *testing.T) {

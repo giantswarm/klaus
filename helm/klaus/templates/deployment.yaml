@@ -1,3 +1,12 @@
+{{- if and .Values.owner.subject (not .Values.auth.tokenIssuerURL) }}
+{{- fail "owner.subject requires auth.tokenIssuerURL: the owner check needs a verified token" }}
+{{- end }}
+{{- if and .Values.auth.tokenIssuerURL (not .Values.auth.tokenAudiences) }}
+{{- fail "auth.tokenAudiences must list at least one audience when auth.tokenIssuerURL is set" }}
+{{- end }}
+{{- if not (or .Values.auth.tokenIssuerURL .Values.auth.allowUnauthenticated) }}
+{{- fail "no authentication for /mcp: set auth.tokenIssuerURL and auth.tokenAudiences, or auth.allowUnauthenticated=true for an isolated test" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -104,6 +113,16 @@ spec:
             {{- if .Values.owner.subject }}
             - name: KLAUS_OWNER_SUBJECT
               value: {{ .Values.owner.subject | quote }}
+            {{- end }}
+            {{- if .Values.auth.tokenIssuerURL }}
+            - name: KLAUS_TOKEN_ISSUER_URL
+              value: {{ .Values.auth.tokenIssuerURL | quote }}
+            - name: KLAUS_TOKEN_AUDIENCES
+              value: {{ join "," .Values.auth.tokenAudiences | quote }}
+            {{- end }}
+            {{- if .Values.auth.allowUnauthenticated }}
+            - name: KLAUS_ALLOW_UNAUTHENTICATED
+              value: "true"
             {{- end }}
             {{- if .Values.claude.model }}
             - name: CLAUDE_MODEL

@@ -66,6 +66,8 @@ func newServeCmd() *cobra.Command {
 		disableStrictSchemeMatching      bool
 		tlsCertFile                      string
 		tlsKeyFile                       string
+
+		allowUnauthenticated bool
 	)
 
 	cmd := &cobra.Command{
@@ -111,6 +113,9 @@ pkg/config for the full Config struct and supported fields.`,
 				trustedPublicRegistrationSchemes, disableStrictSchemeMatching,
 				tlsCertFile, tlsKeyFile,
 			)
+			if cmd.Flags().Changed("allow-unauthenticated") {
+				cfg.Server.AllowUnauthenticated = allowUnauthenticated
+			}
 
 			// Validate after all overrides (YAML -> env -> flags) are applied.
 			if err := cfg.Validate(); err != nil {
@@ -185,6 +190,8 @@ pkg/config for the full Config struct and supported fields.`,
 	cmd.Flags().BoolVar(&disableStrictSchemeMatching, "disable-strict-scheme-matching", false, "Allow mixed redirect URI schemes with trusted scheme registration")
 	cmd.Flags().StringVar(&tlsCertFile, "tls-cert-file", "", "TLS certificate file for HTTPS (PEM format)")
 	cmd.Flags().StringVar(&tlsKeyFile, "tls-key-file", "", "TLS private key file for HTTPS (PEM format)")
+
+	cmd.Flags().BoolVar(&allowUnauthenticated, "allow-unauthenticated", false, "Serve /mcp without authentication when neither OAuth nor a token issuer is configured (or KLAUS_ALLOW_UNAUTHENTICATED env)")
 
 	return cmd
 }
@@ -329,7 +336,22 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		process = claude.NewProcess(opts)
 	}
 
-	// Owner-based access control.
+	if err := checkAuthConfig(cfg.Server, enableOAuth); err != nil {
+		return err
+	}
+	var verifier server.TokenVerifier
+	switch {
+	case enableOAuth:
+	case cfg.Server.TokenIssuerURL != "":
+		v, err := server.NewOIDCVerifier(context.Background(), cfg.Server.TokenIssuerURL, cfg.Server.TokenAudiences)
+		if err != nil {
+			return fmt.Errorf("token verification: %w", err)
+		}
+		verifier = v
+		slog.Info("token verification enabled", "issuer", cfg.Server.TokenIssuerURL, "audiences", cfg.Server.TokenAudiences)
+	default:
+		slog.Warn("/mcp and /v1/chat/completions are unauthenticated: any caller that reaches the port can run the agent")
+	}
 	if cfg.Server.OwnerSubject != "" {
 		slog.Info("owner-based access control enabled", "subject", cfg.Server.OwnerSubject)
 	}
@@ -353,12 +375,34 @@ func runServe(portFlag string, cfg config.Config, enableOAuth bool, oauthConfig 
 		Port:         listenPort,
 		Mode:         mode,
 		OwnerSubject: cfg.Server.OwnerSubject,
+		Verifier:     verifier,
 	}
 
 	if enableOAuth {
 		return runWithOAuth(serverCtx, process, srvCfg, oauthConfig, quit)
 	}
 	return runWithoutOAuth(serverCtx, process, srvCfg, quit)
+}
+
+// checkAuthConfig refuses a configuration in which /mcp would trust a token
+// it cannot verify, or would be open without an explicit opt-in.
+func checkAuthConfig(s config.ServerConfig, oauthEnabled bool) error {
+	if oauthEnabled {
+		return nil
+	}
+	if s.TokenIssuerURL != "" {
+		if len(s.TokenAudiences) == 0 {
+			return errors.New("server.tokenAudiences (KLAUS_TOKEN_AUDIENCES) must list at least one audience when server.tokenIssuerURL is set")
+		}
+		return nil
+	}
+	if s.OwnerSubject != "" {
+		return errors.New("server.ownerSubject (KLAUS_OWNER_SUBJECT) requires server.tokenIssuerURL (KLAUS_TOKEN_ISSUER_URL) or --enable-oauth: the owner check needs a verified token")
+	}
+	if !s.AllowUnauthenticated {
+		return errors.New("no authentication configured for /mcp: set server.tokenIssuerURL (KLAUS_TOKEN_ISSUER_URL) or --enable-oauth, or opt in to an open endpoint with --allow-unauthenticated (KLAUS_ALLOW_UNAUTHENTICATED=true)")
+	}
+	return nil
 }
 
 func runWithOAuth(serverCtx context.Context, process claude.Prompter, cfg server.Config, config server.OAuthConfig, quit chan os.Signal) error {

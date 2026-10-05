@@ -57,6 +57,9 @@ A Go wrapper around claude-code to orchestrate AI agents within Kubernetes
 | claude.includePartialMessages | bool | `false` |  |
 | claude.mode | string | `"agent"` |  |
 | owner.subject | string | `""` |  |
+| auth.tokenIssuerURL | string | `""` |  |
+| auth.tokenAudiences | list | `[]` |  |
+| auth.allowUnauthenticated | bool | `false` |  |
 | anthropicApiKey.secretName | string | `""` |  |
 | anthropicApiKey.secretKey | string | `"api-key"` |  |
 | workspace.enabled | bool | `false` |  |

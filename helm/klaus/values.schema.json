@@ -19,6 +19,21 @@
                 }
             }
         },
+        "auth": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "allowUnauthenticated": {
+                    "type": "boolean"
+                },
+                "tokenAudiences": {
+                    "type": "array"
+                },
+                "tokenIssuerURL": {
+                    "type": "string"
+                }
+            }
+        },
         "baseDomain": {
             "type": "string"
         },

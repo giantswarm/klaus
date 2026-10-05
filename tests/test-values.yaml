@@ -3,3 +3,7 @@
 claude:
   permissionMode: "bypassPermissions"
   mode: agent
+# The smoke test runs on a throwaway kind cluster and calls no endpoint that
+# needs a token.
+auth:
+  allowUnauthenticated: true
