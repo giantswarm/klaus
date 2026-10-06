@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/giantswarm/mcp-oauth/handler"
@@ -44,12 +45,19 @@ type OIDCVerifier struct {
 	audiences []string
 }
 
+// oidcHTTPTimeout bounds the discovery and JWKS requests. Without it a stalled
+// issuer would block startup forever, and a stalled JWKS refresh would block
+// every later refresh, so tokens signed with a rotated key would get 401.
+const oidcHTTPTimeout = 10 * time.Second
+
 // NewOIDCVerifier discovers the issuer's keys. audiences must not be empty: a
 // token is accepted only when one of its aud values is in the list.
 func NewOIDCVerifier(ctx context.Context, issuerURL string, audiences []string) (*OIDCVerifier, error) {
 	if len(audiences) == 0 {
 		return nil, errors.New("at least one trusted audience is required")
 	}
+	// go-oidc keeps this client for the later JWKS refreshes as well.
+	ctx = oidc.ClientContext(ctx, &http.Client{Timeout: oidcHTTPTimeout})
 	provider, err := oidc.NewProvider(ctx, issuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("discovering OIDC issuer %q: %w", issuerURL, err)

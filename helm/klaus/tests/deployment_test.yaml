@@ -11,7 +11,82 @@ suite: Deployment template tests
 templates:
   - templates/deployment.yaml
   - templates/configmap.yaml
+# The chart refuses to render without authentication; the tests that are not
+# about authentication opt out of it.
+set:
+  auth:
+    allowUnauthenticated: true
 tests:
+  - it: should fail without authentication
+    template: templates/deployment.yaml
+    set:
+      auth:
+        allowUnauthenticated: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "no authentication for /mcp: set auth.tokenIssuerURL and auth.tokenAudiences, or auth.allowUnauthenticated=true for an isolated test"
+
+  - it: should fail when owner.subject is set without a token issuer
+    template: templates/deployment.yaml
+    set:
+      owner:
+        subject: owner@example.com
+    asserts:
+      - failedTemplate:
+          errorMessage: "owner.subject requires auth.tokenIssuerURL: the owner check needs a verified token"
+
+  - it: should fail when a token issuer has no audience
+    template: templates/deployment.yaml
+    set:
+      auth:
+        allowUnauthenticated: false
+        tokenIssuerURL: https://dex.example.com
+    asserts:
+      - failedTemplate:
+          errorMessage: "auth.tokenAudiences must list at least one audience when auth.tokenIssuerURL is set"
+
+  - it: should pass the token issuer and the comma-joined audiences
+    documentIndex: 0
+    template: templates/deployment.yaml
+    set:
+      owner:
+        subject: owner@example.com
+      auth:
+        allowUnauthenticated: false
+        tokenIssuerURL: https://dex.example.com
+        tokenAudiences: [muster, klaus]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KLAUS_TOKEN_ISSUER_URL
+            value: "https://dex.example.com"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KLAUS_TOKEN_AUDIENCES
+            value: "muster,klaus"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KLAUS_OWNER_SUBJECT
+            value: "owner@example.com"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KLAUS_ALLOW_UNAUTHENTICATED
+            value: "true"
+
+  - it: should pass the opt-in to no authentication
+    documentIndex: 0
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KLAUS_ALLOW_UNAUTHENTICATED
+            value: "true"
+
   - it: should set replicas from values
     documentIndex: 0
     template: templates/deployment.yaml

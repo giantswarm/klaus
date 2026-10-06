@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/giantswarm/mcp-oauth/handler"
+	"github.com/giantswarm/mcp-oauth/providers"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
@@ -170,6 +172,36 @@ func TestNewServer_RejectsUnsignedOwnerToken(t *testing.T) {
 			srv.httpServer.Handler.ServeHTTP(w, req)
 			if w.Code != http.StatusUnauthorized {
 				t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+			}
+		})
+	}
+}
+
+// TestOAuthIdentityOwner covers the OAuth path: the owner check reads the
+// identity that mcp-oauth's ValidateToken verified.
+func TestOAuthIdentityOwner(t *testing.T) {
+	const owner = "owner@example.com"
+	tests := []struct {
+		name string
+		info providers.UserInfo
+		want int
+	}{
+		{"owner by subject", providers.UserInfo{ID: owner}, http.StatusOK},
+		{"owner by verified email", providers.UserInfo{ID: "u1", Email: owner, EmailVerified: true}, http.StatusOK},
+		{"unverified email is not the owner", providers.UserInfo{ID: "u1", Email: owner}, http.StatusForbidden},
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := oauthIdentityMiddleware(OwnerMiddleware(owner, discardLogger())(next))
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req = req.WithContext(handler.ContextWithUserInfo(req.Context(), &tc.info))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
 			}
 		})
 	}

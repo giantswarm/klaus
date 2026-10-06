@@ -239,7 +239,7 @@ auth:
   tokenIssuerURL: ""
   # tokenAudiences lists the accepted aud values, e.g. muster's Dex client ID.
   # Required with tokenIssuerURL.
-  tokenAudiences: []
+  tokenAudiences: []  # @schema item: string
   # allowUnauthenticated serves the endpoints with no authentication: any pod
   # that reaches the Service can run the agent. For isolated tests only.
   allowUnauthenticated: false
