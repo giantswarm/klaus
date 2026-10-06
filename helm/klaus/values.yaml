@@ -223,11 +223,26 @@ claude:
   mode: agent
 
 # Owner-based access control.
-# When set, only the user whose JWT sub or email claim matches this value
-# can access the /mcp endpoint. Other authenticated users receive HTTP 403.
-# Leave empty to allow any authenticated user (backward-compatible).
+# When set, only the user whose verified token has this sub, or this email
+# with email_verified, can access /mcp and /v1/chat/completions. Other users
+# receive HTTP 403. Requires auth.tokenIssuerURL.
+# Leave empty to allow any user with a token that auth accepts.
 owner:
   subject: ""
+
+# Authentication of /mcp and /v1/chat/completions. The chart refuses to render
+# unless auth.tokenIssuerURL is set or auth.allowUnauthenticated is true.
+auth:
+  # tokenIssuerURL is the OIDC issuer whose signed tokens klaus accepts, e.g.
+  # the Dex that issues the ID tokens muster forwards. klaus verifies the
+  # signature (the issuer's JWKS), the issuer, the expiry and the audience.
+  tokenIssuerURL: ""
+  # tokenAudiences lists the accepted aud values, e.g. muster's Dex client ID.
+  # Required with tokenIssuerURL.
+  tokenAudiences: []  # @schema item: string
+  # allowUnauthenticated serves the endpoints with no authentication: any pod
+  # that reaches the Service can run the agent. For isolated tests only.
+  allowUnauthenticated: false
 
 # anthropicApiKey configures the API key secret reference.
 anthropicApiKey:

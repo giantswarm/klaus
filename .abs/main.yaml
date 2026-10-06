@@ -3,3 +3,4 @@ replace-app-version-with-git: true
 generate-metadata: true
 chart-dir: ./helm/klaus
 destination: ./build
+helm-template-extra-values: tests/test-values.yaml

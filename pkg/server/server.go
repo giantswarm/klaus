@@ -31,9 +31,12 @@ type Config struct {
 	// Mode is the operating mode (ModeAgent or ModeChat).
 	Mode string
 	// OwnerSubject restricts MCP access to the configured owner identity
-	// by matching the JWT sub or email claim. When empty, no owner
-	// validation is performed (backward-compatible).
+	// by matching the verified token's sub or email claim. When empty, any
+	// caller that Verifier accepts is allowed.
 	OwnerSubject string
+	// Verifier verifies the bearer token on /mcp and /v1/chat/completions.
+	// When nil the endpoints are unauthenticated; the caller must have opted in.
+	Verifier TokenVerifier
 }
 
 // NewServer creates a Server that serves MCP and operational endpoints.
@@ -48,16 +51,22 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 		mcpServer: mcpSrv,
 	}
 
+	protect := func(h http.Handler) http.Handler {
+		h = OwnerMiddleware(cfg.OwnerSubject, slog.Default())(h)
+		if cfg.Verifier != nil {
+			h = VerifyTokenMiddleware(cfg.Verifier, slog.Default())(h)
+		}
+		return h
+	}
+
 	// MCP endpoint -- delegates to the StreamableHTTPServer handler.
-	// Owner middleware is applied when OwnerSubject is configured.
-	ownerMW := OwnerMiddleware(cfg.OwnerSubject, slog.Default())
-	mux.Handle("/mcp", ownerMW(mcpSrv))
+	mux.Handle("/mcp", protect(mcpSrv))
 
-	// Chat endpoint -- owner-authenticated, OpenAI-compatible.
-	mux.Handle("/v1/chat/completions", ownerMW(handleChatCompletions(process)))
+	// Chat endpoint -- OpenAI-compatible, same protection as /mcp.
+	mux.Handle("/v1/chat/completions", protect(handleChatCompletions(process)))
 
-	// Operational endpoints (bypass owner validation).
-	registerOperationalRoutes(mux, process, cfg.Mode, cfg.OwnerSubject)
+	// Operational endpoints (no authentication).
+	registerOperationalRoutes(mux, process, cfg.Mode)
 
 	s.httpServer = &http.Server{
 		Addr:              ":" + cfg.Port,

@@ -1,13 +1,25 @@
 package server
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/giantswarm/mcp-oauth/handler"
+	"github.com/giantswarm/mcp-oauth/providers"
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
+
+	"github.com/giantswarm/klaus/pkg/claude"
 )
 
 // discardLogger returns a slog.Logger that discards all output.
@@ -15,177 +27,196 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// buildTestJWT creates an unsigned JWT with the given claims for testing.
-// The header and signature are valid placeholders; only the payload matters.
-func buildTestJWT(t *testing.T, claims map[string]string) string {
+const testAudience = "muster"
+
+// testIssuer is an OIDC issuer (discovery document and JWKS) that signs
+// tokens with its own RSA key.
+type testIssuer struct {
+	url string
+	key *rsa.PrivateKey
+}
+
+func newTestIssuer(t *testing.T) *testIssuer {
 	t.Helper()
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
-	payload, err := json.Marshal(claims)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		t.Fatalf("failed to marshal claims: %v", err)
+		t.Fatal(err)
 	}
-	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
-	return header + "." + encodedPayload + ".signature"
-}
-
-func TestOwnerMiddleware_NoOwnerConfigured(t *testing.T) {
-	handler := OwnerMiddleware("", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 when no owner configured, got %d", w.Code)
-	}
-}
-
-func TestOwnerMiddleware_MatchingSub(t *testing.T) {
-	token := buildTestJWT(t, map[string]string{
-		"sub":   "user-123",
-		"email": "other@example.com",
+	iss := &testIssuer{key: key}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                iss.url,
+			"jwks_uri":                              iss.url + "/keys",
+			"authorization_endpoint":                iss.url + "/auth",
+			"token_endpoint":                        iss.url + "/token",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
 	})
-
-	handler := OwnerMiddleware("user-123", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 when sub matches owner, got %d", w.Code)
-	}
-}
-
-func TestOwnerMiddleware_MatchingEmail(t *testing.T) {
-	token := buildTestJWT(t, map[string]string{
-		"sub":   "other-sub",
-		"email": "owner@example.com",
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{
+			{Key: &key.PublicKey, KeyID: "k1", Algorithm: string(jose.RS256), Use: "sig"},
+		}})
 	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	iss.url = srv.URL
+	return iss
+}
 
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+// sign returns a JWT with the issuer's defaults (iss, aud, a future exp)
+// overridden by claims, signed with key.
+func (i *testIssuer) sign(t *testing.T, key *rsa.PrivateKey, claims map[string]any) string {
+	t.Helper()
+	all := map[string]any{
+		"iss": i.url,
+		"aud": testAudience,
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iat": time.Now().Unix(),
+	}
+	for k, v := range claims {
+		all[k] = v
+	}
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "k1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := jwt.Signed(signer).Claims(all).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
+// unsignedToken is the forgery from giantswarm/giantswarm#38099: an alg:none
+// header and the owner's claims, with no signature.
+func unsignedToken(claims map[string]any) string {
+	enc := func(v any) string {
+		b, _ := json.Marshal(v)
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	return enc(map[string]string{"alg": "none", "typ": "JWT"}) + "." + enc(claims) + "."
+}
 
-	handler.ServeHTTP(w, req)
+func newTestVerifier(t *testing.T, iss *testIssuer) *OIDCVerifier {
+	t.Helper()
+	v, err := NewOIDCVerifier(context.Background(), iss.url, []string{"other-client", testAudience})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 when email matches owner, got %d", w.Code)
+func TestVerifyAndOwnerMiddleware(t *testing.T) {
+	const owner = "owner@example.com"
+	iss := newTestIssuer(t)
+	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name  string
+		token string
+		want  int
+	}{
+		{"owner by subject", iss.sign(t, iss.key, map[string]any{"sub": owner}), http.StatusOK},
+		{"owner by verified email", iss.sign(t, iss.key, map[string]any{"sub": "u1", "email": owner, "email_verified": true}), http.StatusOK},
+		{"unverified email is not the owner", iss.sign(t, iss.key, map[string]any{"sub": "u1", "email": owner}), http.StatusForbidden},
+		{"other user", iss.sign(t, iss.key, map[string]any{"sub": "u2", "email": "u2@example.com", "email_verified": true}), http.StatusForbidden},
+		{"unsigned token with the owner's claims", unsignedToken(map[string]any{"iss": iss.url, "aud": testAudience, "sub": owner, "email": owner}), http.StatusUnauthorized},
+		{"signed by another key", iss.sign(t, otherKey, map[string]any{"sub": owner}), http.StatusUnauthorized},
+		{"expired", iss.sign(t, iss.key, map[string]any{"sub": owner, "exp": time.Now().Add(-time.Hour).Unix()}), http.StatusUnauthorized},
+		{"untrusted audience", iss.sign(t, iss.key, map[string]any{"sub": owner, "aud": "someone-else"}), http.StatusUnauthorized},
+		{"other issuer", iss.sign(t, iss.key, map[string]any{"sub": owner, "iss": "https://evil.example.com"}), http.StatusUnauthorized},
+		{"no token", "", http.StatusUnauthorized},
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := VerifyTokenMiddleware(newTestVerifier(t, iss), discardLogger())(OwnerMiddleware(owner, discardLogger())(next))
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d (body %q)", w.Code, tc.want, strings.TrimSpace(w.Body.String()))
+			}
+		})
 	}
 }
 
-func TestOwnerMiddleware_NonMatchingClaims(t *testing.T) {
-	token := buildTestJWT(t, map[string]string{
-		"sub":   "other-user",
-		"email": "other@example.com",
+// TestNewServer_RejectsUnsignedOwnerToken is the regression for
+// giantswarm/giantswarm#38099: the forged token reached the agent on both
+// protected endpoints.
+func TestNewServer_RejectsUnsignedOwnerToken(t *testing.T) {
+	const owner = "owner@example.com"
+	iss := newTestIssuer(t)
+	srv := NewServer(t.Context(), claude.NewProcess(claude.DefaultOptions()), Config{
+		Mode:         ModeAgent,
+		OwnerSubject: owner,
+		Verifier:     newTestVerifier(t, iss),
 	})
+	forged := unsignedToken(map[string]any{"iss": iss.url, "aud": testAudience, "sub": owner, "email": owner})
 
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("handler should not have been called")
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403 when claims don't match, got %d", w.Code)
+	for _, path := range []string{"/mcp", "/v1/chat/completions"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
+			req.Header.Set("Authorization", "Bearer "+forged)
+			w := httptest.NewRecorder()
+			srv.httpServer.Handler.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+			}
+		})
 	}
 }
 
-func TestOwnerMiddleware_NoToken(t *testing.T) {
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("handler should not have been called")
-	}))
+// TestOAuthIdentityOwner covers the OAuth path: the owner check reads the
+// identity that mcp-oauth's ValidateToken verified.
+func TestOAuthIdentityOwner(t *testing.T) {
+	const owner = "owner@example.com"
+	tests := []struct {
+		name string
+		info providers.UserInfo
+		want int
+	}{
+		{"owner by subject", providers.UserInfo{ID: owner}, http.StatusOK},
+		{"owner by verified email", providers.UserInfo{ID: "u1", Email: owner, EmailVerified: true}, http.StatusOK},
+		{"unverified email is not the owner", providers.UserInfo{ID: "u1", Email: owner}, http.StatusForbidden},
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	w := httptest.NewRecorder()
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := oauthIdentityMiddleware(OwnerMiddleware(owner, discardLogger())(next))
 
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403 when no token and owner configured, got %d", w.Code)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+			req = req.WithContext(handler.ContextWithUserInfo(req.Context(), &tc.info))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Errorf("status = %d, want %d", w.Code, tc.want)
+			}
+		})
 	}
 }
 
-func TestOwnerMiddleware_MalformedJWT(t *testing.T) {
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("handler should not have been called")
-	}))
-
+func TestOwnerMiddleware_NoVerifiedIdentity(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer not-a-jwt")
+	req.Header.Set("Authorization", "Bearer "+unsignedToken(map[string]any{"sub": "owner"}))
 	w := httptest.NewRecorder()
 
-	handler.ServeHTTP(w, req)
+	OwnerMiddleware("owner", discardLogger())(next).ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for malformed JWT, got %d", w.Code)
-	}
-}
-
-func TestOwnerMiddleware_InvalidBase64Payload(t *testing.T) {
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("handler should not have been called")
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Bearer header.!!!invalid-base64!!!.signature")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for invalid base64 payload, got %d", w.Code)
-	}
-}
-
-func TestOwnerMiddleware_NonBearerAuth(t *testing.T) {
-	handler := OwnerMiddleware("owner@example.com", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("handler should not have been called")
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for non-Bearer auth, got %d", w.Code)
-	}
-}
-
-func TestOwnerMiddleware_CaseInsensitiveBearer(t *testing.T) {
-	token := buildTestJWT(t, map[string]string{
-		"sub": "user-123",
-	})
-
-	handler := OwnerMiddleware("user-123", discardLogger())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "bearer "+token)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 with lowercase 'bearer' prefix, got %d", w.Code)
+		t.Errorf("status = %d, want %d: the owner check must not trust an unverified token", w.Code, http.StatusForbidden)
 	}
 }
 
@@ -236,68 +267,6 @@ func TestExtractBearerToken(t *testing.T) {
 			got := extractBearerToken(req)
 			if got != tc.token {
 				t.Errorf("extractBearerToken() = %q, want %q", got, tc.token)
-			}
-		})
-	}
-}
-
-func TestDecodeJWTClaims(t *testing.T) {
-	tests := []struct {
-		name string
-		// claims builds a JWT via buildTestJWT when non-nil; rawToken is used otherwise.
-		claims    map[string]string
-		rawToken  string
-		wantSub   string
-		wantEmail string
-		wantErr   bool
-	}{
-		{
-			name:      "valid token with sub and email",
-			claims:    map[string]string{"sub": "user-1", "email": "user@test.com"},
-			wantSub:   "user-1",
-			wantEmail: "user@test.com",
-		},
-		{
-			name:    "valid token with sub only",
-			claims:  map[string]string{"sub": "user-2"},
-			wantSub: "user-2",
-		},
-		{
-			name:     "malformed - single segment",
-			rawToken: "onlyone",
-			wantErr:  true,
-		},
-		{
-			name:     "invalid base64 payload",
-			rawToken: "header.!!!.sig",
-			wantErr:  true,
-		},
-		{
-			name:     "invalid JSON payload",
-			rawToken: "header." + base64.RawURLEncoding.EncodeToString([]byte("not-json")) + ".sig",
-			wantErr:  true,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			token := tc.rawToken
-			if tc.claims != nil {
-				token = buildTestJWT(t, tc.claims)
-			}
-
-			claims, err := decodeJWTClaims(token)
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("decodeJWTClaims() error = %v, wantErr %v", err, tc.wantErr)
-			}
-			if err != nil {
-				return
-			}
-			if claims.Sub != tc.wantSub {
-				t.Errorf("sub = %q, want %q", claims.Sub, tc.wantSub)
-			}
-			if claims.Email != tc.wantEmail {
-				t.Errorf("email = %q, want %q", claims.Email, tc.wantEmail)
 			}
 		})
 	}

@@ -105,6 +105,14 @@ type ServerConfig struct {
 	Port string `yaml:"port"`
 	// OwnerSubject restricts /mcp to the configured identity.
 	OwnerSubject string `yaml:"ownerSubject"`
+	// TokenIssuerURL is the OIDC issuer whose tokens /mcp accepts when OAuth
+	// is off, e.g. the Dex that issues the ID tokens muster forwards.
+	TokenIssuerURL string `yaml:"tokenIssuerURL"`
+	// TokenAudiences lists the aud values accepted from TokenIssuerURL.
+	TokenAudiences []string `yaml:"tokenAudiences"`
+	// AllowUnauthenticated serves /mcp without any authentication when
+	// neither OAuth nor TokenIssuerURL is set. Without it klaus refuses to start.
+	AllowUnauthenticated bool `yaml:"allowUnauthenticated"`
 }
 
 // OAuthFileConfig mirrors the OAuth flags for YAML configuration.
@@ -234,6 +242,9 @@ func applyEnvOverrides(cfg *Config) {
 	// Server settings.
 	envOverrideString(&cfg.Server.Port, "PORT")
 	envOverrideString(&cfg.Server.OwnerSubject, "KLAUS_OWNER_SUBJECT")
+	envOverrideString(&cfg.Server.TokenIssuerURL, "KLAUS_TOKEN_ISSUER_URL")
+	envOverrideCSV(&cfg.Server.TokenAudiences, "KLAUS_TOKEN_AUDIENCES")
+	envOverrideBool(&cfg.Server.AllowUnauthenticated, "KLAUS_ALLOW_UNAUTHENTICATED")
 
 	// OAuth settings.
 	envOverrideString(&cfg.OAuth.Google.ClientID, "GOOGLE_CLIENT_ID")

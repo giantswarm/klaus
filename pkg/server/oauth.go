@@ -243,8 +243,8 @@ func (s *OAuthServer) Start(addr string, mode string, config OAuthConfig) error 
 	// MCP endpoint (protected by OAuth).
 	s.setupMCPRoutes(mux, config)
 
-	// Health and status endpoints (unprotected, bypass owner validation).
-	registerOperationalRoutes(mux, s.process, mode, s.ownerSubject)
+	// Health and status endpoints (unprotected).
+	registerOperationalRoutes(mux, s.process, mode)
 
 	s.httpServer = &http.Server{
 		Addr:              addr,
@@ -317,10 +317,10 @@ func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
 	}
 	httpServer := mcpserver.NewStreamableHTTPServer(mcpSrv, opts...)
 
-	// Owner middleware runs first (decode-only claim check), then OAuth token
-	// validation verifies the token cryptographically. This order is safe:
-	// a forged JWT with matching claims will still be rejected by ValidateToken.
-	mux.Handle("/mcp", OwnerMiddleware(s.ownerSubject, slog.Default())(s.oauthHandler.ValidateToken(httpServer)))
+	// ValidateToken verifies the token first; the owner check then reads the
+	// identity it verified.
+	ownerMW := OwnerMiddleware(s.ownerSubject, slog.Default())
+	mux.Handle("/mcp", s.oauthHandler.ValidateToken(oauthIdentityMiddleware(ownerMW(httpServer))))
 }
 
 func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {

@@ -8,7 +8,7 @@ Klaus serves the following HTTP endpoints.
 
 - Method: `POST`
 - Content-Type: `application/json`
-- Optionally protected by OAuth 2.1
+- Requires a verified bearer token: OAuth 2.1, or a token from the issuer in `KLAUS_TOKEN_ISSUER_URL`. Open only with `--allow-unauthenticated`. A missing or invalid token gets `401`; a user who is not the owner gets `403`. See [Secure with OAuth](../how-to/secure-with-oauth.md)
 
 Supports the standard MCP JSON-RPC protocol: `initialize`, `tools/list`, `tools/call`.
 
@@ -68,7 +68,7 @@ See [Set Up Monitoring](../how-to/set-up-monitoring.md) for available metrics.
 
 - Method: `POST`
 - Content-Type: `application/json`
-- Protected by owner authentication (same as `/mcp`)
+- Protected the same way as `/mcp` (token verification, then the owner check)
 
 Only the last user message in the `messages` array is used as the prompt -- the instance maintains its own conversation state.
 
