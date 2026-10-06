@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0
-	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/creativeprojects/go-selfupdate v1.6.0
 	github.com/giantswarm/mcp-oauth v1.7.0
 	github.com/giantswarm/mcp-toolkit v0.2.15
