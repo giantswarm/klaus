@@ -2,3 +2,5 @@ CVE-2026-33815 until=2026-10-30 # github.com/jackc/pgx/v5@v5.8.0
 CVE-2026-33816 until=2026-10-30 # github.com/jackc/pgx/v5@v5.8.0
 CVE-2026-41889 until=2026-10-30 # github.com/jackc/pgx/v5@v5.8.0
 CVE-2021-43668 until=2026-10-30 # github.com/syndtr/goleveldb@v1.0.1-0.20220721030215-126854af5e6d
+# CVE-2026-108859: mcp-go through v1.2.1 (the latest) reads a Streamable HTTP POST body whole; the /mcp route is bounded at 1 MiB meanwhile, tracked in https://github.com/giantswarm/klaus/issues/557.
+CVE-2026-108859 until=2026-11-12 # github.com/mark3labs/mcp-go@v1.2.1
