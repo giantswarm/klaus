@@ -39,6 +39,10 @@ type Config struct {
 	Verifier TokenVerifier
 }
 
+// maxMCPBodyBytes bounds an MCP request body. mcp-go reads a POST body whole
+// before validating it (CVE-2026-108859); the bound keeps that read small.
+const maxMCPBodyBytes = 1 << 20
+
 // NewServer creates a Server that serves MCP and operational endpoints.
 // The serverCtx controls the lifetime of background goroutines; it should
 // be cancelled during server shutdown to ensure drain goroutines are cleaned up.
@@ -60,7 +64,7 @@ func NewServer(serverCtx context.Context, process claudepkg.Prompter, cfg Config
 	}
 
 	// MCP endpoint -- delegates to the StreamableHTTPServer handler.
-	mux.Handle("/mcp", protect(mcpSrv))
+	mux.Handle("/mcp", http.MaxBytesHandler(protect(mcpSrv), maxMCPBodyBytes))
 
 	// Chat endpoint -- OpenAI-compatible, same protection as /mcp.
 	mux.Handle("/v1/chat/completions", protect(handleChatCompletions(process)))

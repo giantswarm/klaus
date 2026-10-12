@@ -320,7 +320,7 @@ func (s *OAuthServer) setupMCPRoutes(mux *http.ServeMux, config OAuthConfig) {
 	// ValidateToken verifies the token first; the owner check then reads the
 	// identity it verified.
 	ownerMW := OwnerMiddleware(s.ownerSubject, slog.Default())
-	mux.Handle("/mcp", s.oauthHandler.ValidateToken(oauthIdentityMiddleware(ownerMW(httpServer))))
+	mux.Handle("/mcp", http.MaxBytesHandler(s.oauthHandler.ValidateToken(oauthIdentityMiddleware(ownerMW(httpServer))), maxMCPBodyBytes))
 }
 
 func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
