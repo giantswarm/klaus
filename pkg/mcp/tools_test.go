@@ -8,7 +8,7 @@ import (
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/v2/mcp"
 )
 
 func strPtr(s string) *string { return &s }

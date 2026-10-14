@@ -22,7 +22,7 @@ import (
 	oauthserver "github.com/giantswarm/mcp-oauth/server"
 	"github.com/giantswarm/mcp-oauth/storage"
 	"github.com/giantswarm/mcp-oauth/storage/memory"
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	mcpserver "github.com/mark3labs/mcp-go/v2/server"
 
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	mcppkg "github.com/giantswarm/klaus/pkg/mcp"

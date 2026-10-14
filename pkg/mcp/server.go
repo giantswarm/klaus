@@ -6,7 +6,7 @@ import (
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/project"
 
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/v2/server"
 )
 
 // NewServer returns a StreamableHTTPServer that serves MCP at /mcp.

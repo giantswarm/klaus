@@ -9,7 +9,7 @@ import (
 	mcppkg "github.com/giantswarm/klaus/pkg/mcp"
 	"github.com/giantswarm/klaus/pkg/project"
 
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	mcpserver "github.com/mark3labs/mcp-go/v2/server"
 )
 
 // Server wraps the MCP and operational HTTP endpoints.

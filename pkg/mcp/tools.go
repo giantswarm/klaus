@@ -11,8 +11,8 @@ import (
 	claudepkg "github.com/giantswarm/klaus/pkg/claude"
 	"github.com/giantswarm/klaus/pkg/metrics"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/mark3labs/mcp-go/v2/mcp"
+	"github.com/mark3labs/mcp-go/v2/server"
 )
 
 // argMessage is the name of the prompt argument shared between the prompt tool
