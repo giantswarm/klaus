@@ -83,7 +83,7 @@ require (
 	github.com/davidmz/go-pageant v1.0.2 // indirect
 	github.com/giantswarm/selfupdate-cosign v0.3.4
 	github.com/go-fed/httpsig v1.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-github/v86 v86.0.0 // indirect
