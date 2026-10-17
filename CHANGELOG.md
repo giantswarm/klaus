@@ -7,43 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3-rc.1] - 2026-10-12
+
 ### Fixed
 
 - The `/mcp` endpoint, with and without OAuth, refuses a request body larger than 1 MiB before mcp-go reads it whole (CVE-2026-108859, no fixed mcp-go release yet; the scan ignores it until 2026-11-12). Fixes [#557](https://github.com/giantswarm/klaus/issues/557).
-- `.nancy-ignore` no longer carries the four entries that expired on 2026-10-04 (CVE-2026-81870, CVE-2026-81871, CVE-2026-81872, CVE-2026-56855): klaus already builds with fixed versions of the modules they covered (`otlptracegrpc` v1.46.0, `otlploggrpc` and `sdk/log` v0.22.0, `golang.org/x/crypto` v0.57.0), so nancy audits them again instead of keeping dead exceptions.
-- A prompt sent while another one runs says why it was refused and that it was not queued. Until the running session emits Claude's init message (its SessionStart hooks and MCP servers can take minutes) the `prompt` tool answers `claude process is already busy: its session is still starting (SessionStart hooks, MCP servers)`, after it `claude process is already busy with another prompt`, both with when to send it again; the chat completions endpoint's 429 names the starting session too. A prompt arriving while another caller was still spawning its subprocess used to pass the busy check and start a second `claude` beside it; it is refused now, and two first prompts to a persistent process no longer fail one of them with `persistent process already running`. Fixes [giantswarm/klausctl#108](https://github.com/giantswarm/klausctl/issues/108).
-- A turn whose claude subprocess exits non-zero reports why: the result's and status's `error` is `exit status 1: <the turn's last result or assistant text>`, e.g. `exit status 1: Not logged in · Please run /login`, falling back to the stderr tail and then to the bare exit status. Previously it read only `exit status 1` and the cause was visible only in the transcript. The persisted result carries the same error. Fixes [#516](https://github.com/giantswarm/klaus/issues/516).
-- Chart: the `git-clone` init container authenticates with `workspace.gitSecretName` through a per-process git credential helper that reads the token from the mounted Secret, instead of building an `x-access-token` clone URL and resetting the remote afterwards. The token never lands in a remote URL or `.git/config` on the workspace PVC, not even when the container dies mid-clone; an existing checkout's origin is reset to `workspace.gitRepo`, which drops credentials an older chart left in it.
-- `self-update` replaces the binary, symbolic links resolved, with a single rename (`selfupdatecosign.Install`, selfupdate-cosign v0.3.0). go-selfupdate's own swap moved the binary aside before it moved the new one in, so a process started in between found none, and concurrent updates could lose it. Now a process started meanwhile runs the old binary or the new one, several updates may run at once, and the binary keeps its mode.
-- Chart: the `helm.sh/chart` label was invalid when the 63-character cut of a long chart version (a branch build, or helm-controller's `<tag>+<digest>`) ended in `.`, `_` or `--.`, and the API server refused every labelled object. The whole trailing run of `-`, `.` and `_` is now trimmed. Fixes [#504](https://github.com/giantswarm/klaus/issues/504).
-- `result` MCP tool: `result_text` was empty for every run started through `/v1/chat/completions` (`klausctl prompt`, `klausctl run`, the `klaus_prompt` MCP tool). Only the `prompt` tool's `Submit` path stored the turn result; the chat endpoint drives `RunWithOptions` directly and never did. Each turn's result is now finalized in the stream reader when its result message arrives (or the subprocess exits), in both agent and chat mode, and persisted to the result store. When a turn ends in a tool call and the CLI's result message carries no text, `result_text` is the last non-empty assistant text instead of the concatenation of every assistant message. Fixes [klausctl#269](https://github.com/giantswarm/klausctl/issues/269).
-- `pr_urls` means "pull requests this turn created or pushed to": URLs printed by `gh pr create`, plus PRs addressed by `gh pr view/checkout/merge/comment/...` in a repository the turn `git push`ed to (bare PR numbers resolve against `--repo` or the single pushed repository). Previously every PR URL that appeared in any Bash output was listed, so PRs merely read during research showed up and PRs pushed to via `gh pr merge <number>` did not.
-- `subagent_calls` entries stayed `running` after the parent finished: completion is now detected from the `Agent`/`Task` tool's `tool_result` (matched by `tool_use_id`) instead of only from `<usage>` blocks in assistant text.
-- `tool_result` blocks whose `content` is an array of content blocks (MCP tools) no longer make the whole user message unparseable; their text is flattened, so error counts and PR attribution see them.
-- Drop the version badges from the chart README so a release PR's `Chart.yaml` version bump no longer leaves `README.md` stale and fails the helm-docs pre-commit hook.
 
-### Changed
-
-
-
-
-- Bump `giantswarm/architect` orb to `8.2.2` and re-enable cosign keyless chart signing (`sign: false` removed from every `push-to-app-catalog*` invocation). v8.2.2 ships [architect-orb#772](https://github.com/giantswarm/architect-orb/pull/772) which upgrades the `app-build-suite` executor image from `1.8.0-circleci` to `1.8.1-circleci` -- the new image includes the `cosign` binary that v8.2.0's chart signing defaults require. Closes [architect-orb#769](https://github.com/giantswarm/architect-orb/issues/769).
-- Disable cosign keyless chart signing on the `push-to-app-catalog*` jobs (`sign: false`). The architect orb's `push-to-app-catalog` defaults `sign` to `true` since v8.2.0 and shells out to `cosign`, but this repo uses `executor: app-build-suite` (so the `app_build_suite` Python CLI is available to package the chart with metadata) and the `app-build-suite` image doesn't ship `cosign`. Without this opt-out, every chart push fails on the `Mint Sigstore OIDC token` step with `cosign: command not found`. To be removed once architect-orb makes `cosign-prepare` resilient to a missing binary (or ships cosign in the `app-build-suite` executor).
-- Bump `giantswarm/architect` orb to `8.2.1` to pick up [architect-orb#767](https://github.com/giantswarm/architect-orb/pull/767): `image-login-to-registries` is now POSIX-portable, unblocking `architect/sync-china-registry` (the gsoci -> Aliyun mirror via the in-China `giantswarm/galaxy-runner`). The v8.1.0 refactor accidentally introduced bash-only `${!var}` indirect expansion in the shared login command, which BusyBox `/bin/sh` (used by the regctl executor) rejected with `bad substitution` -- so no Aliyun mirror has been happening since the migration to `split-china-push: true`. v8.2.x also enables cosign keyless signing, SLSA provenance, and SBOM attestations by default for public images and charts.
-- Enable `split-china-push: true` on the four tag-build `push-to-registries-release` jobs (klaus, klaus-debian, klaus-toolchains/base, klaus-toolchains/base-debian) and add four companion `sync-china-registry` jobs. The cross-Pacific `docker buildx` push to the Aliyun mirror (which timed out for ~10 minutes per image and failed the tag job) is replaced with `regctl image copy` from gsoci to Aliyun executed on the in-China `giantswarm/galaxy-runner` self-hosted CircleCI runner. The chart-catalog publish and downstream notify chains no longer wait on Aliyun.
-- Bump `giantswarm/architect` orb to `8.1.0` and migrate all 12 image pushes from the deprecated `push-to-registries-multiarch` job to `push-to-registries` with `multiarch: true`. Picks up the v8.1.0 QEMU/binfmt auto-registration, hardened buildx bootstrap, and standard OCI image labels.
+## [1.0.0] - 2026-10-06
 
 ### Security
 
 - Without OAuth, `/mcp` and `/v1/chat/completions` accept only a token that klaus verifies itself: signed by the issuer in `KLAUS_TOKEN_ISSUER_URL` (chart: `auth.tokenIssuerURL`, e.g. the Dex whose ID tokens muster forwards), not expired, with an `aud` in `KLAUS_TOKEN_AUDIENCES` (`auth.tokenAudiences`). Other tokens get `401`. The owner in `KLAUS_OWNER_SUBJECT` is compared with that verified token only, by `sub` or by `email` when `email_verified` is true.
 - **Breaking:** the chart refuses to render, and klaus refuses to start, when `/mcp` would have no authentication. Chart users set `auth.tokenIssuerURL` and `auth.tokenAudiences`, or `auth.allowUnauthenticated: true` for an isolated test. Without the chart, `--enable-oauth` is a third choice, and the opt-in is `--allow-unauthenticated` (`KLAUS_ALLOW_UNAUTHENTICATED=true`). `owner.subject` without a token issuer (or `--enable-oauth`) is refused too.
 - `/status` no longer shows the owner.
+
+## [0.1.44-rc.15] - 2026-10-06
+
+### Fixed
+
+- `.nancy-ignore` no longer carries the four entries that expired on 2026-10-04 (CVE-2026-81870, CVE-2026-81871, CVE-2026-81872, CVE-2026-56855): klaus already builds with fixed versions of the modules they covered (`otlptracegrpc` v1.46.0, `otlploggrpc` and `sdk/log` v0.22.0, `golang.org/x/crypto` v0.57.0), so nancy audits them again instead of keeping dead exceptions.
+
+## [0.1.44-rc.6] - 2026-10-01
+
+### Fixed
+
+- A prompt sent while another one runs says why it was refused and that it was not queued. Until the running session emits Claude's init message (its SessionStart hooks and MCP servers can take minutes) the `prompt` tool answers `claude process is already busy: its session is still starting (SessionStart hooks, MCP servers)`, after it `claude process is already busy with another prompt`, both with when to send it again; the chat completions endpoint's 429 names the starting session too. A prompt arriving while another caller was still spawning its subprocess used to pass the busy check and start a second `claude` beside it; it is refused now, and two first prompts to a persistent process no longer fail one of them with `persistent process already running`. Fixes [giantswarm/klausctl#108](https://github.com/giantswarm/klausctl/issues/108).
+
+## [0.1.44-rc.5] - 2026-10-01
+
+### Fixed
+
+- A turn whose claude subprocess exits non-zero reports why: the result's and status's `error` is `exit status 1: <the turn's last result or assistant text>`, e.g. `exit status 1: Not logged in · Please run /login`, falling back to the stderr tail and then to the bare exit status. Previously it read only `exit status 1` and the cause was visible only in the transcript. The persisted result carries the same error. Fixes [#516](https://github.com/giantswarm/klaus/issues/516).
+
+## [0.1.44-rc.4] - 2026-09-30
+
+### Fixed
+
+- Chart: the `git-clone` init container authenticates with `workspace.gitSecretName` through a per-process git credential helper that reads the token from the mounted Secret, instead of building an `x-access-token` clone URL and resetting the remote afterwards. The token never lands in a remote URL or `.git/config` on the workspace PVC, not even when the container dies mid-clone; an existing checkout's origin is reset to `workspace.gitRepo`, which drops credentials an older chart left in it.
+
+## [0.1.35] - 2026-09-24
+
+### Fixed
+
+- `self-update` replaces the binary, symbolic links resolved, with a single rename (`selfupdatecosign.Install`, selfupdate-cosign v0.3.0). go-selfupdate's own swap moved the binary aside before it moved the new one in, so a process started in between found none, and concurrent updates could lose it. Now a process started meanwhile runs the old binary or the new one, several updates may run at once, and the binary keeps its mode.
+
+## [0.1.33] - 2026-09-24
+
+### Fixed
+
+- Chart: the `helm.sh/chart` label was invalid when the 63-character cut of a long chart version (a branch build, or helm-controller's `<tag>+<digest>`) ended in `.`, `_` or `--.`, and the API server refused every labelled object. The whole trailing run of `-`, `.` and `_` is now trimmed. Fixes [#504](https://github.com/giantswarm/klaus/issues/504).
+
+## [0.1.21] - 2026-09-17
+
+### Fixed
+
+- Drop the version badges from the chart README so a release PR's `Chart.yaml` version bump no longer leaves `README.md` stale and fails the helm-docs pre-commit hook.
+
+## [0.0.329] - 2026-09-05
+
+### Fixed
+
+- `result` MCP tool: `result_text` was empty for every run started through `/v1/chat/completions` (`klausctl prompt`, `klausctl run`, the `klaus_prompt` MCP tool). Only the `prompt` tool's `Submit` path stored the turn result; the chat endpoint drives `RunWithOptions` directly and never did. Each turn's result is now finalized in the stream reader when its result message arrives (or the subprocess exits), in both agent and chat mode, and persisted to the result store. When a turn ends in a tool call and the CLI's result message carries no text, `result_text` is the last non-empty assistant text instead of the concatenation of every assistant message. Fixes [klausctl#269](https://github.com/giantswarm/klausctl/issues/269).
+- `pr_urls` means "pull requests this turn created or pushed to": URLs printed by `gh pr create`, plus PRs addressed by `gh pr view/checkout/merge/comment/...` in a repository the turn `git push`ed to (bare PR numbers resolve against `--repo` or the single pushed repository). Previously every PR URL that appeared in any Bash output was listed, so PRs merely read during research showed up and PRs pushed to via `gh pr merge <number>` did not.
+- `subagent_calls` entries stayed `running` after the parent finished: completion is now detected from the `Agent`/`Task` tool's `tool_result` (matched by `tool_use_id`) instead of only from `<usage>` blocks in assistant text.
+- `tool_result` blocks whose `content` is an array of content blocks (MCP tools) no longer make the whole user message unparseable; their text is flattened, so error counts and PR attribution see them.
+
+## [0.0.160] - 2026-05-19
+
+### Changed
+
+- Bump `giantswarm/architect` orb to `8.2.2` and re-enable cosign keyless chart signing (`sign: false` removed from every `push-to-app-catalog*` invocation). v8.2.2 ships [architect-orb#772](https://github.com/giantswarm/architect-orb/pull/772) which upgrades the `app-build-suite` executor image from `1.8.0-circleci` to `1.8.1-circleci` -- the new image includes the `cosign` binary that v8.2.0's chart signing defaults require. Closes [architect-orb#769](https://github.com/giantswarm/architect-orb/issues/769).
+
+## [0.0.158] - 2026-05-19
+
+### Changed
+
+- Disable cosign keyless chart signing on the `push-to-app-catalog*` jobs (`sign: false`). The architect orb's `push-to-app-catalog` defaults `sign` to `true` since v8.2.0 and shells out to `cosign`, but this repo uses `executor: app-build-suite` (so the `app_build_suite` Python CLI is available to package the chart with metadata) and the `app-build-suite` image doesn't ship `cosign`. Without this opt-out, every chart push fails on the `Mint Sigstore OIDC token` step with `cosign: command not found`. To be removed once architect-orb makes `cosign-prepare` resilient to a missing binary (or ships cosign in the `app-build-suite` executor).
+- Bump `giantswarm/architect` orb to `8.2.1` to pick up [architect-orb#767](https://github.com/giantswarm/architect-orb/pull/767): `image-login-to-registries` is now POSIX-portable, unblocking `architect/sync-china-registry` (the gsoci -> Aliyun mirror via the in-China `giantswarm/galaxy-runner`). The v8.1.0 refactor accidentally introduced bash-only `${!var}` indirect expansion in the shared login command, which BusyBox `/bin/sh` (used by the regctl executor) rejected with `bad substitution` -- so no Aliyun mirror has been happening since the migration to `split-china-push: true`. v8.2.x also enables cosign keyless signing, SLSA provenance, and SBOM attestations by default for public images and charts.
+
+## [0.0.157] - 2026-05-18
+
+### Changed
+
+- Enable `split-china-push: true` on the four tag-build `push-to-registries-release` jobs (klaus, klaus-debian, klaus-toolchains/base, klaus-toolchains/base-debian) and add four companion `sync-china-registry` jobs. The cross-Pacific `docker buildx` push to the Aliyun mirror (which timed out for ~10 minutes per image and failed the tag job) is replaced with `regctl image copy` from gsoci to Aliyun executed on the in-China `giantswarm/galaxy-runner` self-hosted CircleCI runner. The chart-catalog publish and downstream notify chains no longer wait on Aliyun.
+
+## [0.0.156] - 2026-05-18
+
+### Changed
+
+- Bump `giantswarm/architect` orb to `8.1.0` and migrate all 12 image pushes from the deprecated `push-to-registries-multiarch` job to `push-to-registries` with `multiarch: true`. Picks up the v8.1.0 QEMU/binfmt auto-registration, hardened buildx bootstrap, and standard OCI image labels.
+
+## [0.0.149] - 2026-05-11
+
+### Security
+
 - Bump Go to `1.26.3` (in `go.mod` and the `golang:` builder image in `Dockerfile`/`Dockerfile.debian`) and `golang.org/x/net` to `v0.53.0`, clearing four standard-library vulnerabilities (GO-2026-4971, GO-2026-4918, and two related entries affecting `net` / `net/http`) and two `golang.org/x/net` vulnerabilities flagged by `govulncheck` in CI.
+
+## [0.0.93] - 2026-03-23
 
 ### Removed
 
 - **`/v1/chat/messages` HTTP endpoint**: Conversation history is now available
   via the MCP messages tool instead of a dedicated REST endpoint.
+
+## [0.0.32] - 2026-02-22
 
 ### Changed
 
@@ -52,25 +119,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove OCI manifest annotations from CI builds (no longer needed).
 - Add Docker labels on both Alpine and Debian images.
 
+## [0.0.27] - 2026-02-20
+
+### Fixed
+
+- **Container missing bash for Claude CLI shell detection**: Claude CLI requires `bash` or `zsh` in the shell path (not just any POSIX shell). Alpine now installs `bash` via `apk add` and both variants set `ENV SHELL=/bin/bash`.
+
+## [0.0.26] - 2026-02-20
+
+### Fixed
+
+- **Auto-allow MCP server tools**: When an MCP config file is provided, `--allowedTools mcp__<server>__*` patterns are now auto-generated for each server, preventing Claude's permission system from blocking MCP tool calls even with `--permission-mode bypassPermissions`.
+
+## [0.0.22] - 2026-02-18
+
 ### Added
 
 - **OCI Artifacts documentation** (`docs/explanation/oci-artifacts.md`): Explains the OCI artifact format for plugins, personalities, and toolchains, the shared `klaus-oci` types library, and how each component (klausctl, Helm chart, klaus-operator) produces and consumes artifacts.
-- **Owner-based access control** (`KLAUS_OWNER_SUBJECT`): Restricts the `/mcp` endpoint to the configured owner identity by matching the JWT `sub` or `email` claim from the bearer token. Works in all deployment modes: OAuth (Dex/Google), muster token forwarding, and local (no-op when unset). Operational endpoints (`/healthz`, `/readyz`, `/status`, `/metrics`) bypass owner validation. The owner is exposed in the `/status` endpoint response for observability. Helm chart supports `owner.subject` in values.
-- **Toolchain image support** (`toolchainImage`): Override the default Klaus container image with a composite toolchain image that includes both the language toolchain and the Klaus agent. Built by `klausctl toolchain build` or pre-built by CI/CD. When empty (default), the chart uses the standard Klaus image -- fully backward compatible.
+
+## [0.0.21] - 2026-02-17
+
+### Added
+
 - **Workspace git clone support** (`workspace.gitRepo`, `workspace.gitRef`, `workspace.gitSecretName`, `workspace.gitImage`): Populate the workspace PVC with a git repository via an init container. On first run, the repo is cloned; on subsequent runs, the existing checkout is updated. Supports branch/tag/commit SHA selection, HTTPS token credential injection via Kubernetes Secrets (using `x-access-token` URL injection with shell parameter expansion and an EXIT trap for credential cleanup), and a configurable git image (pinned to `alpine/git:v2.52.0` by default). Includes shallow clone support (`workspace.gitDepth`), a configurable timeout (`workspace.gitTimeout`, default 300s) to prevent hung pod startup, and optional resource requests/limits for the init container (`workspace.gitResources`). The init container runs with `ReadOnlyRootFilesystem: true`, a dedicated writable `/tmp` emptyDir for git scratch space, `GIT_CONFIG_NOSYSTEM=1`, and drops all capabilities.
+
+## [0.0.19] - 2026-02-17
+
+### Changed
+
+- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
+  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
+  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
+  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
+  - CI validates both images build successfully and checks Dockerfile sync on every PR.
+
+## [0.0.18] - 2026-02-17
+
+### Added
+
+- **Owner-based access control** (`KLAUS_OWNER_SUBJECT`): Restricts the `/mcp` endpoint to the configured owner identity by matching the JWT `sub` or `email` claim from the bearer token. Works in all deployment modes: OAuth (Dex/Google), muster token forwarding, and local (no-op when unset). Operational endpoints (`/healthz`, `/readyz`, `/status`, `/metrics`) bypass owner validation. The owner is exposed in the `/status` endpoint response for observability. Helm chart supports `owner.subject` in values.
+
+## [0.0.17] - 2026-02-17
+
+### Added
+
+- **Toolchain image support** (`toolchainImage`): Override the default Klaus container image with a composite toolchain image that includes both the language toolchain and the Klaus agent. Built by `klausctl toolchain build` or pre-built by CI/CD. When empty (default), the chart uses the standard Klaus image -- fully backward compatible.
+
+## [0.0.12] - 2026-02-14
+
+### Added
+
 - **Structured MCP server configuration** (`claude.mcpServers`): Define MCP servers as typed Helm values entries rendered to `.mcp.json` format, replacing the need to hand-craft raw JSON in `claude.mcpConfig`. Each server entry is a free-form object passed through as-is for forward compatibility.
 - **MCP server secret injection** (`claude.mcpServerSecrets`): Inject Kubernetes Secret values as container env vars for `${VAR}` expansion in MCP server configuration, enabling secure credential management for MCP integrations.
 - **MCP tuning controls** (`claude.mcpTimeout`, `claude.maxMcpOutputTokens`): Set `MCP_TIMEOUT` and `MAX_MCP_OUTPUT_TOKENS` env vars consumed by the Claude Code subprocess for controlling MCP server connection timeout and output token limits.
 - Helm `fail` directive when both `claude.mcpConfig` (raw JSON) and `claude.mcpServers` (structured) are set, preventing ambiguous configuration.
+
+## [0.0.8] - 2026-02-12
+
+### Added
+
 - **Prometheus `/metrics` endpoint**: Server-side Prometheus metrics exposed via `promhttp.Handler` at `/metrics`, always available regardless of OTel configuration. Metrics include `klaus_prompts_total`, `klaus_prompt_duration_seconds`, `klaus_process_status`, `klaus_session_cost_usd_total`, `klaus_messages_total`, `klaus_tool_calls_total`, and `klaus_process_restarts_total`.
 - **OpenTelemetry pass-through configuration**: New `telemetry` section in Helm values for passing `OTEL_*` environment variables to the Claude Code subprocess, enabling its native telemetry for tokens, cost, sessions, and tool events. Gated behind `telemetry.enabled`.
 - **ServiceMonitor template**: Optional Prometheus Operator `ServiceMonitor` resource (`telemetry.serviceMonitor.enabled`) with configurable interval, timeout, and namespace selector for cross-namespace monitoring.
 - **Prometheus scrape annotations**: Independently toggleable `prometheus.io/*` annotations on the Service via `telemetry.scrapeAnnotations`, decoupled from OTel pass-through.
+
+## [0.0.6] - 2026-02-12
+
+### Added
+
 - **`completed` process status**: New status that indicates a non-blocking Submit run has finished and results are available. Callers can now distinguish "task finished" (`completed`) from "never ran" (`idle`), making polling loops unambiguous.
 - **`result` MCP debug tool**: New tool that returns the full untruncated result text and detailed metadata (message history, costs, session info) from the last completed run. Intended for debugging and troubleshooting when the agent produces unexpected output.
 - `Submit()` method on `Prompter` interface for non-blocking prompt execution with background result collection.
 - `ResultDetail()` method on `Prompter` interface for retrieving full debug output from the last completed run.
-- Initial project structure with Go app and Helm chart.
+
+### Changed
+
+- **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
+- **`status` MCP tool now includes result on completion**: When a non-blocking run completes, the status transitions to `completed` with a `result` field containing the agent's final output text. The `completed` status distinguishes "task finished with results" from `idle` ("never ran / no results").
+- **Non-blocking drain goroutines now use a server-scoped context**: Previously, drain goroutines used `context.Background()` and could be orphaned during server shutdown. They now use a server-scoped context that is cancelled during graceful shutdown, ensuring clean goroutine cleanup.
+
+## [0.0.4] - 2026-02-12
+
+### Fixed
+
+- **Persistent mode stream-json input format updated for claude-code v2.1+**: The `stdinMessage` format now uses `{"type":"user","message":{"role":"user","content":"..."}}` instead of the deprecated `{"type":"user","text":"..."}` format, fixing immediate subprocess crashes on every prompt in persistent mode.
+
+## [0.0.2] - 2026-02-11
+
+### Added
+
 - **Bidirectional stream-json mode** (`CLAUDE_PERSISTENT_MODE=true`): Maintains a single long-running Claude subprocess using `--input-format stream-json` for multi-turn conversations with conversation continuity, lower latency, and cost efficiency.
 - `Prompter` interface abstracting over single-shot (`Process`) and persistent (`PersistentProcess`) modes, allowing seamless switching via configuration.
 - **MCP progress notifications**: The `prompt` tool now streams real-time `notifications/progress` messages to MCP clients during task execution, reporting tool usage, assistant output, and task completion.
@@ -92,22 +229,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Helm chart values for all new Claude Code configuration options including `persistentMode`.
 - Comprehensive unit tests for the `pkg/mcp` package covering all three tools, parameter extraction helpers, progress messages, and error handling.
 
-### Changed
-
-- **Switched default base image to Alpine** (`node:24-alpine`): Reduces image size (~50 MB vs ~200 MB) and attack surface.
-  - Removed `git`, `openssh-client`, and `curl` -- not needed at runtime. Only `ca-certificates` is retained for TLS.
-  - A Debian variant is published as `giantswarm/klaus-debian` (same semver tags) for glibc use cases.
-  - `Dockerfile.debian` is generated from `Dockerfile` -- run `make generate-dockerfile-debian` after editing.
-  - CI validates both images build successfully and checks Dockerfile sync on every PR.
-- **`prompt` MCP tool is now non-blocking by default**: The `prompt` tool returns immediately with `{status: "started", session_id: "..."}` and runs the task in the background. Use the `status` tool to poll for progress and retrieve the result. Set `blocking=true` for the previous behavior of waiting for completion. This is a breaking change for callers that assume blocking behavior.
-- **`status` MCP tool now includes result on completion**: When a non-blocking run completes, the status transitions to `completed` with a `result` field containing the agent's final output text. The `completed` status distinguishes "task finished with results" from `idle` ("never ran / no results").
-- **Non-blocking drain goroutines now use a server-scoped context**: Previously, drain goroutines used `context.Background()` and could be orphaned during server shutdown. They now use a server-scoped context that is cancelled during graceful shutdown, ensuring clean goroutine cleanup.
-
 ### Fixed
 
-- **Auto-allow MCP server tools**: When an MCP config file is provided, `--allowedTools mcp__<server>__*` patterns are now auto-generated for each server, preventing Claude's permission system from blocking MCP tool calls even with `--permission-mode bypassPermissions`.
-- **Container missing bash for Claude CLI shell detection**: Claude CLI requires `bash` or `zsh` in the shell path (not just any POSIX shell). Alpine now installs `bash` via `apk add` and both variants set `ENV SHELL=/bin/bash`.
-- **Persistent mode stream-json input format updated for claude-code v2.1+**: The `stdinMessage` format now uses `{"type":"user","message":{"role":"user","content":"..."}}` instead of the deprecated `{"type":"user","text":"..."}` format, fixing immediate subprocess crashes on every prompt in persistent mode.
 - **Persistent mode subprocess lifetime is now decoupled from request contexts**: `PersistentProcess` reader/watchdog now use an internal lifecycle context so cancelling a single MCP request does not terminate persistent stream handling.
 - **`/readyz` now reflects Claude process health**: readiness returns `503` when the process is `starting`, `stopped`, or `error`, and `200` otherwise.
 - **Negative `CLAUDE_MAX_BUDGET_USD` and `CLAUDE_MAX_TURNS` now fail fast** with clear startup errors instead of being silently ignored.
@@ -135,4 +258,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Helm: `noSessionPersistence` and `strictMcpConfig` env vars are now always emitted (not only when truthy), so setting them to `false` via Helm overrides actually takes effect.
 - `ForkSession` added to `RunOptions` so MCP clients can fork sessions per-invocation via `fork_session` parameter on the `prompt` tool.
 
-[Unreleased]: https://github.com/giantswarm/klaus/tree/main
+## [0.0.1] - 2026-02-11
+
+### Added
+
+- Initial project structure with Go app and Helm chart.
+
+[Unreleased]: https://github.com/giantswarm/klaus/compare/v1.0.3-rc.1...HEAD
+[1.0.3-rc.1]: https://github.com/giantswarm/klaus/compare/v1.0.0...v1.0.3-rc.1
+[1.0.0]: https://github.com/giantswarm/klaus/compare/v0.1.44-rc.15...v1.0.0
+[0.1.44-rc.15]: https://github.com/giantswarm/klaus/compare/v0.1.44-rc.6...v0.1.44-rc.15
+[0.1.44-rc.6]: https://github.com/giantswarm/klaus/compare/v0.1.44-rc.5...v0.1.44-rc.6
+[0.1.44-rc.5]: https://github.com/giantswarm/klaus/compare/v0.1.44-rc.4...v0.1.44-rc.5
+[0.1.44-rc.4]: https://github.com/giantswarm/klaus/compare/v0.1.35...v0.1.44-rc.4
+[0.1.35]: https://github.com/giantswarm/klaus/compare/v0.1.33...v0.1.35
+[0.1.33]: https://github.com/giantswarm/klaus/compare/v0.1.21...v0.1.33
+[0.1.21]: https://github.com/giantswarm/klaus/compare/v0.0.329...v0.1.21
+[0.0.329]: https://github.com/giantswarm/klaus/compare/v0.0.160...v0.0.329
+[0.0.160]: https://github.com/giantswarm/klaus/compare/v0.0.158...v0.0.160
+[0.0.158]: https://github.com/giantswarm/klaus/compare/v0.0.157...v0.0.158
+[0.0.157]: https://github.com/giantswarm/klaus/compare/v0.0.156...v0.0.157
+[0.0.156]: https://github.com/giantswarm/klaus/compare/v0.0.149...v0.0.156
+[0.0.149]: https://github.com/giantswarm/klaus/compare/v0.0.93...v0.0.149
+[0.0.93]: https://github.com/giantswarm/klaus/compare/v0.0.32...v0.0.93
+[0.0.32]: https://github.com/giantswarm/klaus/compare/v0.0.27...v0.0.32
+[0.0.27]: https://github.com/giantswarm/klaus/compare/v0.0.26...v0.0.27
+[0.0.26]: https://github.com/giantswarm/klaus/compare/v0.0.22...v0.0.26
+[0.0.22]: https://github.com/giantswarm/klaus/compare/v0.0.21...v0.0.22
+[0.0.21]: https://github.com/giantswarm/klaus/compare/v0.0.19...v0.0.21
+[0.0.19]: https://github.com/giantswarm/klaus/compare/v0.0.18...v0.0.19
+[0.0.18]: https://github.com/giantswarm/klaus/compare/v0.0.17...v0.0.18
+[0.0.17]: https://github.com/giantswarm/klaus/compare/v0.0.12...v0.0.17
+[0.0.12]: https://github.com/giantswarm/klaus/compare/v0.0.8...v0.0.12
+[0.0.8]: https://github.com/giantswarm/klaus/compare/v0.0.6...v0.0.8
+[0.0.6]: https://github.com/giantswarm/klaus/compare/v0.0.4...v0.0.6
+[0.0.4]: https://github.com/giantswarm/klaus/compare/v0.0.2...v0.0.4
+[0.0.2]: https://github.com/giantswarm/klaus/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/giantswarm/klaus/releases/tag/v0.0.1
