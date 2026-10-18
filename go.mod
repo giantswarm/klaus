@@ -6,7 +6,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/giantswarm/go-selfupdate v1.6.4
-	github.com/giantswarm/mcp-oauth v1.7.2
+	github.com/giantswarm/mcp-oauth v1.7.3
 	github.com/giantswarm/mcp-toolkit v0.4.0
 	github.com/mark3labs/mcp-go v1.3.0
 	github.com/prometheus/client_golang v1.25.0
