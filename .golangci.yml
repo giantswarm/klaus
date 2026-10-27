@@ -1,6 +1,9 @@
 version: "2"
 
 linters:
+  enable:
+    - gosec
+    - goconst
   exclusions:
     rules:
       # goconst flags repeated string literals; tests naturally repeat
