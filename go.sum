@@ -112,8 +112,8 @@ github.com/giantswarm/go-selfupdate v1.7.4 h1:6im5lkjaMaUs1lYrrGtZYPQsNnPtSb/oSd
 github.com/giantswarm/go-selfupdate v1.7.4/go.mod h1:nqRW1Io8Ixo3x8tSnLKkpfenWn2PRf/Zcu548PZp780=
 github.com/giantswarm/mcp-oauth v1.10.2 h1:cuszZbdHyrB2Ve1Z8o+IIqgOzeo2fEMixW9AGWxD3bo=
 github.com/giantswarm/mcp-oauth v1.10.2/go.mod h1:Hs/VtIVha63ls9zYrAuLUJTu0SeiXWqPCFOo49vrHSk=
-github.com/giantswarm/mcp-toolkit v0.4.12 h1:OSV2sMNheLn6rjzLJs8eJfqRPfIiMY/1shMHCR5xl4Y=
-github.com/giantswarm/mcp-toolkit v0.4.12/go.mod h1:m8dbpEeOg25kldNTnBh/al5ux4y5PYvbg2KhfHiUinc=
+github.com/giantswarm/mcp-toolkit v0.5.1 h1:RyUAIu3m/ilEhq8o33zpp2fPO6AWM1unP/Jr4O2o5gk=
+github.com/giantswarm/mcp-toolkit v0.5.1/go.mod h1:m8dbpEeOg25kldNTnBh/al5ux4y5PYvbg2KhfHiUinc=
 github.com/giantswarm/selfupdate-cosign v0.3.22 h1:biJWH0IPniFN5bY8me5aDndGp0k4FdUclzGeOEyO5Zg=
 github.com/giantswarm/selfupdate-cosign v0.3.22/go.mod h1:Z1TgQtiGdIk6Nvs+W3vd+Ffqp3tH/nkCWwL94h2h+sk=
 github.com/go-chi/chi/v5 v5.5.0 h1:xdKQ1dJmVJsmgahrXSKhUx8NyVPzpwdlyrrQFpMPJgg=
