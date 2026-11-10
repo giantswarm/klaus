@@ -143,7 +143,7 @@ require (
 // Pin transitive modules flagged by the OSS Index scan (nancy) in CI.
 // go mod tidy would otherwise resolve them below the fixed versions,
 // because nothing imports them directly.
-replace golang.org/x/mod => golang.org/x/mod v0.42.0
+replace golang.org/x/mod => golang.org/x/mod v0.43.0
 
 replace github.com/prometheus/prometheus v0.51.0 => github.com/prometheus/prometheus v0.315.0
 
