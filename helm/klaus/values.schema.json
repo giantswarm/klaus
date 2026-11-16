@@ -61,11 +61,11 @@
                 },
                 "addDirs": {
                     "type": "array",
-                    "description": "Extension directories -- addDirs are additional directories to search for .claude/ subdirectories (skills, agents)."
+                    "description": "Extension directories -- addDirs are additional directories to search for .claude/ subdirectories (skills, agents). These are passed to Claude Code via --add-dir / CLAUDE_ADD_DIRS."
                 },
                 "agentFiles": {
                     "type": "object",
-                    "description": "Inline subagent files (markdown format) -- These are mounted as .claude/agents/<name>.md files. Claude Code discovers them and makes them available for delegation via the Task tool, and for selection as the main agent via activeAgent or the MCP agent parameter. Subagents defined here have lower priority than those in `agents` (JSON). See https://code.claude.com/docs/en/sub-agents Example: agentFiles: researcher: content: | name: researcher description: Research agent that gathers information tools: Read, Grep, Glob You are a research agent...",
+                    "description": "Inline subagent files (markdown format) -- agentFiles defines markdown-format subagent definitions loaded via --add-dir. These are mounted as .claude/agents/<name>.md files. Claude Code discovers them and makes them available for delegation via the Task tool, and for selection as the main agent via activeAgent or the MCP agent parameter. Subagents defined here have lower priority than those in `agents` (JSON). See https://code.claude.com/docs/en/sub-agents Example: agentFiles: researcher: content: | --- name: researcher description: Research agent that gathers information tools: Read, Grep, Glob --- You are a research agent...",
                     "additionalProperties": {
                         "type": "object",
                         "additionalProperties": true
@@ -73,7 +73,7 @@
                 },
                 "agents": {
                     "type": "object",
-                    "description": "Subagents (JSON format, highest priority) -- Subagents are specialized AI assistants that the main Claude Code agent can delegate work to via the built-in \"Task\" tool. Each runs in its own context window with its own prompt, tools, model, and permissions. These have the highest priority and override agent files with the same name. See https://code.claude.com/docs/en/sub-agents Example: agents: reviewer: description: \"Reviews code changes. Use proactively after edits.\" prompt: \"You are a senior code reviewer...\" tools: [\"Read\", \"Grep\", \"Glob\", \"Bash\"] model: \"sonnet\" deployer: description: \"Handles deployments\" prompt: \"You are a deployment specialist...\"",
+                    "description": "Subagents (JSON format, highest priority) -- agents defines custom subagents via the --agents CLI flag (JSON). Subagents are specialized AI assistants that the main Claude Code agent can delegate work to via the built-in \"Task\" tool. Each runs in its own context window with its own prompt, tools, model, and permissions. These have the highest priority and override agent files with the same name. See https://code.claude.com/docs/en/sub-agents Example: agents: reviewer: description: \"Reviews code changes. Use proactively after edits.\" prompt: \"You are a senior code reviewer...\" tools: [\"Read\", \"Grep\", \"Glob\", \"Bash\"] model: \"sonnet\" deployer: description: \"Handles deployments\" prompt: \"You are a deployment specialist...\"",
                     "additionalProperties": {
                         "type": "object",
                         "additionalProperties": true
@@ -146,7 +146,7 @@
                 },
                 "mode": {
                     "type": "string",
-                    "description": "Operating mode -- mode selects the operating mode: \"agent\" or \"chat\". (autonomous coding, no disk I/O for sessions). chat: uses a PersistentProcess subprocess (bidirectional stream-json) with sessions saved to disk (interactive multi-turn chat)."
+                    "description": "Operating mode -- mode selects the operating mode: \"agent\" or \"chat\". agent: spawns a new Process subprocess per prompt with --no-session-persistence (autonomous coding, no disk I/O for sessions). chat: uses a PersistentProcess subprocess (bidirectional stream-json) with sessions saved to disk (interactive multi-turn chat)."
                 },
                 "model": {
                     "type": "string"
@@ -171,7 +171,7 @@
                 },
                 "skills": {
                     "type": "object",
-                    "description": "Inline skills -- Supported frontmatter fields: description, disableModelInvocation, userInvocable, allowedTools, model, context, agent, argumentHint. Example: skills: api-conventions: description: \"API design patterns\" content: | When writing API endpoints...",
+                    "description": "Inline skills -- skills defines Claude Code skills rendered as SKILL.md files and loaded via --add-dir. Supported frontmatter fields: description, disableModelInvocation, userInvocable, allowedTools, model, context, agent, argumentHint. Example: skills: api-conventions: description: \"API design patterns\" content: | When writing API endpoints...",
                     "additionalProperties": {
                         "type": "object",
                         "additionalProperties": true
