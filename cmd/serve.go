@@ -61,7 +61,6 @@ func newServeCmd() *cobra.Command {
 		maxClientsPerIP                  int
 		oauthEncryptionKey               string
 		enableCIMD                       bool
-		cimdAllowPrivateIPs              bool
 		trustedPublicRegistrationSchemes []string
 		disableStrictSchemeMatching      bool
 		tlsCertFile                      string
@@ -109,7 +108,7 @@ pkg/config for the full Config struct and supported fields.`,
 				disableStreaming, registrationToken,
 				allowPublicRegistration, allowInsecureAuthWithoutState,
 				maxClientsPerIP, oauthEncryptionKey,
-				enableCIMD, cimdAllowPrivateIPs,
+				enableCIMD,
 				trustedPublicRegistrationSchemes, disableStrictSchemeMatching,
 				tlsCertFile, tlsKeyFile,
 			)
@@ -149,7 +148,6 @@ pkg/config for the full Config struct and supported fields.`,
 					AllowInsecureAuthWithoutState:    cfg.OAuth.Security.AllowInsecureAuthWithoutState,
 					MaxClientsPerIP:                  cfg.OAuth.Security.MaxClientsPerIP,
 					EnableCIMD:                       cfg.EnableCIMD(),
-					CIMDAllowPrivateIPs:              cfg.OAuth.Security.CIMDAllowPrivateIPs,
 					TrustedPublicRegistrationSchemes: cfg.OAuth.Security.TrustedPublicRegistrationSchemes,
 					DisableStrictSchemeMatching:      cfg.OAuth.Security.DisableStrictSchemeMatching,
 				},
@@ -185,7 +183,6 @@ pkg/config for the full Config struct and supported fields.`,
 	cmd.Flags().IntVar(&maxClientsPerIP, "max-clients-per-ip", 10, "Maximum OAuth clients per IP address")
 	cmd.Flags().StringVar(&oauthEncryptionKey, "oauth-encryption-key", "", "AES-256 encryption key for token encryption (base64, or OAUTH_ENCRYPTION_KEY env)")
 	cmd.Flags().BoolVar(&enableCIMD, "enable-cimd", true, "Enable Client ID Metadata Documents (MCP 2025-11-25)")
-	cmd.Flags().BoolVar(&cimdAllowPrivateIPs, "cimd-allow-private-ips", false, "Allow CIMD metadata URLs to resolve to private IPs")
 	cmd.Flags().StringSliceVar(&trustedPublicRegistrationSchemes, "trusted-public-registration-schemes", nil, "URI schemes allowed for unauthenticated client registration (e.g., cursor,vscode)")
 	cmd.Flags().BoolVar(&disableStrictSchemeMatching, "disable-strict-scheme-matching", false, "Allow mixed redirect URI schemes with trusted scheme registration")
 	cmd.Flags().StringVar(&tlsCertFile, "tls-cert-file", "", "TLS certificate file for HTTPS (PEM format)")
@@ -491,7 +488,7 @@ func applyOAuthFlagOverrides(
 	disableStreaming bool, regToken string,
 	allowPubReg, allowInsecureAuth bool,
 	maxClients int, encKey string,
-	eCIMD, cimdPrivIPs bool,
+	eCIMD bool,
 	trustedSchemes []string, disableStrictScheme bool,
 	tlsCert, tlsKey string,
 ) {
@@ -545,9 +542,6 @@ func applyOAuthFlagOverrides(
 	}
 	if cmd.Flags().Changed("enable-cimd") {
 		cfg.OAuth.Security.EnableCIMD = &eCIMD
-	}
-	if cmd.Flags().Changed("cimd-allow-private-ips") {
-		cfg.OAuth.Security.CIMDAllowPrivateIPs = cimdPrivIPs
 	}
 	if cmd.Flags().Changed("trusted-public-registration-schemes") {
 		cfg.OAuth.Security.TrustedPublicRegistrationSchemes = trustedSchemes
