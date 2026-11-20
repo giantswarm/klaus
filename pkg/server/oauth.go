@@ -133,9 +133,6 @@ type SecurityConfig struct {
 	// EnableCIMD enables Client ID Metadata Documents per MCP 2025-11-25.
 	EnableCIMD bool
 
-	// CIMDAllowPrivateIPs allows CIMD metadata URLs to resolve to private IPs.
-	CIMDAllowPrivateIPs bool
-
 	// TrustedPublicRegistrationSchemes lists URI schemes allowed for unauthenticated registration.
 	TrustedPublicRegistrationSchemes []string
 
@@ -402,12 +399,11 @@ func createOAuthServer(config OAuthConfig) (*oauth.Server, error) {
 		AllowPKCEPlain:                false,
 		AllowPublicClientRegistration: config.Security.AllowPublicClientRegistration,
 		RegistrationAccessToken:       config.Security.RegistrationAccessToken,
-		AllowNoStateParameter:         config.Security.AllowInsecureAuthWithoutState,
+		AllowNoStateParameter:         config.Security.AllowInsecureAuthWithoutState, //nolint:staticcheck // SA1019: mcp-oauth ignores it and accepts a request without state
 		MaxClientsPerIP:               maxClientsPerIP,
 
 		// CIMD per MCP 2025-11-25.
 		EnableClientIDMetadataDocuments: config.Security.EnableCIMD,
-		AllowPrivateIPClientMetadata:    config.Security.CIMDAllowPrivateIPs,
 
 		// Trusted scheme registration.
 		TrustedPublicRegistrationSchemes: config.Security.TrustedPublicRegistrationSchemes,

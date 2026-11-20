@@ -583,3 +583,19 @@ func assertEqualSlice(t *testing.T, field string, want, got []string) {
 		}
 	}
 }
+
+func TestLoad_IgnoresRemovedCIMDAllowPrivateIPs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := "oauth:\n  security:\n    enableCIMD: true\n    cimdAllowPrivateIPs: true\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.EnableCIMD() {
+		t.Error("enableCIMD next to the removed key was not read")
+	}
+}

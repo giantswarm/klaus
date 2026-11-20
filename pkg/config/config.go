@@ -161,7 +161,6 @@ type SecurityFileConfig struct {
 	AllowInsecureAuthWithoutState    bool     `yaml:"allowInsecureAuthWithoutState"`
 	MaxClientsPerIP                  int      `yaml:"maxClientsPerIP"`
 	EnableCIMD                       *bool    `yaml:"enableCIMD"`
-	CIMDAllowPrivateIPs              bool     `yaml:"cimdAllowPrivateIPs"`
 	TrustedPublicRegistrationSchemes []string `yaml:"trustedPublicRegistrationSchemes"`
 	DisableStrictSchemeMatching      bool     `yaml:"disableStrictSchemeMatching"`
 }
