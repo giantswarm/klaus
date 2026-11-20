@@ -274,7 +274,7 @@ workspace:
   # This image must be available in your cluster's container registry.
   # For air-gapped environments, mirror this image to your internal registry
   # and set this value to the internal image reference.
-  gitImage: "alpine/git:v2.54.0"
+  gitImage: "alpine/git:v2.54.1"
   # gitSecretName references a K8s Secret containing a personal access token
   # (key: token) for HTTPS repo authentication. A git credential helper reads
   # the token from the mounted Secret when git authenticates, so it never
